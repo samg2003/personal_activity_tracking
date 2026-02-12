@@ -23,9 +23,19 @@ struct DashboardView: View {
         allLogs.filter { $0.date.isSameDay(as: today) }
     }
 
+    private var pendingAllDay: [Activity] {
+        todayActivities.filter { activity in
+            (activity.timeWindow?.slot == .allDay || activity.timeWindow == nil) &&
+            !isCompleted(activity) && !isSkipped(activity)
+        }
+    }
+
     private var pendingTimed: [Activity] {
         todayActivities.filter { activity in
-            activity.schedule.type != .sticky && !isCompleted(activity) && !isSkipped(activity)
+            activity.schedule.type != .sticky &&
+            activity.timeWindow?.slot != .allDay &&
+            activity.timeWindow != nil &&
+            !isCompleted(activity) && !isSkipped(activity)
         }
     }
 
@@ -61,6 +71,7 @@ struct DashboardView: View {
             ScrollView {
                 VStack(spacing: 24) {
                     headerSection
+                    allDaySection
                     timeBucketSections
                     backlogSection
                     completedSection
@@ -102,6 +113,35 @@ struct DashboardView: View {
     }
 
     @ViewBuilder
+    private var allDaySection: some View {
+        if !pendingAllDay.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Image(systemName: "clock.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    Text("ALL DAY")
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150))], spacing: 12) {
+                    ForEach(pendingAllDay) { activity in
+                        ActivityRowView(
+                            activity: activity,
+                            isCompleted: false,
+                            isSkipped: false,
+                            onComplete: { toggleComplete(activity) },
+                            onSkip: { reason in skipActivity(activity, reason: reason) }
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
     private var timeBucketSections: some View {
         ForEach(groupedBySlot, id: \.slot) { group in
             TimeBucketSection(
@@ -110,7 +150,7 @@ struct DashboardView: View {
                 isAutoCollapsed: shouldAutoCollapse(group.slot),
                 isCompleted: { isCompleted($0) },
                 isSkipped: { isSkipped($0) },
-                onComplete: { completeActivity($0) },
+                onComplete: { toggleComplete($0) },
                 onSkip: { activity, reason in skipActivity(activity, reason: reason) }
             )
         }
@@ -135,7 +175,7 @@ struct DashboardView: View {
                         activity: activity,
                         isCompleted: false,
                         isSkipped: false,
-                        onComplete: { completeActivity(activity) },
+                        onComplete: { toggleComplete(activity) },
                         onSkip: { reason in skipActivity(activity, reason: reason) }
                     )
                 }
@@ -152,7 +192,7 @@ struct DashboardView: View {
                         activity: activity,
                         isCompleted: true,
                         isSkipped: false,
-                        onComplete: { },
+                        onComplete: { toggleComplete(activity) },
                         onSkip: { _ in }
                     )
                 }
@@ -186,10 +226,14 @@ struct DashboardView: View {
         }
     }
 
-    private func completeActivity(_ activity: Activity) {
-        guard !isCompleted(activity) else { return }
-        let log = ActivityLog(activity: activity, date: today, status: .completed)
-        modelContext.insert(log)
+    private func toggleComplete(_ activity: Activity) {
+        if let log = todayLogs.first(where: { $0.activity?.id == activity.id && $0.status == .completed }) {
+            modelContext.delete(log)
+        } else {
+            let log = ActivityLog(activity: activity, date: today, status: .completed)
+            modelContext.insert(log)
+        }
+        try? modelContext.save()
     }
 
     private func skipActivity(_ activity: Activity, reason: String) {
@@ -197,6 +241,7 @@ struct DashboardView: View {
         let log = ActivityLog(activity: activity, date: today, status: .skipped)
         log.skipReason = reason
         modelContext.insert(log)
+        try? modelContext.save()
     }
 
     private func shouldAutoCollapse(_ slot: TimeSlot) -> Bool {

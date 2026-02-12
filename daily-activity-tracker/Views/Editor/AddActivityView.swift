@@ -118,7 +118,7 @@ struct AddActivityView: View {
     private var timeWindowSection: some View {
         Section("Time of Day") {
             Picker("When", selection: $selectedSlot) {
-                ForEach([TimeSlot.morning, .afternoon, .evening], id: \.self) { slot in
+                ForEach([TimeSlot.allDay, .morning, .afternoon, .evening], id: \.self) { slot in
                     Label(slot.displayName, systemImage: slot.icon).tag(slot)
                 }
             }

@@ -20,7 +20,7 @@ enum ScheduleType: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-struct Schedule: Codable, Equatable {
+struct Schedule: Codable, Equatable, Sendable {
     var type: ScheduleType
     var weekdays: [Int]?      // 1=Mon..7=Sun (ISO)
     var monthDays: [Int]?     // 1..31
