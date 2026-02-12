@@ -1,6 +1,6 @@
 import Foundation
 
-enum LogStatus: String, Codable, Sendable {
+enum LogStatus: String, Codable {
     case completed
     case skipped
 }

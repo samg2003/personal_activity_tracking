@@ -9,7 +9,7 @@ struct DashboardView: View {
 
     @State private var showAddActivity = false
 
-    private let scheduleEngine = ScheduleEngine()
+    private let scheduleEngine: ScheduleEngineProtocol = ScheduleEngine()
 
     // MARK: - Derived Data
 
@@ -23,39 +23,37 @@ struct DashboardView: View {
         allLogs.filter { $0.date.isSameDay(as: today) }
     }
 
-    private var pendingAllDay: [Activity] {
-        todayActivities.filter { activity in
-            (activity.timeWindow?.slot == .allDay || activity.timeWindow == nil) &&
-            !isCompleted(activity) && !isSkipped(activity)
-        }
+    // All Day cumulative items (outside time buckets)
+    private var allDayActivities: [Activity] {
+        todayActivities.filter { $0.type == .cumulative && $0.timeWindow?.slot == .allDay }
     }
 
+    // Non-cumulative pending items in time buckets
     private var pendingTimed: [Activity] {
         todayActivities.filter { activity in
-            activity.schedule.type != .sticky &&
-            activity.timeWindow?.slot != .allDay &&
-            activity.timeWindow != nil &&
-            !isCompleted(activity) && !isSkipped(activity)
+            activity.schedule.type != .sticky
+            && !(activity.type == .cumulative && activity.timeWindow?.slot == .allDay)
+            && !isFullyCompleted(activity)
+            && !isSkipped(activity)
         }
     }
 
     private var stickyPending: [Activity] {
         todayActivities.filter { activity in
-            activity.schedule.type == .sticky && !isCompleted(activity) && !isSkipped(activity)
+            activity.schedule.type == .sticky && !isFullyCompleted(activity) && !isSkipped(activity)
         }
     }
 
     private var completed: [Activity] {
-        todayActivities.filter { isCompleted($0) }
+        todayActivities.filter { isFullyCompleted($0) }
     }
 
     private var completionFraction: Double {
         let countable = todayActivities.filter { !isSkipped($0) }
         guard !countable.isEmpty else { return 1.0 }
-        return Double(countable.filter { isCompleted($0) }.count) / Double(countable.count)
+        return Double(countable.filter { isFullyCompleted($0) }.count) / Double(countable.count)
     }
 
-    /// Group pending timed activities by their time slot
     private var groupedBySlot: [(slot: TimeSlot, activities: [Activity])] {
         let grouped = Dictionary(grouping: pendingTimed) { $0.timeWindow?.slot ?? .morning }
         return [TimeSlot.morning, .afternoon, .evening].compactMap { slot in
@@ -114,45 +112,37 @@ struct DashboardView: View {
 
     @ViewBuilder
     private var allDaySection: some View {
-        if !pendingAllDay.isEmpty {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Image(systemName: "clock.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                    Text("ALL DAY")
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                }
-
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150))], spacing: 12) {
-                    ForEach(pendingAllDay) { activity in
-                        ActivityRowView(
-                            activity: activity,
-                            isCompleted: false,
-                            isSkipped: false,
-                            onComplete: { toggleComplete(activity) },
-                            onSkip: { reason in skipActivity(activity, reason: reason) }
-                        )
-                    }
-                }
-            }
-        }
+        AllDaySection(
+            activities: allDayActivities,
+            cumulativeValues: { cumulativeTotal(for: $0) },
+            onAdd: { activity, value in addCumulativeLog(activity, value: value) }
+        )
     }
 
     @ViewBuilder
     private var timeBucketSections: some View {
         ForEach(groupedBySlot, id: \.slot) { group in
-            TimeBucketSection(
-                slot: group.slot,
-                activities: group.activities,
-                isAutoCollapsed: shouldAutoCollapse(group.slot),
-                isCompleted: { isCompleted($0) },
-                isSkipped: { isSkipped($0) },
-                onComplete: { toggleComplete($0) },
-                onSkip: { activity, reason in skipActivity(activity, reason: reason) }
-            )
+            VStack(alignment: .leading, spacing: 8) {
+                // Bucket header
+                Button {
+                    // Collapse handled inside TimeBucketSection
+                } label: {
+                    HStack {
+                        Image(systemName: group.slot.icon)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                        Text(group.slot.displayName.uppercased())
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                }
+                .buttonStyle(.plain)
+
+                ForEach(group.activities) { activity in
+                    activityView(for: activity)
+                }
+            }
         }
     }
 
@@ -171,13 +161,7 @@ struct DashboardView: View {
                 }
 
                 ForEach(stickyPending) { activity in
-                    ActivityRowView(
-                        activity: activity,
-                        isCompleted: false,
-                        isSkipped: false,
-                        onComplete: { toggleComplete(activity) },
-                        onSkip: { reason in skipActivity(activity, reason: reason) }
-                    )
+                    activityView(for: activity)
                 }
             }
         }
@@ -192,7 +176,7 @@ struct DashboardView: View {
                         activity: activity,
                         isCompleted: true,
                         isSkipped: false,
-                        onComplete: { toggleComplete(activity) },
+                        onComplete: { },
                         onSkip: { _ in }
                     )
                 }
@@ -212,40 +196,110 @@ struct DashboardView: View {
         }
     }
 
-    // MARK: - Helpers
+    // MARK: - Type-Dispatched Row
 
-    private func isCompleted(_ activity: Activity) -> Bool {
-        todayLogs.contains {
-            $0.activity?.id == activity.id && $0.status == .completed
+    @ViewBuilder
+    private func activityView(for activity: Activity) -> some View {
+        switch activity.type {
+        case .checkbox:
+            ActivityRowView(
+                activity: activity,
+                isCompleted: isFullyCompleted(activity),
+                isSkipped: isSkipped(activity),
+                onComplete: { completeCheckbox(activity) },
+                onSkip: { reason in skipActivity(activity, reason: reason) }
+            )
+        case .value:
+            ValueInputRow(
+                activity: activity,
+                currentValue: latestValue(for: activity),
+                onLog: { value in logValue(activity, value: value) }
+            )
+        case .cumulative:
+            // Non-allDay cumulative shown inline as a value-like row
+            ValueInputRow(
+                activity: activity,
+                currentValue: cumulativeTotal(for: activity),
+                onLog: { value in addCumulativeLog(activity, value: value) }
+            )
+        case .container:
+            ContainerRowView(
+                activity: activity,
+                todayLogs: todayLogs,
+                scheduleEngine: scheduleEngine,
+                today: today,
+                onCompleteChild: { child in completeCheckbox(child) },
+                onSkipChild: { child, reason in skipActivity(child, reason: reason) }
+            )
+        }
+    }
+
+    // MARK: - Completion Logic
+
+    private func isFullyCompleted(_ activity: Activity) -> Bool {
+        switch activity.type {
+        case .checkbox:
+            return todayLogs.contains { $0.activity?.id == activity.id && $0.status == .completed }
+        case .value:
+            return todayLogs.contains { $0.activity?.id == activity.id && $0.status == .completed }
+        case .cumulative:
+            guard let target = activity.targetValue, target > 0 else { return false }
+            return cumulativeTotal(for: activity) >= target
+        case .container:
+            // Container is complete if all today-applicable children are complete
+            let applicable = activity.children.filter { scheduleEngine.shouldShow($0, on: today) }
+            guard !applicable.isEmpty else { return true }
+            return applicable.allSatisfy { isFullyCompleted($0) }
         }
     }
 
     private func isSkipped(_ activity: Activity) -> Bool {
-        todayLogs.contains {
-            $0.activity?.id == activity.id && $0.status == .skipped
-        }
+        todayLogs.contains { $0.activity?.id == activity.id && $0.status == .skipped }
     }
 
-    private func toggleComplete(_ activity: Activity) {
-        if let log = todayLogs.first(where: { $0.activity?.id == activity.id && $0.status == .completed }) {
-            modelContext.delete(log)
-        } else {
-            let log = ActivityLog(activity: activity, date: today, status: .completed)
-            modelContext.insert(log)
+    // MARK: - Mutations
+
+    private func completeCheckbox(_ activity: Activity) {
+        guard !isFullyCompleted(activity) else { return }
+        let log = ActivityLog(activity: activity, date: today, status: .completed)
+        modelContext.insert(log)
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    private func logValue(_ activity: Activity, value: Double) {
+        // Remove existing log for today if re-logging
+        if let existing = todayLogs.first(where: { $0.activity?.id == activity.id && $0.status == .completed }) {
+            modelContext.delete(existing)
         }
-        try? modelContext.save()
+        let log = ActivityLog(activity: activity, date: today, status: .completed, value: value)
+        modelContext.insert(log)
+    }
+
+    private func addCumulativeLog(_ activity: Activity, value: Double) {
+        let log = ActivityLog(activity: activity, date: today, status: .completed, value: value)
+        modelContext.insert(log)
     }
 
     private func skipActivity(_ activity: Activity, reason: String) {
-        guard !isSkipped(activity) && !isCompleted(activity) else { return }
+        guard !isSkipped(activity) && !isFullyCompleted(activity) else { return }
         let log = ActivityLog(activity: activity, date: today, status: .skipped)
         log.skipReason = reason
         modelContext.insert(log)
-        try? modelContext.save()
+    }
+
+    // MARK: - Value Queries
+
+    private func latestValue(for activity: Activity) -> Double? {
+        todayLogs.first(where: { $0.activity?.id == activity.id && $0.status == .completed })?.value
+    }
+
+    private func cumulativeTotal(for activity: Activity) -> Double {
+        todayLogs
+            .filter { $0.activity?.id == activity.id && $0.status == .completed }
+            .reduce(0) { $0 + ($1.value ?? 0) }
     }
 
     private func shouldAutoCollapse(_ slot: TimeSlot) -> Bool {
-        let hour = today.currentHour
-        return hour < slot.startHour
+        today.currentHour < slot.startHour
     }
 }

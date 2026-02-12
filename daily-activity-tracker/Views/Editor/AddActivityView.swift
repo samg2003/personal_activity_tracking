@@ -5,6 +5,7 @@ struct AddActivityView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \Category.sortOrder) private var categories: [Category]
+    @Query(sort: \Activity.sortOrder) private var allActivities: [Activity]
 
     @State private var name = ""
     @State private var selectedIcon = "circle"
@@ -14,6 +15,14 @@ struct AddActivityView: View {
     @State private var selectedWeekdays: Set<Int> = []
     @State private var selectedSlot: TimeSlot = .morning
     @State private var selectedCategory: Category?
+
+    // Value / Cumulative config
+    @State private var targetValueText = ""
+    @State private var unit = ""
+
+    // Container config
+    @State private var selectedParent: Activity?
+    @State private var isSubActivity = false
 
     private let iconOptions = [
         "circle", "star", "heart", "bolt", "flame",
@@ -31,13 +40,21 @@ struct AddActivityView: View {
 
     private let weekdayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
+    /// Existing container activities for "add as sub-activity"
+    private var containerActivities: [Activity] {
+        allActivities.filter { $0.type == .container }
+    }
+
     var body: some View {
         NavigationStack {
             Form {
                 nameSection
+                typeSection
+                typeSpecificSection
                 categorySection
                 scheduleSection
                 timeWindowSection
+                parentSection
                 appearanceSection
             }
             .scrollContentBackground(.hidden)
@@ -66,6 +83,46 @@ struct AddActivityView: View {
         }
     }
 
+    private var typeSection: some View {
+        Section("Type") {
+            Picker("Type", selection: $selectedType) {
+                ForEach(ActivityType.allCases) { type in
+                    Label(type.displayName, systemImage: type.systemImage).tag(type)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            // Auto-adjust time slot for cumulative
+            .onChange(of: selectedType) { _, newType in
+                if newType == .cumulative { selectedSlot = .allDay }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var typeSpecificSection: some View {
+        switch selectedType {
+        case .value:
+            Section("Value Configuration") {
+                TextField("Unit (e.g., kg, hrs)", text: $unit)
+            }
+        case .cumulative:
+            Section("Target") {
+                TextField("Daily target (e.g., 2000)", text: $targetValueText)
+                    .keyboardType(.decimalPad)
+                TextField("Unit (e.g., ml, steps)", text: $unit)
+            }
+        case .container:
+            Section {
+                Text("Container will derive completion from its sub-activities.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        case .checkbox:
+            EmptyView()
+        }
+    }
+
     private var categorySection: some View {
         Section("Category") {
             Picker("Category", selection: $selectedCategory) {
@@ -80,15 +137,21 @@ struct AddActivityView: View {
 
     private var scheduleSection: some View {
         Section("Schedule") {
-            Picker("Frequency", selection: $scheduleType) {
-                ForEach([ScheduleType.daily, .weekly, .sticky], id: \.self) { type in
-                    Text(type.displayName).tag(type)
+            if selectedType != .container {
+                Picker("Frequency", selection: $scheduleType) {
+                    ForEach([ScheduleType.daily, .weekly, .sticky], id: \.self) { type in
+                        Text(type.displayName).tag(type)
+                    }
                 }
-            }
-            .pickerStyle(.segmented)
+                .pickerStyle(.segmented)
 
-            if scheduleType == .weekly {
-                weekdayPicker
+                if scheduleType == .weekly {
+                    weekdayPicker
+                }
+            } else {
+                Text("Containers follow their children's schedules")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -126,15 +189,30 @@ struct AddActivityView: View {
         }
     }
 
+    @ViewBuilder
+    private var parentSection: some View {
+        if !containerActivities.isEmpty && selectedType != .container {
+            Section("Add as Sub-Activity") {
+                Toggle("Part of a routine", isOn: $isSubActivity)
+
+                if isSubActivity {
+                    Picker("Parent", selection: $selectedParent) {
+                        Text("None").tag(Activity?.none)
+                        ForEach(containerActivities) { parent in
+                            Text(parent.name).tag(Optional(parent))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private var appearanceSection: some View {
         Section("Appearance") {
-            // Icon picker
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
                     ForEach(iconOptions, id: \.self) { icon in
-                        Button {
-                            selectedIcon = icon
-                        } label: {
+                        Button { selectedIcon = icon } label: {
                             Image(systemName: icon)
                                 .font(.system(size: 18))
                                 .frame(width: 38, height: 38)
@@ -148,21 +226,17 @@ struct AddActivityView: View {
                 .padding(.vertical, 4)
             }
 
-            // Color picker
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(colorOptions, id: \.self) { color in
-                        Button {
-                            selectedColor = color
-                        } label: {
+                        Button { selectedColor = color } label: {
                             Circle()
                                 .fill(Color(hex: color))
                                 .frame(width: 30, height: 30)
                                 .overlay {
                                     if selectedColor == color {
                                         Image(systemName: "checkmark")
-                                            .font(.caption)
-                                            .fontWeight(.bold)
+                                            .font(.caption).fontWeight(.bold)
                                             .foregroundStyle(.white)
                                     }
                                 }
@@ -182,11 +256,15 @@ struct AddActivityView: View {
         guard !trimmed.isEmpty else { return }
 
         let schedule: Schedule
-        switch scheduleType {
-        case .daily: schedule = .daily
-        case .weekly: schedule = .weekly(Array(selectedWeekdays).sorted())
-        case .sticky: schedule = .sticky
-        default: schedule = .daily
+        if selectedType == .container {
+            schedule = .daily // containers auto-show based on children
+        } else {
+            switch scheduleType {
+            case .daily: schedule = .daily
+            case .weekly: schedule = .weekly(Array(selectedWeekdays).sorted())
+            case .sticky: schedule = .sticky
+            default: schedule = .daily
+            }
         }
 
         let activity = Activity(
@@ -198,6 +276,19 @@ struct AddActivityView: View {
             timeWindow: TimeWindow(slot: selectedSlot),
             category: selectedCategory
         )
+
+        // Type-specific config
+        if selectedType == .value || selectedType == .cumulative {
+            activity.unit = unit.isEmpty ? nil : unit
+        }
+        if selectedType == .cumulative, let target = Double(targetValueText) {
+            activity.targetValue = target
+        }
+
+        // Parent relationship
+        if isSubActivity, let parent = selectedParent {
+            activity.parent = parent
+        }
 
         modelContext.insert(activity)
         dismiss()
