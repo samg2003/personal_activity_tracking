@@ -8,12 +8,17 @@ struct DashboardView: View {
     @Query private var vacationDays: [VacationDay]
 
     @State private var showAddActivity = false
+    @State private var selectedDate = Date().startOfDay
+    @State private var showVacationSheet = false
+    @State private var showUndoToast = false
+    @State private var undoMessage = ""
+    @State private var undoAction: () -> Void = {}
 
     private let scheduleEngine: ScheduleEngineProtocol = ScheduleEngine()
 
     // MARK: - Derived Data
 
-    private var today: Date { Date() }
+    private var today: Date { selectedDate }
 
     private var todayActivities: [Activity] {
         scheduleEngine.activitiesForToday(from: allActivities, on: today, vacationDays: vacationDays)
@@ -68,6 +73,7 @@ struct DashboardView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 24) {
+                    DatePickerBar(selectedDate: $selectedDate)
                     headerSection
                     allDaySection
                     timeBucketSections
@@ -77,8 +83,14 @@ struct DashboardView: View {
                 .padding()
             }
             .background(Color(.systemBackground))
-            .navigationTitle(today.shortDisplay)
+            .navigationTitle(selectedDate.isSameDay(as: Date()) ? "Today" : selectedDate.shortDisplay)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { showVacationSheet = true } label: {
+                        Image(systemName: "airplane")
+                            .font(.body)
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { showAddActivity = true } label: {
                         Image(systemName: "plus.circle.fill")
@@ -89,6 +101,10 @@ struct DashboardView: View {
             .sheet(isPresented: $showAddActivity) {
                 AddActivityView()
             }
+            .sheet(isPresented: $showVacationSheet) {
+                VacationModeSheet()
+            }
+            .undoToast(isPresented: $showUndoToast, message: undoMessage, onUndo: undoAction)
         }
     }
 
@@ -264,10 +280,12 @@ struct DashboardView: View {
         let log = ActivityLog(activity: activity, date: today, status: .completed)
         modelContext.insert(log)
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        showUndo("Completed \(activity.name)") { [log] in
+            modelContext.delete(log)
+        }
     }
 
     private func logValue(_ activity: Activity, value: Double) {
-        // Remove existing log for today if re-logging
         if let existing = todayLogs.first(where: { $0.activity?.id == activity.id && $0.status == .completed }) {
             modelContext.delete(existing)
         }
@@ -285,6 +303,15 @@ struct DashboardView: View {
         let log = ActivityLog(activity: activity, date: today, status: .skipped)
         log.skipReason = reason
         modelContext.insert(log)
+        showUndo("Skipped \(activity.name)") { [log] in
+            modelContext.delete(log)
+        }
+    }
+
+    private func showUndo(_ message: String, action: @escaping () -> Void) {
+        undoMessage = message
+        undoAction = action
+        showUndoToast = true
     }
 
     // MARK: - Value Queries
