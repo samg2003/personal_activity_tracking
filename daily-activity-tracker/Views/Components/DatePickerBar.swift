@@ -49,11 +49,11 @@ struct DatePickerBar: View {
             VStack(spacing: 4) {
                 Text(dayAbbreviation(date))
                     .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(isSelected ? .white : .tertiary)
+                    .foregroundStyle(isSelected ? Color.white : Color(.tertiaryLabel))
 
                 Text("\(calendar.component(.day, from: date))")
                     .font(.system(size: 16, weight: isSelected ? .bold : .medium, design: .rounded))
-                    .foregroundStyle(isSelected ? .white : (isToday ? .accentColor : .primary))
+                    .foregroundStyle(isSelected ? Color.white : (isToday ? Color.accentColor : Color(.label)))
             }
             .frame(width: 42, height: 52)
             .background(
