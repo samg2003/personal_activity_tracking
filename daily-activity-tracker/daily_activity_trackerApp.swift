@@ -1,10 +1,3 @@
-//
-//  daily_activity_trackerApp.swift
-//  daily-activity-tracker
-//
-//  Created by Sambhav Gupta on 2/12/26.
-//
-
 import SwiftUI
 import SwiftData
 
@@ -12,7 +5,10 @@ import SwiftData
 struct daily_activity_trackerApp: App {
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
-            Item.self,
+            Category.self,
+            Activity.self,
+            ActivityLog.self,
+            VacationDay.self,
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
@@ -26,7 +22,23 @@ struct daily_activity_trackerApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .preferredColorScheme(.dark)
+                .onAppear { seedCategoriesIfNeeded() }
         }
         .modelContainer(sharedModelContainer)
+    }
+
+    /// Seed default categories on first launch
+    private func seedCategoriesIfNeeded() {
+        let context = sharedModelContainer.mainContext
+        let descriptor = FetchDescriptor<Category>()
+        let count = (try? context.fetchCount(descriptor)) ?? 0
+        guard count == 0 else { return }
+
+        for (i, cat) in Category.defaults.enumerated() {
+            let category = Category(name: cat.name, icon: cat.icon, hexColor: cat.color, sortOrder: i)
+            context.insert(category)
+        }
+        try? context.save()
     }
 }
