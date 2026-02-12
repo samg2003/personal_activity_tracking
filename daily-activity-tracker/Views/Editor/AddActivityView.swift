@@ -249,6 +249,20 @@ struct AddActivityView: View {
         }
     }
 
+    @ViewBuilder
+    private var composableInputsSection: some View {
+        if selectedType != .container {
+            Section("Composable Inputs") {
+                Toggle(isOn: $allowsPhoto) {
+                    Label("Photo Tracking", systemImage: "camera")
+                }
+                Toggle(isOn: $allowsNotes) {
+                    Label("Notes", systemImage: "note.text")
+                }
+            }
+        }
+    }
+
     // MARK: - Save
 
     private func save() {
