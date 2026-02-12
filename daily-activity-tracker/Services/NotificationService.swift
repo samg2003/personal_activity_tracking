@@ -4,7 +4,7 @@ import UserNotifications
 /// Handles scheduling local notifications based on ReminderPresets
 protocol NotificationServiceProtocol {
     func requestPermission() async -> Bool
-    func scheduleReminders(for activity: Activity) async
+    func scheduleReminders(id: UUID, name: String, reminder: ReminderPreset) async
     func cancelReminders(for activityID: UUID)
     func scheduleEveningCheckIn(pendingCount: Int) async
 }
@@ -26,37 +26,40 @@ final class NotificationService: NotificationServiceProtocol {
 
     // MARK: - Schedule
 
-    func scheduleReminders(for activity: Activity) async {
-        guard let reminder = activity.reminder else { return }
-
-        // Clear existing for this activity
-        cancelReminders(for: activity.id)
+    func scheduleReminders(id: UUID, name: String, reminder: ReminderPreset) async {
+        cancelReminders(for: id)
 
         switch reminder {
         case .morningNudge:
             await scheduleDaily(
-                id: "\(activity.id)-morning",
-                title: "Time for \(activity.name)",
+                id: "\(id)-morning",
+                title: "Time for \(name)",
                 body: "Start your morning routine!",
-                hour: 7, minute: 30
+                hour: 8, minute: 0
             )
         case .eveningCheckIn:
             await scheduleDaily(
-                id: "\(activity.id)-evening",
+                id: "\(id)-evening",
                 title: "Evening Check-in",
-                body: "Don't forget to log \(activity.name) before bed",
-                hour: 21, minute: 0
+                body: "Don't forget to log \(name) before bed",
+                hour: 20, minute: 0
             )
-        case .periodicIfBehind:
-            // Schedule afternoon nudge (user can configure more granular timing later)
+        case .periodic(let hours):
             await scheduleDaily(
-                id: "\(activity.id)-periodic",
-                title: "\(activity.name) reminder",
+                id: "\(id)-periodic",
+                title: "\(name) reminder",
                 body: "You haven't logged this today yet",
-                hour: 14, minute: 0
+                hour: min(8 + hours, 20), minute: 0
             )
-        case .custom:
-            break // Future: custom time/interval
+        case .remindAt(let hour, let minute):
+            await scheduleDaily(
+                id: "\(id)-custom",
+                title: "\(name)",
+                body: "Time to log \(name)",
+                hour: hour, minute: minute
+            )
+        case .none:
+            break
         }
     }
 

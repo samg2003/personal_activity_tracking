@@ -20,6 +20,10 @@ struct AddActivityView: View {
     @State private var targetValueText = ""
     @State private var unit = ""
 
+    // Composable inputs
+    @State private var allowsPhoto = false
+    @State private var allowsNotes = false
+
     // Container config
     @State private var selectedParent: Activity?
     @State private var isSubActivity = false

@@ -41,7 +41,8 @@ struct HeatmapView: View {
         VStack(alignment: .leading, spacing: 8) {
             // Weekday labels
             HStack(spacing: 4) {
-                ForEach(["M", "T", "W", "T", "F", "S", "S"], id: \.self) { day in
+                let weekdays = ["M", "T", "W", "T", "F", "S", "S"]
+                ForEach(Array(weekdays.enumerated()), id: \.offset) { _, day in
                     Text(day)
                         .font(.system(size: 9, weight: .medium))
                         .foregroundStyle(.tertiary)

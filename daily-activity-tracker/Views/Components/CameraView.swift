@@ -1,5 +1,6 @@
 import SwiftUI
-import AVFoundation
+import Observation
+@preconcurrency import AVFoundation
 
 /// Camera view with ghost overlay of previous photo for consistent framing
 struct CameraView: View {
@@ -8,7 +9,7 @@ struct CameraView: View {
     let onCapture: (UIImage) -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @StateObject private var camera = CameraModel()
+    @State private var camera = CameraModel()
     @State private var ghostImage: UIImage?
     @State private var showGhost = true
     @State private var capturedImage: UIImage?
@@ -70,7 +71,9 @@ struct CameraView: View {
                 // Capture button
                 Button {
                     camera.capturePhoto { image in
-                        capturedImage = image
+                        Task { @MainActor in
+                            capturedImage = image
+                        }
                     }
                 } label: {
                     ZStack {
@@ -167,19 +170,22 @@ struct GridOverlay: View {
 
 // MARK: - Camera Model (AVFoundation)
 
-class CameraModel: NSObject, ObservableObject {
-    let session = AVCaptureSession()
-    private let output = AVCapturePhotoOutput()
-    private var completion: ((UIImage) -> Void)?
+/// Manages AVCaptureSession lifecycle. Uses nonisolated(unsafe) for
+/// non-Sendable AVFoundation types that are only used on known queues.
+@Observable
+final class CameraModel: NSObject {
+    nonisolated(unsafe) let session = AVCaptureSession()
+    nonisolated(unsafe) private let output = AVCapturePhotoOutput()
+    nonisolated(unsafe) private var completion: ((UIImage) -> Void)?
 
     func checkPermissions() {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized:
             setupSession()
         case .notDetermined:
-            AVCaptureDevice.requestAccess(for: .video) { granted in
+            AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
                 if granted {
-                    DispatchQueue.main.async { self.setupSession() }
+                    DispatchQueue.main.async { self?.setupSession() }
                 }
             }
         default:
@@ -197,15 +203,15 @@ class CameraModel: NSObject, ObservableObject {
         if session.canAddOutput(output) { session.addOutput(output) }
         session.commitConfiguration()
 
-        DispatchQueue.global(qos: .userInitiated).async {
-            self.session.startRunning()
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            self?.session.startRunning()
         }
     }
 
     func stop() {
         if session.isRunning {
-            DispatchQueue.global(qos: .userInitiated).async {
-                self.session.stopRunning()
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                self?.session.stopRunning()
             }
         }
     }
@@ -221,8 +227,8 @@ extension CameraModel: AVCapturePhotoCaptureDelegate {
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         guard let data = photo.fileDataRepresentation(),
               let image = UIImage(data: data) else { return }
-        DispatchQueue.main.async {
-            self.completion?(image)
+        DispatchQueue.main.async { [weak self] in
+            self?.completion?(image)
         }
     }
 }

@@ -23,7 +23,7 @@ final class HealthKitService: HealthKitServiceProtocol {
         guard isAvailable else { return }
 
         let shareTypes = Set(types.compactMap { HKQuantityType.quantityType(forIdentifier: $0) })
-        let readTypes = Set(types.compactMap { HKQuantityType.quantityType(forIdentifier: $0) as HKObjectType })
+        let readTypes: Set<HKObjectType> = Set(types.compactMap { HKQuantityType.quantityType(forIdentifier: $0) })
 
         try await healthStore.requestAuthorization(toShare: shareTypes, read: readTypes)
     }
