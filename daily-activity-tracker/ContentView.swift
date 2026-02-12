@@ -10,7 +10,7 @@ struct ContentView: View {
                 }
 
             // Placeholder for future Analytics tab
-            Text("Analytics Coming Soon")
+            AnalyticsView()
                 .tabItem {
                     Label("Analytics", systemImage: "chart.bar")
                 }
