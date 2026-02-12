@@ -270,4 +270,4 @@ daily-activity-tracker/
 | **P2: Photos** | MediaService, CameraView (ghost), PhotoTimeline | Photo capture and review |
 | **P3: Analytics** | Heatmap, ValueChart, EncouragementBar, streaks | Per-activity and global analytics |
 | **P4: Integrations** | HealthKit, Notifications, EventKit | External system connections |
-| **P5: Polish** | Past-day browser, vacation mode, haptics, undo | Full UX refinement including editing|
+| **P5: Polish** | Past-day browser, vacation mode, haptics, undo | Full UX refinement including editing, deleting, etc.|
