@@ -40,14 +40,14 @@ struct UndoToast: View {
             )
             .padding(.horizontal, 16)
             .opacity(opacity)
-            .offset(y: opacity > 0 ? 0 : 20)
+            .offset(y: opacity > 0 ? 0 : -20)
             .onAppear {
                 withAnimation(.easeOut(duration: 0.25)) {
                     opacity = 1
                 }
                 scheduleAutoDismiss()
             }
-            .transition(.move(edge: .bottom).combined(with: .opacity))
+            .transition(.move(edge: .top).combined(with: .opacity))
         }
     }
 
@@ -79,7 +79,7 @@ struct UndoToastModifier: ViewModifier {
     let onUndo: () -> Void
 
     func body(content: Content) -> some View {
-        ZStack(alignment: .bottom) {
+        ZStack(alignment: .top) {
             content
 
             UndoToast(
@@ -87,7 +87,7 @@ struct UndoToastModifier: ViewModifier {
                 onUndo: onUndo,
                 isPresented: $isPresented
             )
-            .padding(.bottom, 8)
+            .padding(.top, 60)
         }
     }
 }

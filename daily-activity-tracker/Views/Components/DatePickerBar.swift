@@ -3,6 +3,7 @@ import SwiftUI
 /// Horizontal scrollable date picker for browsing past days
 struct DatePickerBar: View {
     @Binding var selectedDate: Date
+    var vacationDays: [VacationDay] = []
 
     private let visibleDays = 14
 
@@ -12,6 +13,10 @@ struct DatePickerBar: View {
         return (0..<visibleDays).compactMap {
             calendar.date(byAdding: .day, value: -$0, to: today)
         }.reversed()
+    }
+    
+    private func isVacation(_ date: Date) -> Bool {
+        vacationDays.contains { $0.date.isSameDay(as: date) }
     }
 
     var body: some View {
@@ -39,6 +44,7 @@ struct DatePickerBar: View {
     private func dateChip(_ date: Date) -> some View {
         let isSelected = date.isSameDay(as: selectedDate)
         let isToday = date.isSameDay(as: Date())
+        let vacation = isVacation(date)
         let calendar = Calendar.current
 
         return Button {
@@ -47,9 +53,14 @@ struct DatePickerBar: View {
             }
         } label: {
             VStack(spacing: 4) {
-                Text(dayAbbreviation(date))
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(isSelected ? Color.white : Color(.tertiaryLabel))
+                if vacation {
+                    Text("✈️")
+                        .font(.system(size: 10))
+                } else {
+                    Text(dayAbbreviation(date))
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(isSelected ? Color.white : Color(.tertiaryLabel))
+                }
 
                 Text("\(calendar.component(.day, from: date))")
                     .font(.system(size: 16, weight: isSelected ? .bold : .medium, design: .rounded))
@@ -58,7 +69,7 @@ struct DatePickerBar: View {
             .frame(width: 42, height: 52)
             .background(
                 RoundedRectangle(cornerRadius: 12)
-                    .fill(isSelected ? Color.accentColor : Color(.secondarySystemBackground))
+                    .fill(vacation && isSelected ? Color.blue : (isSelected ? Color.accentColor : Color(.secondarySystemBackground)))
             )
             .overlay {
                 if isToday && !isSelected {

@@ -21,7 +21,7 @@ struct ActivityRowView: View {
 
             // Checkbox circle
             Button {
-                if !isCompleted && !isSkipped {
+                if !isSkipped {
                     withAnimation(.spring(response: 0.3)) {
                         onComplete()
                     }
@@ -58,6 +58,27 @@ struct ActivityRowView: View {
         .padding(.horizontal, 14)
         .background(Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12))
+        .contextMenu {
+            if isCompleted {
+                Button(role: .destructive) {
+                    onComplete() // Toggles off
+                } label: {
+                    Label("Undo Completion", systemImage: "arrow.uturn.backward")
+                }
+            } else {
+                Button {
+                    onComplete()
+                } label: {
+                    Label("Complete", systemImage: "checkmark")
+                }
+                
+                Button {
+                    showSkipSheet = true
+                } label: {
+                    Label("Skip", systemImage: "forward")
+                }
+            }
+        }
         .swipeActions(edge: .trailing) {
             Button {
                 withAnimation { onComplete() }

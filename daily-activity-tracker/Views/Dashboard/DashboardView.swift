@@ -1,11 +1,14 @@
 import SwiftUI
 import SwiftData
+import HealthKit
 
 struct DashboardView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Activity.sortOrder) private var allActivities: [Activity]
     @Query(sort: \ActivityLog.date, order: .reverse) private var allLogs: [ActivityLog]
+
     @Query private var vacationDays: [VacationDay]
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var showAddActivity = false
     @State private var selectedDate = Date().startOfDay
@@ -15,6 +18,18 @@ struct DashboardView: View {
     @State private var undoMessage = ""
     @State private var undoAction: () -> Void = {}
     
+    @State private var editingActivity: Activity?
+    
+    // Quick-add (FAB) state
+    @State private var quickAddActivity: Activity?
+    @State private var quickAddText = ""
+    @State private var showQuickAdd = false
+    
+    // Cumulative log sheet state
+    @State private var logSheetActivity: Activity?
+    
+    // Detail navigation state
+    @State private var detailActivity: Activity?
 
 
     private let scheduleEngine: ScheduleEngineProtocol = ScheduleEngine()
@@ -59,40 +74,7 @@ struct DashboardView: View {
     private var completionFraction: Double {
         let countable = todayActivities.filter { !isSkipped($0) }
         guard !countable.isEmpty else { return 1.0 }
-        
-        // Weighted scoring: Σ(completion * weight) / Σ(weight)
-        let totalWeight = countable.reduce(0.0) { $0 + $1.weight }
-        guard totalWeight > 0 else { return 1.0 }
-
-        let completedWeight = countable.reduce(0.0) { sum, activity in
-            sum + (completionScore(for: activity) * activity.weight)
-        }
-        return completedWeight / totalWeight
-    }
-
-    private func completionScore(for activity: Activity) -> Double {
-        if isFullyCompleted(activity) { return 1.0 }
-        
-        // Partial completion support for Cumulative and Container
-        switch activity.type {
-        case .cumulative:
-            guard let target = activity.targetValue, target > 0 else { return 0.0 }
-            let total = cumulativeTotal(for: activity)
-            return min(total / target, 1.0)
-        case .container:
-             // Recursively calculate container score based on children
-             // Note: This matches ContainerRowView logic but lifted to Dashboard level
-             let applicable = activity.children.filter { scheduleEngine.shouldShow($0, on: today) }
-             guard !applicable.isEmpty else { return 1.0 }
-             let childTotalWeight = applicable.reduce(0.0) { $0 + $1.weight }
-             guard childTotalWeight > 0 else { return 1.0 }
-             let childCompletedWeight = applicable.reduce(0.0) { sum, child in
-                 sum + (completionScore(for: child) * child.weight)
-             }
-             return childCompletedWeight / childTotalWeight
-        default:
-            return 0.0
-        }
+        return Double(countable.filter { isFullyCompleted($0) }.count) / Double(countable.count)
     }
 
     private var groupedBySlot: [(slot: TimeSlot, activities: [Activity])] {
@@ -103,13 +85,37 @@ struct DashboardView: View {
         }
     }
 
-    // MARK: - Body
+    private var isSelectedDateVacation: Bool {
+        vacationDays.contains { $0.date.isSameDay(as: selectedDate) }
+    }
 
     var body: some View {
         NavigationStack {
             ScrollView {
+                // ... [VStack content] ...
                 VStack(spacing: 24) {
-                    DatePickerBar(selectedDate: $selectedDate)
+                    DatePickerBar(selectedDate: $selectedDate, vacationDays: vacationDays)
+                    
+                    // Vacation banner (informational only, no standalone button)
+                    if isSelectedDateVacation {
+                        HStack {
+                            Image(systemName: "airplane")
+                                .foregroundStyle(.blue)
+                            Text("Vacation Day")
+                                .font(.subheadline.bold())
+                            Spacer()
+                            Button("Remove") {
+                                toggleVacation(for: selectedDate, isVacation: false)
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(Color.blue.opacity(0.1))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                    
                     headerSection
                     allDaySection
                     timeBucketSections
@@ -141,10 +147,16 @@ struct DashboardView: View {
                 }
             }
             .sheet(isPresented: $showAddActivity) {
-                AddActivityView()
+                AddActivityView(activityToEdit: nil)
+            }
+            .sheet(item: $editingActivity) { activity in
+                AddActivityView(activityToEdit: activity)
             }
             .sheet(isPresented: $showVacationSheet) {
-                VacationModeSheet()
+                VacationModeSheet(selectedDate: selectedDate)
+            }
+            .sheet(item: $logSheetActivity) { activity in
+                CumulativeLogSheet(activity: activity, date: today)
             }
             .sheet(isPresented: $showSettings) {
                 SettingsView()
@@ -152,6 +164,13 @@ struct DashboardView: View {
             .undoToast(isPresented: $showUndoToast, message: undoMessage, onUndo: undoAction)
             .overlay(alignment: .bottomTrailing) {
                 floatingActionButton
+            }
+            .navigationDestination(for: Activity.self) { activity in
+                ActivityDetailView(activity: activity)
+            }
+            .onAppear { syncHealthKit() }
+            .onChange(of: scenePhase) { _, newPhase in
+                if newPhase == .active { syncHealthKit() }
             }
         }
     }
@@ -165,7 +184,9 @@ struct DashboardView: View {
             Menu {
                 ForEach(cumulative) { activity in
                     Button {
-                        addCumulativeLog(activity, value: 50) // Default increment, could be refined
+                        quickAddActivity = activity
+                        quickAddText = ""
+                        showQuickAdd = true
                     } label: {
                         Label("Add to \(activity.name)", systemImage: activity.icon)
                     }
@@ -180,7 +201,27 @@ struct DashboardView: View {
                     .shadow(radius: 4, y: 4)
             }
             .padding()
+            .alert("Add to \(quickAddActivity?.name ?? "")", isPresented: $showQuickAdd) {
+                TextField(quickAddActivity?.unit ?? "Amount", text: $quickAddText)
+                    .keyboardType(.decimalPad)
+                Button("Add") {
+                    if let activity = quickAddActivity, let val = Double(quickAddText), val > 0 {
+                        addCumulativeLog(activity, value: val)
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                if let target = quickAddActivity?.targetValue {
+                    Text("Current: \(formatQuickAddCurrent()) / \(Int(target)) \(quickAddActivity?.unit ?? "")")
+                }
+            }
         }
+    }
+
+    private func formatQuickAddCurrent() -> String {
+        guard let activity = quickAddActivity else { return "0" }
+        let total = cumulativeTotal(for: activity)
+        return total.truncatingRemainder(dividingBy: 1) == 0 ? String(format: "%.0f", total) : String(format: "%.1f", total)
     }
 
     // MARK: - Sections
@@ -263,13 +304,7 @@ struct DashboardView: View {
         if !completed.isEmpty {
             DisclosureGroup {
                 ForEach(completed) { activity in
-                    ActivityRowView(
-                        activity: activity,
-                        isCompleted: true,
-                        isSkipped: false,
-                        onComplete: { },
-                        onSkip: { _ in }
-                    )
+                    activityView(for: activity)
                 }
             } label: {
                 HStack {
@@ -291,37 +326,57 @@ struct DashboardView: View {
 
     @ViewBuilder
     private func activityView(for activity: Activity) -> some View {
-        switch activity.type {
-        case .checkbox:
-            ActivityRowView(
-                activity: activity,
-                isCompleted: isFullyCompleted(activity),
-                isSkipped: isSkipped(activity),
-                onComplete: { completeCheckbox(activity) },
-                onSkip: { reason in skipActivity(activity, reason: reason) }
-            )
-        case .value:
-            ValueInputRow(
-                activity: activity,
-                currentValue: latestValue(for: activity),
-                onLog: { value in logValue(activity, value: value) }
-            )
-        case .cumulative:
-            // Non-allDay cumulative shown inline as a value-like row
-            ValueInputRow(
-                activity: activity,
-                currentValue: cumulativeTotal(for: activity),
-                onLog: { value in addCumulativeLog(activity, value: value) }
-            )
-        case .container:
-            ContainerRowView(
-                activity: activity,
-                todayLogs: todayLogs,
-                scheduleEngine: scheduleEngine,
-                today: today,
-                onCompleteChild: { child in completeCheckbox(child) },
-                onSkipChild: { child, reason in skipActivity(child, reason: reason) }
-            )
+        Group {
+            switch activity.type {
+            case .checkbox:
+                ActivityRowView(
+                    activity: activity,
+                    isCompleted: isFullyCompleted(activity),
+                    isSkipped: isSkipped(activity),
+                    onComplete: { completeCheckbox(activity) },
+                    onSkip: { reason in skipActivity(activity, reason: reason) }
+                )
+            case .value:
+                ValueInputRow(
+                    activity: activity,
+                    currentValue: latestValue(for: activity),
+                    onLog: { value in logValue(activity, value: value) },
+                    onRemove: { removeValueLog(activity) }
+                )
+            case .cumulative:
+                ValueInputRow(
+                    activity: activity,
+                    currentValue: cumulativeTotal(for: activity),
+                    onLog: { value in addCumulativeLog(activity, value: value) },
+                    onShowLogs: { logSheetActivity = activity }
+                )
+            case .container:
+                ContainerRowView(
+                    activity: activity,
+                    todayLogs: todayLogs,
+                    scheduleEngine: scheduleEngine,
+                    today: today,
+                    onCompleteChild: { child in completeCheckbox(child) },
+                    onSkipChild: { child, reason in skipActivity(child, reason: reason) }
+                )
+            }
+        }
+        .contextMenu {
+            NavigationLink(value: activity) {
+                Label("View Details", systemImage: "info.circle")
+            }
+            
+            Button {
+                editingActivity = activity
+            } label: {
+                Label("Edit", systemImage: "pencil")
+            }
+            
+            Button(role: .destructive) {
+                modelContext.delete(activity)
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
         }
     }
 
@@ -351,10 +406,27 @@ struct DashboardView: View {
     // MARK: - Mutations
 
     private func completeCheckbox(_ activity: Activity) {
-        guard !isFullyCompleted(activity) else { return }
+        if isFullyCompleted(activity) {
+            // Uncomplete: delete the completion log
+            if let log = todayLogs.first(where: { $0.activity?.id == activity.id && $0.status == .completed }) {
+                modelContext.delete(log)
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                showUndo("Uncompleted \(activity.name)") {
+                    let restored = ActivityLog(activity: activity, date: today, status: .completed)
+                    modelContext.insert(restored)
+                }
+            }
+            return
+        }
+        
         let log = ActivityLog(activity: activity, date: today, status: .completed)
         modelContext.insert(log)
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        
+        // Integrations
+        NotificationService.shared.cancelReminders(for: activity.id)
+        writeToHealthKit(activity: activity, value: 1.0)
+        
         showUndo("Completed \(activity.name)") { [log] in
             modelContext.delete(log)
         }
@@ -366,11 +438,59 @@ struct DashboardView: View {
         }
         let log = ActivityLog(activity: activity, date: today, status: .completed, value: value)
         modelContext.insert(log)
+        
+        // Integrations
+        NotificationService.shared.cancelReminders(for: activity.id)
+        writeToHealthKit(activity: activity, value: value)
     }
 
     private func addCumulativeLog(_ activity: Activity, value: Double) {
         let log = ActivityLog(activity: activity, date: today, status: .completed, value: value)
         modelContext.insert(log)
+        
+        // Integrations
+        if isFullyCompleted(activity) {
+            NotificationService.shared.cancelReminders(for: activity.id)
+        }
+        writeToHealthKit(activity: activity, value: value)
+        
+        showUndo("Added \(Int(value)) to \(activity.name)") { [log] in
+            modelContext.delete(log)
+        }
+    }
+
+    private func removeValueLog(_ activity: Activity) {
+        guard let log = todayLogs.first(where: { $0.activity?.id == activity.id && $0.status == .completed }) else { return }
+        let oldValue = log.value
+        modelContext.delete(log)
+        
+        showUndo("Cleared \(activity.name)") {
+            let restored = ActivityLog(activity: activity, date: today, status: .completed, value: oldValue)
+            modelContext.insert(restored)
+        }
+    }
+
+    private func removeLastCumulativeLog(_ activity: Activity) {
+        guard let lastLog = todayLogs.first(where: { $0.activity?.id == activity.id && $0.status == .completed }) else { return }
+        let oldValue = lastLog.value
+        modelContext.delete(lastLog)
+        
+        showUndo("Removed entry from \(activity.name)") {
+            let restored = ActivityLog(activity: activity, date: today, status: .completed, value: oldValue)
+            modelContext.insert(restored)
+        }
+    }
+
+    private func toggleVacation(for date: Date, isVacation: Bool) {
+        if isVacation {
+            guard !vacationDays.contains(where: { $0.date.isSameDay(as: date) }) else { return }
+            let vacation = VacationDay(date: date.startOfDay)
+            modelContext.insert(vacation)
+        } else {
+            if let existing = vacationDays.first(where: { $0.date.isSameDay(as: date) }) {
+                modelContext.delete(existing)
+            }
+        }
     }
 
     private func skipActivity(_ activity: Activity, reason: String) {
@@ -378,6 +498,10 @@ struct DashboardView: View {
         let log = ActivityLog(activity: activity, date: today, status: .skipped)
         log.skipReason = reason
         modelContext.insert(log)
+        
+        // Integrations
+        NotificationService.shared.cancelReminders(for: activity.id)
+        
         showUndo("Skipped \(activity.name)") { [log] in
             modelContext.delete(log)
         }
@@ -404,4 +528,69 @@ struct DashboardView: View {
     private func shouldAutoCollapse(_ slot: TimeSlot) -> Bool {
         today.currentHour < slot.startHour
     }
+    
+    // MARK: - HealthKit Sync
+    
+    private func syncHealthKit() {
+        guard HealthKitService.shared.isAvailable else { return }
+        
+        Task {
+            // 1. Request Auth for all relevant types
+            let typesToRead = Set(todayActivities.compactMap { $0.healthKitTypeID }.compactMap { HealthKitService.identifierFrom($0) })
+            guard !typesToRead.isEmpty else { return }
+            try? await HealthKitService.shared.requestAuthorization(for: typesToRead)
+            
+            // 2. Read and Update
+            for activity in todayActivities {
+                guard let typeID = activity.healthKitTypeID,
+                      let hkType = HealthKitService.identifierFrom(typeID),
+                      activity.healthKitMode == .read || activity.healthKitMode == .both
+                else { continue }
+                
+                // Determine unit
+                let unit: HKUnit = activity.unit == "ml" ? .literUnit(with: .milli) : .count() 
+                // TODO: Robust unit mapping based on typeID. For now, basic fallback.
+                // Refinement: Add a helper in HealthKitService to get default unit for type.
+                
+                let value = try? await HealthKitService.shared.readTotalToday(for: hkType, unit: unit)
+                if let val = value, val > 0 {
+                    // Update log if value differs significantly or missing
+                    let current = latestValue(for: activity) ?? cumulativeTotal(for: activity)
+                    if abs(current - val) > 0.1 {
+                        // Auto-log from HealthKit
+                        await MainActor.run {
+                            // If cumulative, we might need to be careful not to double add?
+                            // Actually, readTotalToday returns the SUM.
+                            // If we have local logs provided by user, do we overwrite?
+                            // Strategy: For HK synced activities, the "Truth" is HK.
+                            // We replace today's logs with a single "HealthKit Sync" log?
+                            // Or we strictly use HK value.
+                            
+                            // Simple approach: Delete existing logs for today, insert one "HealthKit Import".
+                            let existing = todayLogs.filter { $0.activity?.id == activity.id }
+                            existing.forEach { modelContext.delete($0) }
+                            
+                            let log = ActivityLog(activity: activity, date: today, status: .completed, value: val)
+                            log.note = "Synced from HealthKit"
+                            modelContext.insert(log)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func writeToHealthKit(activity: Activity, value: Double) {
+        guard let typeID = activity.healthKitTypeID,
+              let hkType = HealthKitService.identifierFrom(typeID),
+              activity.healthKitMode == .write || activity.healthKitMode == .both
+        else { return }
+        
+        Task {
+            // Simple unit mapping
+            let unit: HKUnit = activity.unit == "ml" ? .literUnit(with: .milli) : .count()
+            try? await HealthKitService.shared.writeSample(type: hkType, value: value, unit: unit, date: Date())
+        }
+    }
 }
+

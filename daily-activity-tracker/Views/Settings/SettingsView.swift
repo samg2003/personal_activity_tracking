@@ -86,7 +86,7 @@ struct SettingsView: View {
     private func exportData() {
         Task {
             do {
-                let json = try await DataService.shared.exportData(context: modelContext)
+                let json = try DataService.shared.exportData(context: modelContext)
                 let filename = "DailyTracker_Backup_\(Date().formatted(date: .numeric, time: .omitted).replacingOccurrences(of: "/", with: "-")).json"
                 let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
                 try json.write(to: tempURL, atomically: true, encoding: .utf8)
@@ -125,22 +125,36 @@ struct SettingsView: View {
     
     private func clearData() {
         do {
-            // Safe Deletion: Fetch and delete objects explicitly to respect relationship constraints
-            // (Batch delete often fails on "mandatory OTO nullify inverse" errors)
+            // Safe Deletion: Fetch and delete objects explicitly
+            // 1. Delete Logs (Depend on Activity)
             let logs = try modelContext.fetch(FetchDescriptor<ActivityLog>())
             for log in logs { modelContext.delete(log) }
             
+            // 2. Delete Activities (Depend on Category - optional, Parent - self)
             let activities = try modelContext.fetch(FetchDescriptor<Activity>())
             for activity in activities { modelContext.delete(activity) }
             
-            let categories = try modelContext.fetch(FetchDescriptor<Category>())
-            for category in categories { modelContext.delete(category) }
-            
+            // 3. Delete Vacation Days
             let vacations = try modelContext.fetch(FetchDescriptor<VacationDay>())
             for vacation in vacations { modelContext.delete(vacation) }
 
+            // 4. Delete Categories (EXCEPT Base Defaults)
+            let categories = try modelContext.fetch(FetchDescriptor<Category>())
+            let defaultNames = Category.defaults.map { $0.name }
+            for category in categories {
+                if !defaultNames.contains(category.name) {
+                    modelContext.delete(category)
+                }
+            }
+            
+            // 5. Ensure defaults exist (in case user deleted them previously or they are missing)
+            // If we kept them, good. If we deleted them because names matched but we want to reset?
+            // Actually, user invoked "Clear Data", usually implies "Reset to Factory".
+            // So we should probably keep defaults if they exist, or re-create them if they don't.
+            // The logic above keeps them if they exist.
+            
             try modelContext.save()
-            alertMessage = "All data cleared."
+            alertMessage = "All data cleared (Base categories preserved)."
             showAlert = true
         } catch {
             alertMessage = "Failed to clear data: \(error.localizedDescription)"

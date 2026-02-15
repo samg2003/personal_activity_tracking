@@ -1,6 +1,6 @@
 import Foundation
 
-enum TimeSlot: String, Codable, CaseIterable, Identifiable, Comparable {
+enum TimeSlot: String, Codable, CaseIterable, Identifiable, Comparable, Sendable {
     case allDay
     case morning
     case afternoon
@@ -50,7 +50,7 @@ enum TimeSlot: String, Codable, CaseIterable, Identifiable, Comparable {
     }
 }
 
-struct TimeWindow: Codable, Equatable {
+struct TimeWindow: Codable, Equatable, Sendable {
     var slot: TimeSlot
     var customStartHour: Int?
     var customEndHour: Int?

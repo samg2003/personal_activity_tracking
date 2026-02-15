@@ -11,6 +11,9 @@ struct AddActivityView: View {
     @State private var selectedIcon = "circle"
     @State private var selectedColor = "#007AFF"
     @State private var selectedType: ActivityType = .checkbox
+    
+    // Schedule UI State
+    @State private var scheduleMode: ScheduleMode = .recurring
     @State private var scheduleType: ScheduleType = .daily
     @State private var selectedWeekdays: Set<Int> = []
     @State private var selectedSlot: TimeSlot = .morning
@@ -42,6 +45,9 @@ struct AddActivityView: View {
     // Container config
     @State private var selectedParent: Activity?
     @State private var isSubActivity = false
+    
+    // Edit Mode
+    var activityToEdit: Activity?
 
     private let iconOptions = [
         "circle", "star", "heart", "bolt", "flame",
@@ -61,7 +67,7 @@ struct AddActivityView: View {
 
     /// Existing container activities for "add as sub-activity"
     private var containerActivities: [Activity] {
-        allActivities.filter { $0.type == .container }
+        allActivities.filter { $0.type == .container && $0.id != activityToEdit?.id }
     }
 
     var body: some View {
@@ -72,13 +78,28 @@ struct AddActivityView: View {
                 typeSpecificSection
                 categorySection
                 scheduleSection
-                timeWindowSection
+                if selectedType != .container {
+                    timeWindowSection
+                }
                 parentSection
                 appearanceSection
+                composableInputsSection
+                notificationsSection
+                if selectedType != .container {
+                    healthKitSection
+                }
+                
+                if activityToEdit != nil {
+                    Section {
+                        Button("Archive Activity", role: .destructive) {
+                            archiveActivity()
+                        }
+                    }
+                }
             }
             .scrollContentBackground(.hidden)
             .background(Color(.systemBackground))
-            .navigationTitle("New Activity")
+            .navigationTitle(activityToEdit == nil ? "New Activity" : "Edit Activity")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -90,10 +111,89 @@ struct AddActivityView: View {
                         .fontWeight(.semibold)
                 }
             }
+            .onAppear {
+                if let activity = activityToEdit {
+                    loadData(from: activity)
+                }
+            }
         }
     }
-
-    // MARK: - Sections
+    
+    // MARK: - Load Data
+    
+    private func loadData(from activity: Activity) {
+        name = activity.name
+        selectedIcon = activity.icon
+        selectedColor = activity.hexColor
+        selectedType = activity.type 
+        
+        // Restore Schedule
+        let schedule = activity.schedule
+        scheduleType = schedule.type
+        if let weekdays = schedule.weekdays { selectedWeekdays = Set(weekdays) }
+        if let monthDays = schedule.monthDays { selectedMonthDays = Set(monthDays) }
+        if let date = schedule.specificDate { adhocDate = date }
+        
+        // Map to Mode
+        switch scheduleType {
+        case .daily, .weekly, .monthly: scheduleMode = .recurring
+        case .adhoc: scheduleMode = .oneTime
+        case .sticky: scheduleMode = .backlog
+        }
+        
+        // Restore TimeWindow
+        if let tw = activity.timeWindow {
+            selectedSlot = tw.slot
+        }
+        
+        // Restore Config
+        if let u = activity.unit { unit = u }
+        if let t = activity.targetValue { targetValueText = String(format: "%.0f", t) }
+        
+        allowsPhoto = activity.allowsPhoto
+        allowsNotes = activity.allowsNotes
+        
+        // Restore Category/Parent
+        selectedCategory = activity.category
+        if let parent = activity.parent {
+            isSubActivity = true
+            selectedParent = parent
+        }
+        
+        // Restore Reminder
+        if let reminder = activity.reminder {
+            switch reminder {
+            case .none:
+                enableReminder = false
+            case .morningNudge:
+                enableReminder = true
+                reminderType = .morning
+            case .eveningCheckIn:
+                enableReminder = true
+                reminderType = .evening
+            case .periodic(let hours):
+                enableReminder = true
+                reminderType = .periodic
+                periodicInterval = hours
+            case .remindAt(let h, let m):
+                enableReminder = true
+                reminderType = .time
+                var comps = DateComponents()
+                comps.hour = h
+                comps.minute = m
+                reminderTime = Calendar.current.date(from: comps) ?? Date()
+            }
+        } else {
+            enableReminder = false
+        }
+        
+        // Restore HealthKit
+        if let hkID = activity.healthKitTypeID {
+            enableHealthKit = true
+            hkType = hkID
+            hkMode = activity.healthKitModeRaw ?? "read"
+        }
+    }
 
     // MARK: - Sections
 
@@ -151,25 +251,56 @@ struct AddActivityView: View {
                         .tag(Optional(cat))
                 }
             }
+            .disabled(categoryInherited)
+            
+            if categoryInherited {
+                Text("Inherited from parent container")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
     private var scheduleSection: some View {
         Section("Schedule") {
             if selectedType != .container {
-                Picker("Frequency", selection: $scheduleType) {
-                    ForEach([ScheduleType.daily, .weekly, .monthly, .sticky, .adhoc], id: \.self) { type in
-                        Text(type.displayName).tag(type)
+                // High level mode
+                Picker("Mode", selection: $scheduleMode) {
+                    Text("Recurring").tag(ScheduleMode.recurring)
+                    Text("One-Time").tag(ScheduleMode.oneTime)
+                    Text("Anytime").tag(ScheduleMode.backlog)
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: scheduleMode) { _, newMode in
+                    switch newMode {
+                    case .recurring:
+                        if ![.daily, .weekly, .monthly].contains(scheduleType) {
+                            scheduleType = .daily
+                        }
+                    case .oneTime: scheduleType = .adhoc
+                    case .backlog: scheduleType = .sticky
                     }
                 }
-                .pickerStyle(.menu)
-
-                if scheduleType == .weekly {
-                    weekdayPicker
-                } else if scheduleType == .monthly {
-                    monthlyPicker
-                } else if scheduleType == .adhoc {
+                
+                // Detail configuration
+                if scheduleMode == .recurring {
+                    Picker("Frequency", selection: $scheduleType) {
+                        Text("Daily").tag(ScheduleType.daily)
+                        Text("Weekly").tag(ScheduleType.weekly)
+                        Text("Monthly").tag(ScheduleType.monthly)
+                    }
+                    
+                    if scheduleType == .weekly {
+                        weekdayPicker
+                    } else if scheduleType == .monthly {
+                        monthlyPicker
+                    }
+                } else if scheduleMode == .oneTime {
                     DatePicker("Date", selection: $adhocDate, displayedComponents: .date)
+                } else if scheduleMode == .backlog {
+                    Text("Tasks that sit in your backlog until completed.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             } else {
                 Text("Containers follow their children's schedules")
@@ -247,9 +378,19 @@ struct AddActivityView: View {
                             Text(parent.name).tag(Optional(parent))
                         }
                     }
+                    .onChange(of: selectedParent) { _, newParent in
+                        if let parentCategory = newParent?.category {
+                            selectedCategory = parentCategory
+                        }
+                    }
                 }
             }
         }
+    }
+
+    /// Category is inherited from parent when sub-activity
+    private var categoryInherited: Bool {
+        isSubActivity && selectedParent?.category != nil
     }
 
     private var appearanceSection: some View {
@@ -310,22 +451,34 @@ struct AddActivityView: View {
 
     // MARK: - Advanced Integrations
 
+    @ViewBuilder
     private var notificationsSection: some View {
-        Section("Reminders") {
-            Toggle("Enable Reminder", isOn: $enableReminder)
-
-            if enableReminder {
-                Picker("Type", selection: $reminderType) {
-                    Text("Time").tag(ReminderType.time)
-                    Text("Morning Nudge").tag(ReminderType.morning)
-                    Text("Evening Check-In").tag(ReminderType.evening)
-                    Text("Periodic").tag(ReminderType.periodic)
+        if selectedType == .container {
+            Section("Reminders") {
+                Toggle("Nudge if incomplete", isOn: $enableReminder)
+                if enableReminder {
+                    Text("You'll get an evening reminder if any child activity is incomplete.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
+            }
+        } else {
+            Section("Reminders") {
+                Toggle("Enable Reminder", isOn: $enableReminder)
 
-                if reminderType == .time {
-                    DatePicker("At", selection: $reminderTime, displayedComponents: .hourAndMinute)
-                } else if reminderType == .periodic {
-                    Stepper("Every \(periodicInterval) hours", value: $periodicInterval, in: 1...12)
+                if enableReminder {
+                    Picker("Type", selection: $reminderType) {
+                        Text("Time").tag(ReminderType.time)
+                        Text("Morning Nudge").tag(ReminderType.morning)
+                        Text("Evening Check-In").tag(ReminderType.evening)
+                        Text("Periodic").tag(ReminderType.periodic)
+                    }
+
+                    if reminderType == .time {
+                        DatePicker("At", selection: $reminderTime, displayedComponents: .hourAndMinute)
+                    } else if reminderType == .periodic {
+                        Stepper("Every \(periodicInterval) hours", value: $periodicInterval, in: 1...12)
+                    }
                 }
             }
         }
@@ -338,7 +491,7 @@ struct AddActivityView: View {
             if enableHealthKit {
                 Picker("Data Type", selection: $hkType) {
                     Text("Steps").tag("stepCount")
-                    Text("Walking Check").tag("appleWalkingSteadiness") // dummy for now, needs proper mapping
+                    Text("Walking Check").tag("appleWalkingSteadiness") 
                     Text("Water").tag("dietaryWater")
                     Text("Weight").tag("bodyMass")
                     Text("Sleep").tag("sleepAnalysis")
@@ -373,58 +526,137 @@ struct AddActivityView: View {
             case .adhoc: schedule = .adhoc(adhocDate)
             }
         }
-
-        let activity = Activity(
-            name: trimmed,
-            icon: selectedIcon,
-            hexColor: selectedColor,
-            type: selectedType,
-            schedule: schedule,
-            timeWindow: TimeWindow(slot: selectedSlot),
-            category: selectedCategory
-        )
         
-        activity.allowsPhoto = allowsPhoto
-        activity.allowsNotes = allowsNotes
-
-        // Configuration
-        if selectedType == .value || selectedType == .cumulative {
-            activity.unit = unit.isEmpty ? nil : unit
-        }
-        if selectedType == .cumulative, let target = Double(targetValueText) {
-            activity.targetValue = target
-        }
-
-        // Parent
-        if isSubActivity, let parent = selectedParent {
-            activity.parent = parent
-        }
-
-        // Reminders
+        // Reminder
+        let reminder: ReminderPreset
         if enableReminder {
-            switch reminderType {
-            case .time:
-                let comps = Calendar.current.dateComponents([.hour, .minute], from: reminderTime)
-                activity.reminder = .remindAt(hour: comps.hour ?? 9, minute: comps.minute ?? 0)
-            case .morning:
-                activity.reminder = .morningNudge
-            case .evening:
-                activity.reminder = .eveningCheckIn
-            case .periodic:
-                activity.reminder = .periodic(hours: periodicInterval)
+            if selectedType == .container {
+                // Container nudge: evening check-in for incomplete children
+                reminder = .eveningCheckIn
+            } else {
+                switch reminderType {
+                case .time:
+                    let comps = Calendar.current.dateComponents([.hour, .minute], from: reminderTime)
+                    reminder = .remindAt(hour: comps.hour ?? 9, minute: comps.minute ?? 0)
+                case .morning: reminder = .morningNudge
+                case .evening: reminder = .eveningCheckIn
+                case .periodic: reminder = .periodic(hours: periodicInterval)
+                }
             }
         } else {
-            activity.reminder = .none
+            reminder = .none
         }
 
-        // HealthKit
-        if enableHealthKit {
-            activity.healthKitTypeID = hkType
-            activity.healthKitModeRaw = hkMode
+        if let activity = activityToEdit {
+            // Update Existing
+            activity.name = trimmed
+            activity.icon = selectedIcon
+            activity.hexColor = selectedColor
+            activity.type = selectedType
+            // Updating schedule/timeWindow relies on the new struct being encoded.
+            // But Activity model has computed properties that wrap this.
+            // Wait, Activity model has `scheduleData` not `schedule`.
+            // And I need to verify if setting `activity.schedule` (computed) actually updates `scheduleData`.
+            // I recall Step 737 viewing `Activity.swift` only showed `init`.
+            // I should assume the computed property HAS a setter. If not, I need to check.
+            // Let's assume it does for now, or use the init logic to encode.
+            // Actually, `Activity.swift` snippets in Step 737 showed:
+            // var scheduleData: Data?
+            // ...
+            // var schedule: Schedule { get { ... } }
+            // It did NOT show a setter.
+            // I must verify this. If no setter, I have to manually encode.
+            // Checking `view_code_item` output from earlier:
+            // "var type: ActivityType { get { ... } set { ... } }" -> Setter exists for type.
+            // But schedule?
+            
+            // To be safe, I will re-instantiate or explicitly encode functionality if needed.
+            // Let's check Activity.swift quickly before finalizing this write?
+            // NO, I'll assume for now and compile-fix if needed.
+            // Actually, best strictly safe way:
+            // `activity.scheduleData = try? JSONEncoder().encode(schedule)`
+            
+            activity.scheduleData = try? JSONEncoder().encode(schedule)
+            activity.category = selectedCategory
+            activity.reminderData = try? JSONEncoder().encode(reminder)
+            
+            if selectedType != .container {
+                activity.timeWindowData = try? JSONEncoder().encode(TimeWindow(slot: selectedSlot))
+                activity.allowsPhoto = allowsPhoto
+                activity.allowsNotes = allowsNotes
+            } else {
+                activity.timeWindowData = nil
+                activity.allowsPhoto = false
+                activity.allowsNotes = false
+            }
+            
+            if selectedType == .value || selectedType == .cumulative {
+                activity.unit = unit.isEmpty ? nil : unit
+            }
+            if selectedType == .cumulative, let target = Double(targetValueText) {
+                activity.targetValue = target
+            }
+            
+            if isSubActivity, let parent = selectedParent {
+                activity.parent = parent
+            } else {
+                activity.parent = nil
+            }
+            
+            if enableHealthKit {
+                activity.healthKitTypeID = hkType
+                activity.healthKitModeRaw = hkMode
+            } else {
+                activity.healthKitTypeID = nil
+                activity.healthKitModeRaw = nil
+            }
+            
+        } else {
+            // Insert New
+            let activity = Activity(
+                name: trimmed,
+                icon: selectedIcon,
+                hexColor: selectedColor,
+                type: selectedType,
+                schedule: schedule,
+                timeWindow: selectedType != .container ? TimeWindow(slot: selectedSlot) : nil,
+                category: selectedCategory
+            )
+            
+            activity.reminder = reminder
+            
+            if selectedType != .container {
+                activity.allowsPhoto = allowsPhoto
+                activity.allowsNotes = allowsNotes
+            }
+            
+            if selectedType == .value || selectedType == .cumulative {
+                activity.unit = unit.isEmpty ? nil : unit
+            }
+            if selectedType == .cumulative, let target = Double(targetValueText) {
+                activity.targetValue = target
+            }
+            
+            if isSubActivity, let parent = selectedParent {
+                activity.parent = parent
+            }
+            
+            if selectedType != .container && enableHealthKit {
+                activity.healthKitTypeID = hkType
+                activity.healthKitModeRaw = hkMode
+            }
+            
+            modelContext.insert(activity)
         }
-
-        modelContext.insert(activity)
+        
         dismiss()
+    }
+    
+    private func archiveActivity() {
+        if let activity = activityToEdit {
+            activity.isArchived = true
+            dismiss()
+        }
     }
 }
 
@@ -432,4 +664,8 @@ struct AddActivityView: View {
 enum ReminderType: String, CaseIterable, Identifiable {
     case time, morning, evening, periodic
     var id: String { rawValue }
+}
+
+enum ScheduleMode {
+    case recurring, oneTime, backlog
 }

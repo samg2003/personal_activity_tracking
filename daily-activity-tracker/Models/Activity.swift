@@ -1,6 +1,12 @@
 import Foundation
 import SwiftData
 
+enum HealthKitMode: String, Sendable {
+    case read
+    case write
+    case both
+}
+
 @Model
 final class Activity {
     var id: UUID = UUID()
@@ -48,11 +54,9 @@ final class Activity {
     var schedule: Schedule {
         get {
             guard let data = scheduleData else { return .daily }
-            // warning: Main actor-isolated conformance of 'Schedule' to 'Decodable' cannot be used in nonisolated context; this is an error in the Swift 6 language mode
             return (try? JSONDecoder().decode(Schedule.self, from: data)) ?? .daily
         }
         set {
-            // warning: Main actor-isolated conformance of 'Schedule' to 'Encodable' cannot be used in nonisolated context; this is an error in the Swift 6 language mode
             scheduleData = try? JSONEncoder().encode(newValue)
         }
     }
@@ -60,11 +64,9 @@ final class Activity {
     var timeWindow: TimeWindow? {
         get {
             guard let data = timeWindowData else { return nil }
-            // warning: Main actor-isolated conformance of 'TimeWindow' to 'Decodable' cannot be used in nonisolated context; this is an error in the Swift 6 language mode
             return try? JSONDecoder().decode(TimeWindow.self, from: data)
         }
         set {
-            // warning: Main actor-isolated conformance of 'TimeWindow' to 'Encodable' cannot be used in nonisolated context; this is an error in the Swift 6 language mode
             timeWindowData = newValue.flatMap { try? JSONEncoder().encode($0) }
         }
     }
@@ -72,13 +74,16 @@ final class Activity {
     var reminder: ReminderPreset? {
         get {
             guard let data = reminderData else { return nil }
-            // warning: Main actor-isolated conformance of 'ReminderPreset' to 'Decodable' cannot be used in nonisolated context; this is an error in the Swift 6 language mode
             return try? JSONDecoder().decode(ReminderPreset.self, from: data)
         }
         set {
-            // warning: Main actor-isolated conformance of 'ReminderPreset' to 'Encodable' cannot be used in nonisolated context; this is an error in the Swift 6 language mode
             reminderData = newValue.flatMap { try? JSONEncoder().encode($0) }
         }
+    }
+
+    var healthKitMode: HealthKitMode? {
+        get { healthKitModeRaw.flatMap { HealthKitMode(rawValue: $0) } }
+        set { healthKitModeRaw = newValue?.rawValue }
     }
 
     // MARK: - Init
@@ -101,9 +106,7 @@ final class Activity {
         self.category = category
         self.sortOrder = sortOrder
         self.createdAt = Date()
-        // warning: Main actor-isolated conformance of 'Schedule' to 'Encodable' cannot be used in nonisolated context; this is an error in the Swift 6 language mode
         self.scheduleData = try? JSONEncoder().encode(schedule)
-        // warning: Main actor-isolated conformance of 'TimeWindow' to 'Encodable' cannot be used in nonisolated context; this is an error in the Swift 6 language mode
         self.timeWindowData = timeWindow.flatMap { try? JSONEncoder().encode($0) }
     }
 }

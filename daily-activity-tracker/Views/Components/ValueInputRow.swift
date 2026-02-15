@@ -5,6 +5,8 @@ struct ValueInputRow: View {
     let activity: Activity
     let currentValue: Double?
     let onLog: (Double) -> Void
+    var onRemove: (() -> Void)?
+    var onShowLogs: (() -> Void)?
 
     @State private var showInput = false
     @State private var inputText = ""
@@ -63,6 +65,30 @@ struct ValueInputRow: View {
                 }
             }
             Button("Cancel", role: .cancel) { inputText = "" }
+        }
+        .contextMenu {
+            Button {
+                if let val = currentValue { inputText = formatValue(val) }
+                showInput = true
+            } label: {
+                Label("Edit Value", systemImage: "pencil")
+            }
+            
+            if let onShowLogs {
+                Button {
+                    onShowLogs()
+                } label: {
+                    Label("View Entries", systemImage: "list.bullet")
+                }
+            }
+
+            if currentValue != nil, let onRemove, onShowLogs == nil {
+                Button(role: .destructive) {
+                    onRemove()
+                } label: {
+                    Label("Clear Value", systemImage: "trash")
+                }
+            }
         }
     }
 

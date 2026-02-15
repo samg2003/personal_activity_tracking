@@ -1,17 +1,29 @@
 import SwiftUI
 import SwiftData
 
-/// Sheet for managing vacation days — toggle today, or add/remove specific dates
+/// Sheet for managing vacation days — toggle today or selected date, add/remove date ranges
 struct VacationModeSheet: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \VacationDay.date, order: .reverse) private var vacationDays: [VacationDay]
 
+    /// The date the user is currently viewing on the dashboard
+    var selectedDate: Date = Date()
+
     @State private var addDate = Date()
+    @State private var endDate = Date()
     @State private var showDatePicker = false
 
     private var todayIsVacation: Bool {
         vacationDays.contains { $0.date.isSameDay(as: Date()) }
+    }
+    
+    private var selectedIsVacation: Bool {
+        vacationDays.contains { $0.date.isSameDay(as: selectedDate) }
+    }
+    
+    private var showSelectedToggle: Bool {
+        !selectedDate.isSameDay(as: Date())
     }
 
     var body: some View {
@@ -40,18 +52,40 @@ struct VacationModeSheet: View {
                         ))
                         .labelsHidden()
                     }
+                    
+                    // Toggle for the selected date (if viewing a different day)
+                    if showSelectedToggle {
+                        HStack {
+                            Image(systemName: "calendar")
+                                .foregroundStyle(.blue)
+                                .font(.title3)
+                            
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("\(selectedDate.shortDisplay) is vacation")
+                                    .font(.subheadline.bold())
+                            }
+                            
+                            Spacer()
+                            
+                            Toggle("", isOn: Binding(
+                                get: { selectedIsVacation },
+                                set: { isOn in toggleVacation(for: selectedDate, isOn: isOn) }
+                            ))
+                            .labelsHidden()
+                        }
+                    }
                 }
 
                 // Add future/past vacation
-                Section("Add Vacation Day") {
-                    DatePicker("Date", selection: $addDate, displayedComponents: .date)
+                Section("Add Vacation Range") {
+                    DatePicker("Start Date", selection: $addDate, displayedComponents: .date)
+                    DatePicker("End Date", selection: $endDate, in: addDate..., displayedComponents: .date)
 
                     Button {
-                        addVacationDay(addDate)
+                        addVacationRange(start: addDate, end: endDate)
                     } label: {
-                        Label("Add Day", systemImage: "plus.circle.fill")
+                        Label("Add Vacation", systemImage: "plus.circle.fill")
                     }
-                    .disabled(vacationDays.contains { $0.date.isSameDay(as: addDate) })
                 }
 
                 // Existing vacation days
@@ -104,10 +138,24 @@ struct VacationModeSheet: View {
         }
     }
 
+    private func addVacationRange(start: Date, end: Date) {
+        var current = start.startOfDay
+        let endDay = end.startOfDay
+        
+        while current <= endDay {
+            if !vacationDays.contains(where: { $0.date.isSameDay(as: current) }) {
+                let vacation = VacationDay(date: current)
+                modelContext.insert(vacation)
+            }
+            current = Calendar.current.date(byAdding: .day, value: 1, to: current) ?? current.addingTimeInterval(86400)
+        }
+        
+        // Reset validation or feedback?
+        // UI updates automatically via Query
+    }
+    
     private func addVacationDay(_ date: Date) {
-        guard !vacationDays.contains(where: { $0.date.isSameDay(as: date) }) else { return }
-        let vacation = VacationDay(date: date)
-        modelContext.insert(vacation)
+        addVacationRange(start: date, end: date)
     }
 
     private func deleteVacationDays(at offsets: IndexSet) {
