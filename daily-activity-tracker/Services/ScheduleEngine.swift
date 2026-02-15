@@ -27,10 +27,10 @@ final class ScheduleEngine: ScheduleEngineProtocol {
         case .adhoc:
             guard let specificDate = schedule.specificDate else { return false }
             // Show if it's the right day and not yet completed
-            let completed = activity.logs.contains {
-                $0.date.isSameDay(as: specificDate) && $0.status == .completed
-            }
-            return date.isSameDay(as: specificDate) && !completed
+            // Show if it's the right day. 
+            // Completion status is handled by the UI (checked vs unchecked), 
+            // we don't hide it immediately upon completion.
+            return date.isSameDay(as: specificDate)
         }
     }
 

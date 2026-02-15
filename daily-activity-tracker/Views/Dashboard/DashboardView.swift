@@ -10,9 +10,12 @@ struct DashboardView: View {
     @State private var showAddActivity = false
     @State private var selectedDate = Date().startOfDay
     @State private var showVacationSheet = false
+    @State private var showSettings = false // New state
     @State private var showUndoToast = false
     @State private var undoMessage = ""
     @State private var undoAction: () -> Void = {}
+    
+
 
     private let scheduleEngine: ScheduleEngineProtocol = ScheduleEngine()
 
@@ -56,7 +59,40 @@ struct DashboardView: View {
     private var completionFraction: Double {
         let countable = todayActivities.filter { !isSkipped($0) }
         guard !countable.isEmpty else { return 1.0 }
-        return Double(countable.filter { isFullyCompleted($0) }.count) / Double(countable.count)
+        
+        // Weighted scoring: Σ(completion * weight) / Σ(weight)
+        let totalWeight = countable.reduce(0.0) { $0 + $1.weight }
+        guard totalWeight > 0 else { return 1.0 }
+
+        let completedWeight = countable.reduce(0.0) { sum, activity in
+            sum + (completionScore(for: activity) * activity.weight)
+        }
+        return completedWeight / totalWeight
+    }
+
+    private func completionScore(for activity: Activity) -> Double {
+        if isFullyCompleted(activity) { return 1.0 }
+        
+        // Partial completion support for Cumulative and Container
+        switch activity.type {
+        case .cumulative:
+            guard let target = activity.targetValue, target > 0 else { return 0.0 }
+            let total = cumulativeTotal(for: activity)
+            return min(total / target, 1.0)
+        case .container:
+             // Recursively calculate container score based on children
+             // Note: This matches ContainerRowView logic but lifted to Dashboard level
+             let applicable = activity.children.filter { scheduleEngine.shouldShow($0, on: today) }
+             guard !applicable.isEmpty else { return 1.0 }
+             let childTotalWeight = applicable.reduce(0.0) { $0 + $1.weight }
+             guard childTotalWeight > 0 else { return 1.0 }
+             let childCompletedWeight = applicable.reduce(0.0) { sum, child in
+                 sum + (completionScore(for: child) * child.weight)
+             }
+             return childCompletedWeight / childTotalWeight
+        default:
+            return 0.0
+        }
     }
 
     private var groupedBySlot: [(slot: TimeSlot, activities: [Activity])] {
@@ -86,9 +122,15 @@ struct DashboardView: View {
             .navigationTitle(selectedDate.isSameDay(as: Date()) ? "Today" : selectedDate.shortDisplay)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button { showVacationSheet = true } label: {
-                        Image(systemName: "airplane")
-                            .font(.body)
+                    HStack {
+                        Button { showSettings = true } label: {
+                            Image(systemName: "gearshape")
+                                .font(.body)
+                        }
+                        Button { showVacationSheet = true } label: {
+                            Image(systemName: "airplane")
+                                .font(.body)
+                        }
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -104,7 +146,40 @@ struct DashboardView: View {
             .sheet(isPresented: $showVacationSheet) {
                 VacationModeSheet()
             }
+            .sheet(isPresented: $showSettings) {
+                SettingsView()
+            }
             .undoToast(isPresented: $showUndoToast, message: undoMessage, onUndo: undoAction)
+            .overlay(alignment: .bottomTrailing) {
+                floatingActionButton
+            }
+        }
+    }
+
+    // MARK: - FAB
+    
+    @ViewBuilder
+    private var floatingActionButton: some View {
+        let cumulative = todayActivities.filter { $0.type == .cumulative }
+        if !cumulative.isEmpty {
+            Menu {
+                ForEach(cumulative) { activity in
+                    Button {
+                        addCumulativeLog(activity, value: 50) // Default increment, could be refined
+                    } label: {
+                        Label("Add to \(activity.name)", systemImage: activity.icon)
+                    }
+                }
+            } label: {
+                Image(systemName: "plus")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 56, height: 56)
+                    .background(Color.accentColor)
+                    .clipShape(Circle())
+                    .shadow(radius: 4, y: 4)
+            }
+            .padding()
         }
     }
 

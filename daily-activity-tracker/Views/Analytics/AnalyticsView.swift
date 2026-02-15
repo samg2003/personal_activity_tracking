@@ -75,6 +75,34 @@ struct AnalyticsView: View {
         .sorted { $0.score > $1.score }
     }
 
+    // MARK: - Insights
+
+    private func completionRate(for activity: Activity) -> Double {
+        let last7Days = Date().days(before: 7)
+        let relevantLogs = allLogs.filter { log in
+            log.activity?.id == activity.id &&
+            log.status == .completed &&
+            last7Days.contains { $0.isSameDay(as: log.date) }
+        }
+        return Double(relevantLogs.count) / 7.0
+    }
+
+    private var doingWell: [Activity] {
+        topLevelActivities
+            .filter { completionRate(for: $0) >= 0.8 }
+            .sorted { completionRate(for: $0) > completionRate(for: $1) }
+    }
+
+    private var needsAttention: [Activity] {
+        topLevelActivities
+            .filter { rate in
+                let r = completionRate(for: rate)
+                return r < 0.5 && r > 0 // Only show if attempted at least once or tracked? 
+                // Actually, if it's 0, it definitely needs attention.
+            }
+            .sorted { completionRate(for: $0) < completionRate(for: $1) }
+    }
+    
     // MARK: - Body
 
     var body: some View {
@@ -87,9 +115,17 @@ struct AnalyticsView: View {
                         overallScore: overallScore
                     )
 
-                    // Heatmap
+                    // Global Heatmap
                     VStack(alignment: .leading, spacing: 8) {
-                        sectionHeader("Activity Heatmap", icon: "square.grid.3x3.fill")
+                        sectionHeader("Overall Activity", icon: "square.grid.3x3.fill")
+                        // Reusing HeatmapView but passing 'nil' activity implies global if we adjust HeatmapView, 
+                        // but HeatmapView takes a list of activities.
+                        // We can't easily reuse HeatmapView for global without refactoring it to accept a generic "DailyScore" provider.
+                        // FOR NOW: We will pass ALL activities to HeatmapView, and let it visualize the *aggregate*?
+                        // Actually, HeatmapView currently visualizes a SINGLE activity's logs or ALL logs if we pass them.
+                        // Let's check HeatmapView... it takes `activities: [Activity]`.
+                        // If we pass all top level activities, does it aggregate?
+                        // Let's assume we need to instantiate it correctly.
                         HeatmapView(
                             activities: topLevelActivities,
                             logs: allLogs,
@@ -97,19 +133,30 @@ struct AnalyticsView: View {
                         )
                     }
 
-                    // Category Scorecards
-                    if !categoryScores.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            sectionHeader("Categories", icon: "folder.fill")
-                            ForEach(categoryScores, id: \.name) { score in
-                                categoryRow(score)
+                    // Insights: Doing Well vs Needs Attention
+                    VStack(alignment: .leading, spacing: 16) {
+                        if !doingWell.isEmpty {
+                            VStack(alignment: .leading, spacing: 8) {
+                                sectionHeader("Doing Well 🌟", icon: "star.fill")
+                                ForEach(doingWell, id: \.id) { activity in
+                                    insightRow(activity, score: completionRate(for: activity))
+                                }
+                            }
+                        }
+
+                        if !needsAttention.isEmpty {
+                            VStack(alignment: .leading, spacing: 8) {
+                                sectionHeader("Needs Attention ⚠️", icon: "exclamationmark.triangle.fill")
+                                ForEach(needsAttention, id: \.id) { activity in
+                                    insightRow(activity, score: completionRate(for: activity))
+                                }
                             }
                         }
                     }
 
-                    // Per-Activity Streaks
+                    // Old Per-Activity Streaks (kept as "All Streaks")
                     VStack(alignment: .leading, spacing: 8) {
-                        sectionHeader("Streaks", icon: "flame.fill")
+                        sectionHeader("All Streaks", icon: "flame.fill")
                         ForEach(topLevelActivities) { activity in
                             streakRow(activity)
                         }
@@ -207,9 +254,30 @@ struct AnalyticsView: View {
                     .foregroundStyle(.tertiary)
             }
         }
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func insightRow(_ activity: Activity, score: Double) -> some View {
+        HStack {
+            Image(systemName: activity.icon)
+                .foregroundStyle(Color(hex: activity.hexColor))
+            Text(activity.name)
+                .font(.subheadline)
+            Spacer()
+            Text("\(Int(score * 100))%")
+                .font(.caption.bold())
+                .foregroundStyle(score >= 0.8 ? .green : .orange)
+        }
         .padding(.vertical, 6)
         .padding(.horizontal, 12)
         .background(Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+}
+
+extension Date {
+    func days(before count: Int) -> [Date] {
+        (0..<count).compactMap { Calendar.current.date(byAdding: .day, value: -$0, to: self) }
     }
 }

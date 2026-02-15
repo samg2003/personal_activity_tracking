@@ -3,25 +3,33 @@ import UserNotifications
 
 /// Handles scheduling local notifications based on ReminderPresets
 protocol NotificationServiceProtocol {
-    func requestPermission() async -> Bool
+    func requestAuthorization()
     func scheduleReminders(id: UUID, name: String, reminder: ReminderPreset) async
     func cancelReminders(for activityID: UUID)
     func scheduleEveningCheckIn(pendingCount: Int) async
 }
 
-final class NotificationService: NotificationServiceProtocol {
+final class NotificationService: NSObject, NotificationServiceProtocol, UNUserNotificationCenterDelegate {
     static let shared = NotificationService()
 
     private let center = UNUserNotificationCenter.current()
 
     // MARK: - Permission
 
-    func requestPermission() async -> Bool {
-        do {
-            return try await center.requestAuthorization(options: [.alert, .sound, .badge])
-        } catch {
-            return false
+    func requestAuthorization() {
+        Task {
+            do {
+                _ = try await center.requestAuthorization(options: [.alert, .sound, .badge])
+            } catch {
+                print("Notification permission denied: \(error)")
+            }
         }
+    }
+
+    // MARK: - UNUserNotificationCenterDelegate
+    
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .sound])
     }
 
     // MARK: - Schedule
@@ -55,7 +63,7 @@ final class NotificationService: NotificationServiceProtocol {
             await scheduleDaily(
                 id: "\(id)-custom",
                 title: "\(name)",
-                body: "Time to log \(name)",
+                body: "Time for \(name)",
                 hour: hour, minute: minute
             )
         case .none:
@@ -68,6 +76,7 @@ final class NotificationService: NotificationServiceProtocol {
             "\(activityID)-morning",
             "\(activityID)-evening",
             "\(activityID)-periodic",
+            "\(activityID)-custom"
         ])
     }
 

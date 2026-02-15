@@ -23,7 +23,10 @@ struct daily_activity_trackerApp: App {
         WindowGroup {
             ContentView()
                 .preferredColorScheme(.dark)
-                .onAppear { seedCategoriesIfNeeded() }
+                .onAppear {
+                    seedCategoriesIfNeeded()
+                    setupNotifications()
+                }
         }
         .modelContainer(sharedModelContainer)
     }
@@ -40,5 +43,10 @@ struct daily_activity_trackerApp: App {
             context.insert(category)
         }
         try? context.save()
+    }
+
+    private func setupNotifications() {
+        NotificationService.shared.requestAuthorization()
+        UNUserNotificationCenter.current().delegate = NotificationService.shared
     }
 }

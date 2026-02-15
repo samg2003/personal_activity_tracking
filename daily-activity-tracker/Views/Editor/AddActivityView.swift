@@ -20,9 +20,24 @@ struct AddActivityView: View {
     @State private var targetValueText = ""
     @State private var unit = ""
 
+    // Schedule config
+    @State private var selectedMonthDays: Set<Int> = []
+    @State private var adhocDate = Date()
+
     // Composable inputs
     @State private var allowsPhoto = false
     @State private var allowsNotes = false
+
+    // Reminders
+    @State private var enableReminder = false
+    @State private var reminderType: ReminderType = .time
+    @State private var reminderTime = Date()
+    @State private var periodicInterval = 4
+
+    // HealthKit
+    @State private var enableHealthKit = false
+    @State private var hkType = "stepCount"
+    @State private var hkMode = "read"
 
     // Container config
     @State private var selectedParent: Activity?
@@ -80,6 +95,8 @@ struct AddActivityView: View {
 
     // MARK: - Sections
 
+    // MARK: - Sections
+
     private var nameSection: some View {
         Section {
             TextField("Activity name", text: $name)
@@ -95,8 +112,6 @@ struct AddActivityView: View {
                 }
             }
             .pickerStyle(.segmented)
-
-            // Auto-adjust time slot for cumulative
             .onChange(of: selectedType) { _, newType in
                 if newType == .cumulative { selectedSlot = .allDay }
             }
@@ -143,14 +158,18 @@ struct AddActivityView: View {
         Section("Schedule") {
             if selectedType != .container {
                 Picker("Frequency", selection: $scheduleType) {
-                    ForEach([ScheduleType.daily, .weekly, .sticky], id: \.self) { type in
+                    ForEach([ScheduleType.daily, .weekly, .monthly, .sticky, .adhoc], id: \.self) { type in
                         Text(type.displayName).tag(type)
                     }
                 }
-                .pickerStyle(.segmented)
+                .pickerStyle(.menu)
 
                 if scheduleType == .weekly {
                     weekdayPicker
+                } else if scheduleType == .monthly {
+                    monthlyPicker
+                } else if scheduleType == .adhoc {
+                    DatePicker("Date", selection: $adhocDate, displayedComponents: .date)
                 }
             } else {
                 Text("Containers follow their children's schedules")
@@ -180,6 +199,28 @@ struct AddActivityView: View {
                 .buttonStyle(.plain)
             }
         }
+    }
+
+    private var monthlyPicker: some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 7), spacing: 8) {
+            ForEach(1...31, id: \.self) { day in
+                let isSelected = selectedMonthDays.contains(day)
+                Button {
+                    if isSelected { selectedMonthDays.remove(day) }
+                    else { selectedMonthDays.insert(day) }
+                } label: {
+                    Text("\(day)")
+                        .font(.caption)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                        .background(isSelected ? Color.accentColor : Color(.tertiarySystemFill))
+                        .foregroundStyle(isSelected ? .white : .primary)
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.vertical, 4)
     }
 
     private var timeWindowSection: some View {
@@ -267,6 +308,53 @@ struct AddActivityView: View {
         }
     }
 
+    // MARK: - Advanced Integrations
+
+    private var notificationsSection: some View {
+        Section("Reminders") {
+            Toggle("Enable Reminder", isOn: $enableReminder)
+
+            if enableReminder {
+                Picker("Type", selection: $reminderType) {
+                    Text("Time").tag(ReminderType.time)
+                    Text("Morning Nudge").tag(ReminderType.morning)
+                    Text("Evening Check-In").tag(ReminderType.evening)
+                    Text("Periodic").tag(ReminderType.periodic)
+                }
+
+                if reminderType == .time {
+                    DatePicker("At", selection: $reminderTime, displayedComponents: .hourAndMinute)
+                } else if reminderType == .periodic {
+                    Stepper("Every \(periodicInterval) hours", value: $periodicInterval, in: 1...12)
+                }
+            }
+        }
+    }
+
+    private var healthKitSection: some View {
+        Section("HealthKit") {
+            Toggle("Link to Health", isOn: $enableHealthKit)
+
+            if enableHealthKit {
+                Picker("Data Type", selection: $hkType) {
+                    Text("Steps").tag("stepCount")
+                    Text("Walking Check").tag("appleWalkingSteadiness") // dummy for now, needs proper mapping
+                    Text("Water").tag("dietaryWater")
+                    Text("Weight").tag("bodyMass")
+                    Text("Sleep").tag("sleepAnalysis")
+                    Text("Workout").tag("workout")
+                }
+                
+                Picker("Mode", selection: $hkMode) {
+                    Text("Read Only").tag("read")
+                    Text("Write Only").tag("write")
+                    Text("Read & Write").tag("both")
+                }
+                .pickerStyle(.segmented)
+            }
+        }
+    }
+
     // MARK: - Save
 
     private func save() {
@@ -280,8 +368,9 @@ struct AddActivityView: View {
             switch scheduleType {
             case .daily: schedule = .daily
             case .weekly: schedule = .weekly(Array(selectedWeekdays).sorted())
+            case .monthly: schedule = .monthly(Array(selectedMonthDays).sorted())
             case .sticky: schedule = .sticky
-            default: schedule = .daily
+            case .adhoc: schedule = .adhoc(adhocDate)
             }
         }
 
@@ -294,8 +383,11 @@ struct AddActivityView: View {
             timeWindow: TimeWindow(slot: selectedSlot),
             category: selectedCategory
         )
+        
+        activity.allowsPhoto = allowsPhoto
+        activity.allowsNotes = allowsNotes
 
-        // Type-specific config
+        // Configuration
         if selectedType == .value || selectedType == .cumulative {
             activity.unit = unit.isEmpty ? nil : unit
         }
@@ -303,12 +395,41 @@ struct AddActivityView: View {
             activity.targetValue = target
         }
 
-        // Parent relationship
+        // Parent
         if isSubActivity, let parent = selectedParent {
             activity.parent = parent
+        }
+
+        // Reminders
+        if enableReminder {
+            switch reminderType {
+            case .time:
+                let comps = Calendar.current.dateComponents([.hour, .minute], from: reminderTime)
+                activity.reminder = .remindAt(hour: comps.hour ?? 9, minute: comps.minute ?? 0)
+            case .morning:
+                activity.reminder = .morningNudge
+            case .evening:
+                activity.reminder = .eveningCheckIn
+            case .periodic:
+                activity.reminder = .periodic(hours: periodicInterval)
+            }
+        } else {
+            activity.reminder = .none
+        }
+
+        // HealthKit
+        if enableHealthKit {
+            activity.healthKitTypeID = hkType
+            activity.healthKitModeRaw = hkMode
         }
 
         modelContext.insert(activity)
         dismiss()
     }
+}
+
+// Helper Enums for UI state
+enum ReminderType: String, CaseIterable, Identifiable {
+    case time, morning, evening, periodic
+    var id: String { rawValue }
 }

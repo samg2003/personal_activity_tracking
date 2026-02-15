@@ -7,10 +7,29 @@ struct EncouragementBanner: View {
     let overallScore: Double
 
     private var message: String {
-        if overallScore >= 0.9 { return "Outstanding consistency! Keep it up! 🏆" }
-        if overallScore >= 0.7 { return "Great momentum! You're building solid habits 💪" }
-        if overallScore >= 0.5 { return "Halfway there! Every check counts 🎯" }
-        return "Small steps lead to big changes. Start today! 🌱"
+        // Smart Suggestion Logic
+        let hour = Calendar.current.component(.hour, from: Date())
+        
+        // Morning (6-11 AM)
+        if hour >= 6 && hour < 12 {
+            if overallScore < 0.3 { return "Start small. A 5-minute win clears the path 🌅" }
+            return "Good morning! Attack the day ☀️"
+        }
+        
+        // Afternoon (12-5 PM)
+        if hour >= 12 && hour < 17 {
+            if overallScore < 0.5 { return "Still plenty of time to turn the day around 🚀" }
+            return "Keep the momentum going! 🔥"
+        }
+        
+        // Evening (5-9 PM)
+        if hour >= 17 && hour < 21 {
+            return "Evening routine coming up. Finish strong! 🌙"
+        }
+        
+        // Night (9 PM+)
+        if overallScore >= 0.9 { return "You crushed it today! Rest well 😴" }
+        return "Reflect and recharge. Tomorrow is a new start 🌱"
     }
 
     var body: some View {
