@@ -12,6 +12,9 @@ struct ActivityAnalyticsView: View {
         case day = "Day"
         case week = "Week"
         case month = "Month"
+        case halfYear = "6M"
+        case year = "1Y"
+        case threeYear = "3Y"
     }
 
     @State private var selectedRange: TimeRange = .week
@@ -204,6 +207,9 @@ struct ActivityAnalyticsView: View {
         case .day: return dailyBars()
         case .week: return weeklyBars()
         case .month: return monthlyBars()
+        case .halfYear: return weeklyAggregatedBars(weeks: 26)
+        case .year: return weeklyAggregatedBars(weeks: 52)
+        case .threeYear: return weeklyAggregatedBars(weeks: 156)
         }
     }
 
@@ -224,6 +230,13 @@ struct ActivityAnalyticsView: View {
             let formatter = DateFormatter()
             formatter.dateFormat = "MMMM yyyy"
             return formatter.string(from: base)
+        case .halfYear, .year, .threeYear:
+            let weeks = selectedRange == .halfYear ? 26 : (selectedRange == .year ? 52 : 156)
+            let end = calendar.date(byAdding: .weekOfYear, value: offset * weeks, to: Date().startOfDay)!
+            let start = calendar.date(byAdding: .weekOfYear, value: -(weeks - 1), to: end)!
+            let fmt = DateFormatter()
+            fmt.dateFormat = "MMM yyyy"
+            return "\(fmt.string(from: start)) – \(fmt.string(from: end))"
         }
     }
 
@@ -265,6 +278,42 @@ struct ActivityAnalyticsView: View {
                 label: "\(dayNum)",
                 value: value,
                 date: day
+            )
+        }
+    }
+
+    /// Wider ranges: each bar = 1 week aggregate
+    private func weeklyAggregatedBars(weeks: Int) -> [BarChartView.BarData] {
+        let today = Date().startOfDay
+        let endAnchor = calendar.date(byAdding: .weekOfYear, value: offset * weeks, to: today)!
+        let fmt = DateFormatter()
+        fmt.dateFormat = "M/d"
+
+        return (0..<weeks).reversed().map { weekOffset in
+            let weekEnd = calendar.date(byAdding: .weekOfYear, value: -weekOffset, to: endAnchor)!
+            let weekStart = calendar.date(byAdding: .day, value: -6, to: weekEnd)!
+
+            let days = (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: weekStart) }
+            let values = days.map { valueForDay($0) }
+
+            let aggregate: Double
+            switch activity.type {
+            case .checkbox:
+                aggregate = values.reduce(0, +) // total completions in week
+            case .value, .metric:
+                let nonZero = values.filter { $0 > 0 }
+                aggregate = nonZero.isEmpty ? 0 : nonZero.reduce(0, +) / Double(nonZero.count) // weekly avg
+            case .cumulative:
+                aggregate = values.reduce(0, +) // weekly sum
+            case .container:
+                let nonZero = values.filter { $0 > 0 }
+                aggregate = nonZero.isEmpty ? 0 : nonZero.reduce(0, +) / Double(nonZero.count) // avg %
+            }
+
+            return BarChartView.BarData(
+                label: fmt.string(from: weekStart),
+                value: aggregate,
+                date: weekStart
             )
         }
     }
@@ -336,14 +385,26 @@ struct ActivityAnalyticsView: View {
                 // Streak Card
                 streakCard
 
-                // Range Picker
-                Picker("Range", selection: $selectedRange) {
-                    ForEach(TimeRange.allCases, id: \.self) { range in
-                        Text(range.rawValue).tag(range)
+                // Range Picker (capsule buttons for 6 options)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(TimeRange.allCases, id: \.self) { range in
+                            Button {
+                                selectedRange = range
+                                offset = 0
+                            } label: {
+                                Text(range.rawValue)
+                                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(selectedRange == range ? Color(hex: activity.hexColor) : Color(.tertiarySystemBackground))
+                                    .foregroundStyle(selectedRange == range ? .white : .primary)
+                                    .clipShape(Capsule())
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                 }
-                .pickerStyle(.segmented)
-                .onChange(of: selectedRange) { _, _ in offset = 0 }
 
                 // Bar Chart
                 BarChartView(

@@ -10,19 +10,30 @@ struct ValueChartView: View {
         case week = "7D"
         case month = "30D"
         case quarter = "90D"
+        case halfYear = "6M"
+        case year = "1Y"
+        case threeYear = "3Y"
+
+        var days: Int {
+            switch self {
+            case .week: return 7
+            case .month: return 30
+            case .quarter: return 90
+            case .halfYear: return 180
+            case .year: return 365
+            case .threeYear: return 1095
+            }
+        }
+
+        var useWeeklyAggregation: Bool {
+            self == .halfYear || self == .year || self == .threeYear
+        }
     }
 
     @State private var selectedRange: TimeRange = .month
 
     private var filteredLogs: [ActivityLog] {
-        let days: Int
-        switch selectedRange {
-        case .week: days = 7
-        case .month: days = 30
-        case .quarter: days = 90
-        }
-
-        let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? Date()
+        let cutoff = Calendar.current.date(byAdding: .day, value: -selectedRange.days, to: Date()) ?? Date()
         return logs
             .filter {
                 $0.activity?.id == activity.id
@@ -33,7 +44,15 @@ struct ValueChartView: View {
             .sorted { $0.date < $1.date }
     }
 
-    /// Aggregate daily values (sum for cumulative, latest for value type)
+    /// Data points: daily for short ranges, weekly-aggregated for 6M+
+    private var chartPoints: [(date: Date, value: Double)] {
+        if selectedRange.useWeeklyAggregation {
+            return weeklyPoints
+        }
+        return dailyPoints
+    }
+
+    /// Aggregate daily values
     private var dailyPoints: [(date: Date, value: Double)] {
         let grouped = Dictionary(grouping: filteredLogs) { $0.date.startOfDay }
         return grouped.map { (date, dayLogs) in
@@ -48,11 +67,30 @@ struct ValueChartView: View {
         .sorted { $0.date < $1.date }
     }
 
-    private var maxValue: Double { dailyPoints.map(\.value).max() ?? 1 }
-    private var minValue: Double { dailyPoints.map(\.value).min() ?? 0 }
+    /// Weekly-aggregated points for wider ranges
+    private var weeklyPoints: [(date: Date, value: Double)] {
+        let calendar = Calendar.current
+        let grouped = Dictionary(grouping: filteredLogs) { log in
+            calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: log.date))!
+        }
+        return grouped.map { (weekStart, weekLogs) in
+            let value: Double
+            if activity.type == .cumulative {
+                value = weekLogs.reduce(0) { $0 + ($1.value ?? 0) }
+            } else {
+                let values = weekLogs.compactMap(\.value)
+                value = values.isEmpty ? 0 : values.reduce(0, +) / Double(values.count)
+            }
+            return (weekStart, value)
+        }
+        .sorted { $0.date < $1.date }
+    }
+
+    private var maxValue: Double { chartPoints.map(\.value).max() ?? 1 }
+    private var minValue: Double { chartPoints.map(\.value).min() ?? 0 }
     private var avgValue: Double {
-        guard !dailyPoints.isEmpty else { return 0 }
-        return dailyPoints.map(\.value).reduce(0, +) / Double(dailyPoints.count)
+        guard !chartPoints.isEmpty else { return 0 }
+        return chartPoints.map(\.value).reduce(0, +) / Double(chartPoints.count)
     }
 
     var body: some View {
@@ -65,16 +103,28 @@ struct ValueChartView: View {
                     .font(.subheadline.bold())
                 Spacer()
 
-                Picker("Range", selection: $selectedRange) {
-                    ForEach(TimeRange.allCases, id: \.self) { range in
-                        Text(range.rawValue).tag(range)
+                // Range picker (capsule buttons)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 4) {
+                        ForEach(TimeRange.allCases, id: \.self) { range in
+                            Button {
+                                selectedRange = range
+                            } label: {
+                                Text(range.rawValue)
+                                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(selectedRange == range ? Color(hex: activity.hexColor) : Color(.tertiarySystemBackground))
+                                    .foregroundStyle(selectedRange == range ? .white : .primary)
+                                    .clipShape(Capsule())
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                 }
-                .pickerStyle(.segmented)
-                .frame(width: 160)
             }
 
-            if dailyPoints.isEmpty {
+            if chartPoints.isEmpty {
                 Text("No data yet")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
@@ -99,8 +149,8 @@ struct ValueChartView: View {
 
                         // Line path
                         Path { path in
-                            for (i, point) in dailyPoints.enumerated() {
-                                let x = dailyPoints.count == 1 ? w / 2 : w * CGFloat(i) / CGFloat(dailyPoints.count - 1)
+                            for (i, point) in chartPoints.enumerated() {
+                                let x = chartPoints.count == 1 ? w / 2 : w * CGFloat(i) / CGFloat(chartPoints.count - 1)
                                 let y = h - CGFloat((point.value - minValue) / effectiveRange) * h
 
                                 if i == 0 { path.move(to: CGPoint(x: x, y: y)) }
@@ -110,8 +160,8 @@ struct ValueChartView: View {
                         .stroke(Color(hex: activity.hexColor), lineWidth: 2)
 
                         // Dots
-                        ForEach(Array(dailyPoints.enumerated()), id: \.offset) { i, point in
-                            let x = dailyPoints.count == 1 ? w / 2 : w * CGFloat(i) / CGFloat(dailyPoints.count - 1)
+                        ForEach(Array(chartPoints.enumerated()), id: \.offset) { i, point in
+                            let x = chartPoints.count == 1 ? w / 2 : w * CGFloat(i) / CGFloat(chartPoints.count - 1)
                             let y = h - CGFloat((point.value - minValue) / effectiveRange) * h
                             Circle()
                                 .fill(Color(hex: activity.hexColor))

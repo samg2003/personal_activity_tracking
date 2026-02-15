@@ -28,4 +28,10 @@ extension Date {
         formatter.dateFormat = "EEEE, MMM d"
         return formatter.string(from: self)
     }
+
+    var shortWeekday: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEE"
+        return formatter.string(from: self)
+    }
 }

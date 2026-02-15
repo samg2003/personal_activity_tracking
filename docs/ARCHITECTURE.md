@@ -191,14 +191,14 @@ enum ReminderPreset: Codable {
 
 ## Services (Protocol-Based)
 
-| Service                 | Responsibility                                 | Dependency          |
-| ----------------------- | ---------------------------------------------- | ------------------- |
-| **ScheduleEngine**      | `shouldShow(activity, on: date) → Bool`        | Activity, Calendar  |
-| **AnalyticsEngine**     | Streaks, scores, heatmap data, insight summary | ActivityLog         |
-| **HealthKitService**    | Read/write HK, observe changes                 | HealthKit framework |
-| **NotificationService** | Schedule/cancel local notifications            | UserNotifications   |
-| **CalendarService**     | Create/read EventKit events                    | EventKit            |
-| **MediaService**        | Save/load photos, cleanup orphans              | FileManager         |
+| Service                 | Responsibility                                                      | Dependency                      |
+| ----------------------- | ------------------------------------------------------------------- | ------------------------------- |
+| **ScheduleEngine**      | `shouldShow`, `activitiesForToday`, carry-forward missed activities | Activity, ActivityLog, Calendar |
+| **AnalyticsEngine**     | Streaks, scores, heatmap data, insight summary                      | ActivityLog                     |
+| **HealthKitService**    | Read/write HK, observe changes                                      | HealthKit framework             |
+| **NotificationService** | Schedule/cancel local notifications                                 | UserNotifications               |
+| **CalendarService**     | Create/read EventKit events                                         | EventKit                        |
+| **MediaService**        | Save/load photos, cleanup orphans                                   | FileManager                     |
 
 Each service is defined as a **protocol** with a concrete implementation. ViewModels receive services via init injection → easily mockable for tests.
 

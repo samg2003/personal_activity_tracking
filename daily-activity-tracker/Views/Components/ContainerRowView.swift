@@ -4,6 +4,7 @@ import SwiftUI
 struct ContainerRowView: View {
     let activity: Activity
     let todayLogs: [ActivityLog]
+    let allLogs: [ActivityLog]
     let scheduleEngine: ScheduleEngineProtocol
     let today: Date
     let allActivities: [Activity]
@@ -18,10 +19,20 @@ struct ContainerRowView: View {
 
     private static let skipReasons = ["Injury", "Weather", "Sick", "Not Feeling Well", "Other"]
 
-    /// Children that should appear today, optionally filtered by time slot
+    /// Children that should appear today, including carry-forward from missed days
     private var todayChildren: [Activity] {
-        let base = activity.historicalChildren(on: today, from: allActivities)
-            .filter { scheduleEngine.shouldShow($0, on: today) }
+        let allChildren = activity.historicalChildren(on: today, from: allActivities)
+        // Normally scheduled children
+        var base = allChildren.filter { scheduleEngine.shouldShow($0, on: today) }
+
+        // Add carry-forward children (missed from previous scheduled days)
+        let baseIDs = Set(base.map { $0.id })
+        let carryForward = allChildren.filter { child in
+            !baseIDs.contains(child.id)
+            && !child.isArchived
+            && scheduleEngine.carriedForwardDate(for: child, on: today, logs: allLogs) != nil
+        }
+        base.append(contentsOf: carryForward)
 
         let filtered: [Activity]
         if let slot = slotFilter {
@@ -36,6 +47,10 @@ struct ContainerRowView: View {
         }
 
         return filtered.sorted { $0.sortOrder < $1.sortOrder }
+    }
+
+    private func isChildCarriedForward(_ child: Activity) -> Bool {
+        scheduleEngine.carriedForwardDate(for: child, on: today, logs: allLogs) != nil
     }
 
     /// Partial completion score based on children (equal weight)
@@ -187,11 +202,26 @@ struct ContainerRowView: View {
                     ForEach(pendingChildren) { child in
                         HStack {
                             Rectangle()
-                                .fill(Color(hex: activity.hexColor).opacity(0.3))
+                                .fill(isChildCarriedForward(child)
+                                      ? Color.red.opacity(0.5)
+                                      : Color(hex: activity.hexColor).opacity(0.3))
                                 .frame(width: 2)
                                 .padding(.leading, 20)
 
                             childRow(child)
+                                .overlay(alignment: .topTrailing) {
+                                    if let dueDate = scheduleEngine.carriedForwardDate(for: child, on: today, logs: allLogs),
+                                       !isChildCompleted(child), !isChildSkipped(child) {
+                                        Text("⏳ Due \(dueDate.shortWeekday)")
+                                            .font(.system(size: 8, weight: .semibold, design: .rounded))
+                                            .foregroundStyle(.red)
+                                            .padding(.horizontal, 5)
+                                            .padding(.vertical, 1)
+                                            .background(Color.red.opacity(0.12))
+                                            .clipShape(Capsule())
+                                            .offset(y: -2)
+                                    }
+                                }
                         }
                     }
                     

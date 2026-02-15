@@ -41,7 +41,7 @@ struct DashboardView: View {
     private var today: Date { selectedDate }
 
     private var todayActivities: [Activity] {
-        scheduleEngine.activitiesForToday(from: allActivities, on: today, vacationDays: vacationDays)
+        scheduleEngine.activitiesForToday(from: allActivities, on: today, vacationDays: vacationDays, logs: allLogs)
     }
 
     private var todayLogs: [ActivityLog] {
@@ -552,6 +552,7 @@ struct DashboardView: View {
                 ContainerRowView(
                     activity: activity,
                     todayLogs: todayLogs,
+                    allLogs: allLogs,
                     scheduleEngine: scheduleEngine,
                     today: today,
                     allActivities: allActivities,
@@ -561,6 +562,23 @@ struct DashboardView: View {
                 )
             }
         }
+        .overlay(alignment: .topTrailing) {
+            if let dueDate = carriedForwardOriginalDate(activity),
+               !isFullyCompleted(activity), !isSkipped(activity) {
+                Text("⏳ Due \(dueDate.shortWeekday)")
+                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.red)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.red.opacity(0.12))
+                    .clipShape(Capsule())
+                    .offset(y: -2)
+            }
+        }
+    }
+
+    private func carriedForwardOriginalDate(_ activity: Activity) -> Date? {
+        scheduleEngine.carriedForwardDate(for: activity, on: today, logs: allLogs)
     }
 
     // MARK: - Completion Logic

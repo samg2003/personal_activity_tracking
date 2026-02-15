@@ -169,6 +169,40 @@ struct GoalDetailView: View {
                 }
             }
 
+            // AVG progress rate
+            if sortedLogs.count >= 2,
+               let first = sortedLogs.first, let last = sortedLogs.last {
+                let daySpan = max(Calendar.current.dateComponents([.day], from: first.date, to: last.date).day ?? 1, 1)
+                let delta = (last.value ?? 0) - baseline
+
+                let (rate, unitLabel): (Double, String) = {
+                    if daySpan < 14 {
+                        return (delta / Double(daySpan), "/day")
+                    } else if daySpan < 90 {
+                        return (delta / (Double(daySpan) / 7.0), "/week")
+                    } else {
+                        return (delta / (Double(daySpan) / 30.44), "/month")
+                    }
+                }()
+
+                let isPositiveDirection = (link.metricDirection?.rawValue ?? "increase") == "increase"
+                let isGood = isPositiveDirection ? rate > 0 : rate < 0
+
+                HStack(spacing: 4) {
+                    Text("Avg Progress")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Image(systemName: rate >= 0 ? "arrow.up.right" : "arrow.down.right")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(isGood ? .green : .red)
+                    Text("\(formatMetric(abs(rate))) \(activity.unit ?? "")\(unitLabel)")
+                        .font(.caption.bold())
+                        .foregroundStyle(isGood ? .green : .red)
+                }
+                .padding(.top, 2)
+            }
+
             // Mini trendline
             if sortedLogs.count >= 2 {
                 trendline(values: sortedLogs.map { $0.value! }, color: Color(hex: goal.hexColor))
@@ -283,7 +317,7 @@ struct GoalDetailView: View {
 
     private var activitiesBreakdown: some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionLabel("7-Day Detail", icon: "calendar")
+            sectionLabel("14-Day Detail", icon: "calendar")
 
             let calendar = Calendar.current
             let today = Date().startOfDay
@@ -292,8 +326,8 @@ struct GoalDetailView: View {
             HStack(spacing: 0) {
                 Text("")
                     .frame(width: 100, alignment: .leading)
-                ForEach(0..<7, id: \.self) { offset in
-                    if let day = calendar.date(byAdding: .day, value: -(6 - offset), to: today) {
+                ForEach(0..<14, id: \.self) { offset in
+                    if let day = calendar.date(byAdding: .day, value: -(14 - offset), to: today) {
                         Text(dayLabel(day))
                             .font(.system(size: 9, weight: .medium, design: .rounded))
                             .foregroundStyle(.secondary)
@@ -318,8 +352,8 @@ struct GoalDetailView: View {
                         }
                         .frame(width: 100, alignment: .leading)
 
-                        ForEach(0..<7, id: \.self) { offset in
-                            if let day = calendar.date(byAdding: .day, value: -(6 - offset), to: today) {
+                        ForEach(0..<14, id: \.self) { offset in
+                            if let day = calendar.date(byAdding: .day, value: -(14 - offset), to: today) {
                                 dayCell(activity: activity, date: day)
                                     .frame(maxWidth: .infinity)
                             }
@@ -539,7 +573,7 @@ struct GoalDetailView: View {
         var completed = 0
         var expected = 0
 
-        for offset in 0..<7 {
+        for offset in 1..<15 {
             guard let day = calendar.date(byAdding: .day, value: -offset, to: today) else { continue }
             if vacationSet.contains(day) { continue }
             if day < activity.createdDate.startOfDay { continue }
@@ -591,7 +625,7 @@ struct GoalDetailView: View {
         var fullyCompleted = 0
         var expected = 0
 
-        for offset in 0..<7 {
+        for offset in 1..<15 {
             guard let day = calendar.date(byAdding: .day, value: -offset, to: today) else { continue }
             if vacationSet.contains(day) { continue }
             if day < container.createdDate.startOfDay { continue }

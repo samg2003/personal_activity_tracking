@@ -152,7 +152,7 @@ struct GoalsView: View {
             var completed = 0
             var expected = 0
 
-            for offset in 0..<7 {
+            for offset in 1..<15 {
                 guard let day = calendar.date(byAdding: .day, value: -offset, to: today) else { continue }
                 if vacationSet.contains(day) { continue }
                 if day < activity.createdDate.startOfDay { continue }

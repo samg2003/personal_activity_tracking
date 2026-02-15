@@ -36,11 +36,10 @@ struct HeatmapView: View {
                 dayLogs.contains { $0.activity?.id == activity.id && $0.status == .skipped }
             }.count
 
-            let hasSkipped = skippedCount > 0
-            // Denominator excludes skipped activities for accurate completion %
-            let effectiveTotal = applicable.count - skippedCount
-            let completion = effectiveTotal > 0 ? Double(completedCount) / Double(effectiveTotal) : (hasSkipped ? 1.0 : 0)
-            return DayCell(date: date, completion: completion, isVacation: isVacation, isSkippedDay: hasSkipped)
+            // Strict: yellow only if ALL applicable activities are skipped (and none completed)
+            let allSkipped = !applicable.isEmpty && skippedCount == applicable.count && completedCount == 0
+            let completion = applicable.isEmpty ? 0 : Double(completedCount) / Double(applicable.count)
+            return DayCell(date: date, completion: completion, isVacation: isVacation, isSkippedDay: allSkipped)
         }.reversed()
     }
 

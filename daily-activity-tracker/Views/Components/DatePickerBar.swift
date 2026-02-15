@@ -25,7 +25,7 @@ struct DatePickerBar: View {
     /// Compute completion fraction for a given date (0…1, or -1 if no activities)
     private func completionForDate(_ date: Date) -> Double {
         if date.startOfDay > Date().startOfDay { return -1 }
-        let scheduled = scheduleEngine.activitiesForToday(from: allActivities, on: date, vacationDays: vacationDays)
+        let scheduled = scheduleEngine.activitiesForToday(from: allActivities, on: date, vacationDays: vacationDays, logs: allLogs)
         guard !scheduled.isEmpty else { return -1 }
 
         let dayLogs = allLogs.filter { $0.date.isSameDay(as: date) }
