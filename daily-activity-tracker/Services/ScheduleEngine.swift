@@ -10,8 +10,13 @@ final class ScheduleEngine: ScheduleEngineProtocol {
 
     func shouldShow(_ activity: Activity, on date: Date) -> Bool {
         guard !activity.isArchived else { return false }
+        // Don't show activities before they were created
+        if date.startOfDay < activity.createdAt.startOfDay { return false }
+        // Stopped activities don't appear after their stop date
+        if let stopped = activity.stoppedAt, date.startOfDay > stopped { return false }
 
-        let schedule = activity.schedule
+        // Use version-appropriate schedule (snapshot for historical dates)
+        let schedule = activity.scheduleActive(on: date)
         switch schedule.type {
         case .daily:
             return true
@@ -22,14 +27,9 @@ final class ScheduleEngine: ScheduleEngineProtocol {
             guard let monthDays = schedule.monthDays else { return true }
             return monthDays.contains(date.dayOfMonth)
         case .sticky:
-            // Show until there's a completed log
             return !activity.logs.contains { $0.status == .completed }
         case .adhoc:
             guard let specificDate = schedule.specificDate else { return false }
-            // Show if it's the right day and not yet completed
-            // Show if it's the right day. 
-            // Completion status is handled by the UI (checked vs unchecked), 
-            // we don't hide it immediately upon completion.
             return date.isSameDay(as: specificDate)
         }
     }

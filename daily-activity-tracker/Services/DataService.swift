@@ -14,6 +14,7 @@ final class DataService {
         let activities: [ActivityDTO]
         let logs: [LogDTO]
         let vacationDays: [VacationDTO]
+        var configSnapshots: [ConfigSnapshotDTO]?
     }
     
     struct CategoryDTO: Codable {
@@ -32,6 +33,7 @@ final class DataService {
         let typeRaw: String
         let scheduleData: Data?
         let timeWindowData: Data?
+        let timeSlotsData: Data?
         let reminderData: Data?
         let targetValue: Double?
         let unit: String?
@@ -43,6 +45,7 @@ final class DataService {
         let createdAt: Date
         let categoryID: UUID?
         let parentID: UUID?
+        var stoppedAt: Date?
         
         // Advanced
         let healthKitTypeID: String?
@@ -57,12 +60,27 @@ final class DataService {
         let photoFilename: String?
         let note: String?
         let skipReason: String?
+        let timeSlotRaw: String?
         let completedAt: Date?
         let activityID: UUID
     }
     
     struct VacationDTO: Codable {
         let date: Date
+    }
+
+    struct ConfigSnapshotDTO: Codable {
+        let id: UUID
+        let activityID: UUID
+        let effectiveFrom: Date
+        let effectiveUntil: Date
+        let scheduleData: Data?
+        let timeWindowData: Data?
+        let timeSlotsData: Data?
+        let typeRaw: String
+        let targetValue: Double?
+        let unit: String?
+        let parentID: UUID?
     }
     
     // MARK: - Export
@@ -85,6 +103,7 @@ final class DataService {
                 typeRaw: $0.typeRaw,
                 scheduleData: $0.scheduleData,
                 timeWindowData: $0.timeWindowData,
+                timeSlotsData: $0.timeSlotsData,
                 reminderData: $0.reminderData,
                 targetValue: $0.targetValue,
                 unit: $0.unit,
@@ -96,6 +115,7 @@ final class DataService {
                 createdAt: $0.createdAt,
                 categoryID: $0.category?.id,
                 parentID: $0.parent?.id,
+                stoppedAt: $0.stoppedAt,
                 healthKitTypeID: $0.healthKitTypeID,
                 healthKitModeRaw: $0.healthKitModeRaw
             )
@@ -107,12 +127,31 @@ final class DataService {
                 id: log.id, date: log.date, statusRaw: log.statusRaw,
                 value: log.value, photoFilename: log.photoFilename,
                 note: log.note, skipReason: log.skipReason,
+                timeSlotRaw: log.timeSlotRaw,
                 completedAt: log.completedAt, activityID: actID
             )
         }
         
         let vacDTOs = vacationDays.map { VacationDTO(date: $0.date) }
-        
+
+        // Config Snapshots
+        let snapshots = try context.fetch(FetchDescriptor<ActivityConfigSnapshot>())
+        let snapDTOs = snapshots.compactMap { snap -> ConfigSnapshotDTO? in
+            guard let actID = snap.activity?.id else { return nil }
+            return ConfigSnapshotDTO(
+                id: snap.id, activityID: actID,
+                effectiveFrom: snap.effectiveFrom,
+                effectiveUntil: snap.effectiveUntil,
+                scheduleData: snap.scheduleData,
+                timeWindowData: snap.timeWindowData,
+                timeSlotsData: snap.timeSlotsData,
+                typeRaw: snap.typeRaw,
+                targetValue: snap.targetValue,
+                unit: snap.unit,
+                parentID: snap.parentID
+            )
+        }
+
         // Create Package
         let package = ExportPackage(
             version: "1.0",
@@ -120,7 +159,8 @@ final class DataService {
             categories: catDTOs,
             activities: actDTOs,
             logs: logDTOs,
-            vacationDays: vacDTOs
+            vacationDays: vacDTOs,
+            configSnapshots: snapDTOs
         )
         
         // Encode
@@ -156,6 +196,9 @@ final class DataService {
         
         let vacations = try context.fetch(FetchDescriptor<VacationDay>())
         for vacation in vacations { context.delete(vacation) }
+
+        let snapshots = try context.fetch(FetchDescriptor<ActivityConfigSnapshot>())
+        for snap in snapshots { context.delete(snap) }
         
         // Save to ensure clear state before insert
         try context.save()
@@ -179,6 +222,7 @@ final class DataService {
             act.id = dto.id
             act.scheduleData = dto.scheduleData
             act.timeWindowData = dto.timeWindowData
+            act.timeSlotsData = dto.timeSlotsData
             act.reminderData = dto.reminderData
             act.targetValue = dto.targetValue
             act.unit = dto.unit
@@ -188,6 +232,7 @@ final class DataService {
             act.sortOrder = dto.sortOrder
             act.isArchived = dto.isArchived
             act.createdAt = dto.createdAt
+            act.stoppedAt = dto.stoppedAt
             act.healthKitTypeID = dto.healthKitTypeID
             act.healthKitModeRaw = dto.healthKitModeRaw
             
@@ -214,6 +259,7 @@ final class DataService {
             log.photoFilename = dto.photoFilename
             log.note = dto.note
             log.skipReason = dto.skipReason
+            log.timeSlotRaw = dto.timeSlotRaw
             log.completedAt = dto.completedAt
             context.insert(log)
         }
@@ -223,7 +269,28 @@ final class DataService {
             let vac = VacationDay(date: dto.date)
             context.insert(vac)
         }
-        
+
+        // Insert Config Snapshots
+        if let snapDTOs = package.configSnapshots {
+            for dto in snapDTOs {
+                guard let act = activityMap[dto.activityID] else { continue }
+                let snap = ActivityConfigSnapshot(
+                    activity: act,
+                    effectiveFrom: dto.effectiveFrom,
+                    effectiveUntil: dto.effectiveUntil
+                )
+                snap.id = dto.id
+                snap.scheduleData = dto.scheduleData
+                snap.timeWindowData = dto.timeWindowData
+                snap.timeSlotsData = dto.timeSlotsData
+                snap.typeRaw = dto.typeRaw
+                snap.targetValue = dto.targetValue
+                snap.unit = dto.unit
+                snap.parentID = dto.parentID
+                context.insert(snap)
+            }
+        }
+
         try context.save()
     }
 }

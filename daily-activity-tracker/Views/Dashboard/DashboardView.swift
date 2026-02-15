@@ -62,6 +62,16 @@ struct DashboardView: View {
         }
     }
 
+    /// Activities that have at least one pending session (for multi-session grouping)
+    private var pendingTimedIncludingPartial: [Activity] {
+        todayActivities.filter { activity in
+            activity.schedule.type != .sticky
+            && !(activity.type == .cumulative && activity.timeWindow?.slot == .allDay)
+            && !isFullyCompleted(activity)
+            && !isSkipped(activity)
+        }
+    }
+
     private var stickyPending: [Activity] {
         todayActivities.filter { activity in
             activity.schedule.type == .sticky && !isFullyCompleted(activity) && !isSkipped(activity)
@@ -77,15 +87,45 @@ struct DashboardView: View {
     }
 
     private var completionFraction: Double {
-        let countable = todayActivities.filter { !isSkipped($0) }
-        guard !countable.isEmpty else { return 1.0 }
-        return Double(countable.filter { isFullyCompleted($0) }.count) / Double(countable.count)
+        // Multi-session activities count as N items (one per slot)
+        var total = 0
+        var done = 0
+        for activity in todayActivities {
+            if isSkipped(activity) { continue }
+            let sessions = activity.isMultiSession ? activity.timeSlots.count : 1
+            total += sessions
+            if isFullyCompleted(activity) {
+                done += sessions
+            } else if activity.isMultiSession {
+                // Count individually completed sessions
+                for slot in activity.timeSlots {
+                    if isSessionCompleted(activity, slot: slot) { done += 1 }
+                }
+            }
+        }
+        guard total > 0 else { return 1.0 }
+        return Double(done) / Double(total)
     }
 
     private var groupedBySlot: [(slot: TimeSlot, activities: [Activity])] {
-        let grouped = Dictionary(grouping: pendingTimed) { $0.timeWindow?.slot ?? .morning }
+        // Build slot→activities mapping, expanding multi-session activities
+        var slotMap: [TimeSlot: [Activity]] = [:]
+        for activity in pendingTimed {
+            if activity.isMultiSession {
+                for slot in activity.timeSlots {
+                    // Only include in this slot if the session isn't already completed/skipped
+                    if !isSessionCompleted(activity, slot: slot)
+                        && !isSessionSkipped(activity, slot: slot) {
+                        slotMap[slot, default: []].append(activity)
+                    }
+                }
+            } else {
+                let slot = activity.timeWindow?.slot ?? .morning
+                slotMap[slot, default: []].append(activity)
+            }
+        }
         return [TimeSlot.morning, .afternoon, .evening].compactMap { slot in
-            guard let acts = grouped[slot], !acts.isEmpty else { return nil }
+            guard let acts = slotMap[slot], !acts.isEmpty else { return nil }
             return (slot, acts)
         }
     }
@@ -296,7 +336,7 @@ struct DashboardView: View {
                 .buttonStyle(.plain)
 
                 ForEach(group.activities) { activity in
-                    activityView(for: activity)
+                    activityView(for: activity, inSlot: group.slot)
                 }
             }
         }
@@ -381,7 +421,7 @@ struct DashboardView: View {
                         Button {
                             unskipActivity(activity)
                         } label: {
-                            Text(activity.type == .container ? "Unskip All" : "Unskip")
+                            Text(activity.type == .container || activity.isMultiSession ? "Unskip All" : "Unskip")
                                 .font(.caption.bold())
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 4)
@@ -414,18 +454,35 @@ struct DashboardView: View {
 
     // MARK: - Type-Dispatched Row
 
+    /// Default rendering (no slot context) — used by backlog, completed, skipped sections
     @ViewBuilder
     private func activityView(for activity: Activity) -> some View {
+        activityView(for: activity, inSlot: nil)
+    }
+
+    /// Slot-aware rendering for time bucket sections
+    @ViewBuilder
+    private func activityView(for activity: Activity, inSlot slot: TimeSlot?) -> some View {
         Group {
             switch activity.type {
             case .checkbox:
-                ActivityRowView(
-                    activity: activity,
-                    isCompleted: isFullyCompleted(activity),
-                    isSkipped: isSkipped(activity),
-                    onComplete: { completeCheckbox(activity) },
-                    onSkip: { reason in skipActivity(activity, reason: reason) }
-                )
+                if activity.isMultiSession, let slot {
+                    ActivityRowView(
+                        activity: activity,
+                        isCompleted: isSessionCompleted(activity, slot: slot),
+                        isSkipped: isSessionSkipped(activity, slot: slot),
+                        onComplete: { completeCheckbox(activity, slot: slot) },
+                        onSkip: { reason in skipActivity(activity, reason: reason, slot: slot) }
+                    )
+                } else {
+                    ActivityRowView(
+                        activity: activity,
+                        isCompleted: isFullyCompleted(activity),
+                        isSkipped: isSkipped(activity),
+                        onComplete: { completeCheckbox(activity) },
+                        onSkip: { reason in skipActivity(activity, reason: reason) }
+                    )
+                }
             case .value:
                 ValueInputRow(
                     activity: activity,
@@ -461,6 +518,12 @@ struct DashboardView: View {
     private func isFullyCompleted(_ activity: Activity) -> Bool {
         switch activity.type {
         case .checkbox:
+            if activity.isMultiSession {
+                // ALL sessions must have a completion log
+                return activity.timeSlots.allSatisfy { slot in
+                    isSessionCompleted(activity, slot: slot)
+                }
+            }
             return todayLogs.contains { $0.activity?.id == activity.id && $0.status == .completed }
         case .value:
             return todayLogs.contains { $0.activity?.id == activity.id && $0.status == .completed }
@@ -468,7 +531,6 @@ struct DashboardView: View {
             guard let target = activity.targetValue, target > 0 else { return false }
             return cumulativeTotal(for: activity) >= target
         case .container:
-            // Container is complete if all today-applicable children are complete
             let applicable = activity.children.filter { scheduleEngine.shouldShow($0, on: today) }
             guard !applicable.isEmpty else { return true }
             return applicable.allSatisfy { isFullyCompleted($0) }
@@ -479,12 +541,31 @@ struct DashboardView: View {
         if activity.type == .container {
             let applicable = activity.children.filter { scheduleEngine.shouldShow($0, on: today) }
             guard !applicable.isEmpty else { return false }
-            // Container is skipped when ALL children are skipped (none pending, none completed-only)
             return applicable.allSatisfy { child in
                 todayLogs.contains { $0.activity?.id == child.id && $0.status == .skipped }
             }
         }
+        if activity.isMultiSession {
+            // Container-like: all sessions must be skipped
+            return activity.timeSlots.allSatisfy { slot in
+                isSessionSkipped(activity, slot: slot)
+            }
+        }
         return todayLogs.contains { $0.activity?.id == activity.id && $0.status == .skipped }
+    }
+
+    // MARK: - Session-Level Checks (multi-session)
+
+    private func isSessionCompleted(_ activity: Activity, slot: TimeSlot) -> Bool {
+        todayLogs.contains {
+            $0.activity?.id == activity.id && $0.status == .completed && $0.timeSlot == slot
+        }
+    }
+
+    private func isSessionSkipped(_ activity: Activity, slot: TimeSlot) -> Bool {
+        todayLogs.contains {
+            $0.activity?.id == activity.id && $0.status == .skipped && $0.timeSlot == slot
+        }
     }
 
     /// Checks whether a photo prompt should be triggered based on cadence
@@ -524,9 +605,40 @@ struct DashboardView: View {
         photoPromptActivity = activity
     }
 
-    private func completeCheckbox(_ activity: Activity) {
+    private func completeCheckbox(_ activity: Activity, slot: TimeSlot? = nil) {
+        // For multi-session with a slot, toggle that specific session
+        if let slot, activity.isMultiSession {
+            if isSessionCompleted(activity, slot: slot) {
+                // Uncomplete this session
+                if let log = todayLogs.first(where: {
+                    $0.activity?.id == activity.id && $0.status == .completed && $0.timeSlot == slot
+                }) {
+                    modelContext.delete(log)
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    showUndo("Uncompleted \(activity.name) (\(slot.displayName))") {
+                        let restored = ActivityLog(activity: activity, date: today, status: .completed)
+                        restored.timeSlotRaw = slot.rawValue
+                        modelContext.insert(restored)
+                    }
+                }
+                return
+            }
+            let log = ActivityLog(activity: activity, date: today, status: .completed)
+            log.timeSlotRaw = slot.rawValue
+            modelContext.insert(log)
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+
+            if activity.allowsPhoto && isPhotoDue(for: activity) {
+                triggerPhotoPrompt(for: activity, log: log)
+            }
+            showUndo("Completed \(activity.name) (\(slot.displayName))") { [log] in
+                modelContext.delete(log)
+            }
+            return
+        }
+
+        // Single-session (original logic)
         if isFullyCompleted(activity) {
-            // Uncomplete: delete the completion log
             if let log = todayLogs.first(where: { $0.activity?.id == activity.id && $0.status == .completed }) {
                 modelContext.delete(log)
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -542,11 +654,9 @@ struct DashboardView: View {
         modelContext.insert(log)
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         
-        // Integrations
         NotificationService.shared.cancelReminders(for: activity.id)
         writeToHealthKit(activity: activity, value: 1.0)
         
-        // Photo cadence check
         if activity.allowsPhoto && isPhotoDue(for: activity) {
             triggerPhotoPrompt(for: activity, log: log)
         }
@@ -623,13 +733,25 @@ struct DashboardView: View {
         }
     }
 
-    private func skipActivity(_ activity: Activity, reason: String) {
+    private func skipActivity(_ activity: Activity, reason: String, slot: TimeSlot? = nil) {
+        // For multi-session with a slot, skip that specific session
+        if let slot, activity.isMultiSession {
+            guard !isSessionSkipped(activity, slot: slot) && !isSessionCompleted(activity, slot: slot) else { return }
+            let log = ActivityLog(activity: activity, date: today, status: .skipped)
+            log.skipReason = reason
+            log.timeSlotRaw = slot.rawValue
+            modelContext.insert(log)
+            showUndo("Skipped \(activity.name) (\(slot.displayName))") { [log] in
+                modelContext.delete(log)
+            }
+            return
+        }
+
         guard !isSkipped(activity) && !isFullyCompleted(activity) else { return }
         let log = ActivityLog(activity: activity, date: today, status: .skipped)
         log.skipReason = reason
         modelContext.insert(log)
         
-        // Integrations
         NotificationService.shared.cancelReminders(for: activity.id)
         
         showUndo("Skipped \(activity.name)") { [log] in
@@ -639,7 +761,6 @@ struct DashboardView: View {
 
     private func unskipActivity(_ activity: Activity) {
         if activity.type == .container {
-            // Unskip all children
             let applicable = activity.children.filter { scheduleEngine.shouldShow($0, on: today) }
             for child in applicable {
                 if let skipLog = todayLogs.first(where: {
@@ -648,6 +769,14 @@ struct DashboardView: View {
                     modelContext.delete(skipLog)
                 }
             }
+            return
+        }
+        if activity.isMultiSession {
+            // Delete all slot-specific skip logs
+            let skipLogs = todayLogs.filter {
+                $0.activity?.id == activity.id && $0.status == .skipped
+            }
+            for log in skipLogs { modelContext.delete(log) }
             return
         }
         guard let skipLog = todayLogs.first(where: {

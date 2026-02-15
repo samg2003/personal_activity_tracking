@@ -13,7 +13,8 @@ The root of the JSON file is an object containing arrays for `categories`, `acti
   "categories": [ ... ],
   "activities": [ ... ],
   "logs": [ ... ],
-  "vacationDays": [ ... ]
+  "vacationDays": [ ... ],
+  "configSnapshots": [ ... ]
 }
 ```
 
@@ -69,7 +70,13 @@ Defines the trackers themselves.
   "scheduleData": "BASE64-ENCODED-JSON-STRING",
   
   // Encoded TimeWindow (Optional)
-  "timeWindowData": "BASE64-ENCODED-JSON-STRING"
+  "timeWindowData": "BASE64-ENCODED-JSON-STRING",
+  
+  // Encoded [TimeSlot] array for multi-session activities (Optional)
+  "timeSlotsData": "BASE64-ENCODED-JSON-STRING",
+  
+  // Optional: date when tracking was stopped
+  "stoppedAt": "2026-06-01T00:00:00Z"
 }
 ```
 
@@ -94,17 +101,19 @@ Records of activity completion.
   "value": 500,
   "completedAt": "2026-02-15T08:30:00Z",
   "photoFilename": null,
-  "skipReason": null
+  "skipReason": null,
+  "timeSlotRaw": "morning"
 }
 ```
 
-| Field         | Type    | Description                                          |
-| :------------ | :------ | :--------------------------------------------------- |
-| `activityID`  | UUID    | ID of the parent activity.                           |
-| `date`        | ISO8601 | The "Day" of the log (usually 00:00:00 time).        |
-| `statusRaw`   | String  | `"completed"` or `"skipped"`.                        |
-| `value`       | Double  | (Optional) Numeric value for value/cumulative types. |
-| `completedAt` | ISO8601 | (Optional) Exact timestamp of completion.            |
+| Field         | Type    | Description                                                       |
+| :------------ | :------ | :---------------------------------------------------------------- |
+| `activityID`  | UUID    | ID of the parent activity.                                        |
+| `date`        | ISO8601 | The "Day" of the log (usually 00:00:00 time).                     |
+| `statusRaw`   | String  | `"completed"` or `"skipped"`.                                     |
+| `value`       | Double  | (Optional) Numeric value for value/cumulative types.              |
+| `completedAt` | ISO8601 | (Optional) Exact timestamp of completion.                         |
+| `timeSlotRaw` | String  | (Optional) Session slot: `"morning"`, `"afternoon"`, `"evening"`. |
 
 ---
 
@@ -130,3 +139,31 @@ To bulk-import data from another system (like a CSV):
 5.  **Import** the modified JSON file back into the app.
 
 > **Warning**: The Import function creates a **Clean State** before importing. All existing data on the device will be replaced by the contents of the import file.
+
+---
+
+## 5. Config Snapshots
+
+Preserves historical activity config when "Future Only" edits are made.
+
+```json
+{
+  "id": "UUID-STRING",
+  "activityID": "UUID-OF-ACTIVITY",
+  "effectiveFrom": "2026-01-01T00:00:00Z",
+  "effectiveUntil": "2026-03-14T00:00:00Z",
+  "scheduleData": "BASE64-ENCODED-JSON",
+  "timeWindowData": "BASE64-ENCODED-JSON",
+  "timeSlotsData": "BASE64-ENCODED-JSON",
+  "typeRaw": "checkbox",
+  "targetValue": null,
+  "unit": null,
+  "parentID": "UUID-OF-CONTAINER-OR-NULL"
+}
+```
+
+| Field            | Type    | Description                                                  |
+| :--------------- | :------ | :----------------------------------------------------------- |
+| `effectiveFrom`  | ISO8601 | Start of this config period.                                 |
+| `effectiveUntil` | ISO8601 | End of this config period (day before the edit took effect). |
+| `parentID`       | UUID    | (Optional) Container this activity belonged to at the time.  |

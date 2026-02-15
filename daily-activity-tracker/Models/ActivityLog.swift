@@ -10,6 +10,7 @@ final class ActivityLog {
     var photoFilename: String?
     var note: String?
     var skipReason: String?
+    var timeSlotRaw: String?
     var completedAt: Date?
 
     var activity: Activity?
@@ -17,6 +18,12 @@ final class ActivityLog {
     var status: LogStatus {
         get { LogStatus(rawValue: statusRaw) ?? .completed }
         set { statusRaw = newValue.rawValue }
+    }
+
+    /// Which time slot this log applies to (nil = single-session / legacy)
+    var timeSlot: TimeSlot? {
+        get { timeSlotRaw.flatMap { TimeSlot(rawValue: $0) } }
+        set { timeSlotRaw = newValue?.rawValue }
     }
 
     init(

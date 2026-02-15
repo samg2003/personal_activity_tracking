@@ -38,9 +38,10 @@ struct AnalyticsView: View {
             day = prev
         }
         
-        // Loop backwards in time
-        // Safety limit: 3650 days (10 years) to avoid infinite loops if glitches occur
         for _ in 0..<3650 {
+            // Skip days after activity was stopped
+            if let stopped = activity.stoppedAt, day > stopped { break }
+
             if completedDates.contains(day) {
                 streak += 1
             } else if vacationDays.contains(where: { $0.date.isSameDay(as: day) }) {
@@ -162,21 +163,29 @@ struct AnalyticsView: View {
         let calendar = Calendar.current
         let today = Date().startOfDay
         let vacationDateSet = Set(vacationDays.map { $0.date.startOfDay })
-        
-        // Count non-vacation days in last 7
-        let eligibleDays = (0..<7).filter { offset in
-            guard let d = calendar.date(byAdding: .day, value: -offset, to: today) else { return false }
-            return !vacationDateSet.contains(d)
-        }.count
-        
-        guard eligibleDays > 0 else { return 0 }
-        
         let cutoff = calendar.date(byAdding: .day, value: -7, to: today)!
-        let relevantCount = logs.filter {
-            $0.status == .completed && $0.date > cutoff &&
-            !vacationDateSet.contains($0.date.startOfDay)
-        }.count
-        return Double(relevantCount) / Double(eligibleDays)
+
+        var totalExpected = 0
+        var totalCompleted = 0
+
+        for offset in 0..<7 {
+            guard let day = calendar.date(byAdding: .day, value: -offset, to: today) else { continue }
+            if vacationDateSet.contains(day) { continue }
+            // Skip days after activity was stopped
+            if let stopped = activity.stoppedAt, day > stopped { continue }
+
+            // Use version-appropriate sessions for this day
+            let sessions = activity.sessionsPerDay(on: day)
+            totalExpected += sessions
+
+            let dayCompleted = logs.filter {
+                $0.status == .completed && $0.date.startOfDay == day
+            }.count
+            totalCompleted += min(dayCompleted, sessions)
+        }
+
+        guard totalExpected > 0 else { return 0 }
+        return Double(totalCompleted) / Double(totalExpected)
     }
 
     private var doingWell: [Activity] {

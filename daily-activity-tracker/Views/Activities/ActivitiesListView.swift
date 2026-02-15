@@ -13,6 +13,15 @@ struct ActivitiesListView: View {
     @State private var showDeleteAlert = false
     @State private var showAddSheet = false
     @State private var expandedContainers: Set<UUID> = []
+    @State private var removeTarget: Activity?
+    @State private var showRemoveDialog = false
+
+    // Inline quick-add state
+    @State private var inlineText = ""
+    @State private var inlineIsContainer = false
+    @State private var inlineContainerText: [UUID: String] = [:]
+    @FocusState private var inlineFocusedSection: UUID?
+    @FocusState private var inlineFocusedContainer: UUID?
 
     // Top-level activities only (not children of containers)
     private var topLevelActivities: [Activity] {
@@ -57,10 +66,27 @@ struct ActivitiesListView: View {
                 ForEach(groupedByCategory, id: \.category?.id) { group in
                     Section {
                         ForEach(group.activities) { activity in
-                            activityRow(activity)
+                            if activity.type == .container {
+                                containerSection(activity)
+                            } else {
+                                standaloneActivityRow(activity)
+                            }
                         }
+
+                        // Inline quick-add at bottom of section
+                        inlineAddRow(category: group.category)
                     } header: {
                         categoryHeader(group.category)
+                    }
+                }
+
+                // If no groups exist, still show a quick-add row
+                if groupedByCategory.isEmpty {
+                    Section {
+                        inlineAddRow(category: nil)
+                    } header: {
+                        Text("GET STARTED")
+                            .font(.system(size: 12, weight: .bold, design: .rounded))
                     }
                 }
 
@@ -90,6 +116,19 @@ struct ActivitiesListView: View {
                                             .foregroundStyle(.blue)
                                     }
                                     .buttonStyle(.plain)
+                                }
+                                .contextMenu {
+                                    Button {
+                                        activity.isArchived = false
+                                    } label: {
+                                        Label("Unarchive", systemImage: "tray.and.arrow.up")
+                                    }
+
+                                    Button(role: .destructive) {
+                                        initiateDelete(activity)
+                                    } label: {
+                                        Label("Delete Permanently", systemImage: "trash")
+                                    }
                                 }
                             }
                         } label: {
@@ -125,103 +164,241 @@ struct ActivitiesListView: View {
             } message: {
                 deleteAlertMessage
             }
-        }
-    }
-
-    // MARK: - Row
-
-    @ViewBuilder
-    private func activityRow(_ activity: Activity) -> some View {
-        VStack(spacing: 0) {
-            activityRowContent(activity)
-                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                    Button(role: .destructive) {
-                        initiateDelete(activity)
-                    } label: {
-                        Label("Delete", systemImage: "trash")
+            .confirmationDialog(
+                "Remove from Container",
+                isPresented: $showRemoveDialog,
+                titleVisibility: .visible
+            ) {
+                Button("Future Only") {
+                    if let child = removeTarget {
+                        // Snapshot old parent, then archive
+                        let snap = ActivityConfigSnapshot(
+                            activity: child,
+                            effectiveFrom: child.configSnapshots
+                                .compactMap { $0.effectiveUntil }
+                                .max()
+                                .map { Calendar.current.date(byAdding: .day, value: 1, to: $0) ?? $0 }
+                                ?? child.createdAt,
+                            effectiveUntil: Calendar.current.date(byAdding: .day, value: -1, to: Date().startOfDay) ?? Date().startOfDay
+                        )
+                        modelContext.insert(snap)
+                        child.parent = nil
+                        child.isArchived = true
                     }
                 }
-                .contextMenu {
-                    Button {
-                        editingActivity = activity
-                    } label: {
-                        Label("Edit", systemImage: "pencil")
-                    }
-
-                    if activity.type == .container {
-                        Button {
-                            cascadeAppearance(activity)
-                        } label: {
-                            Label("Apply Style to Children", systemImage: "paintbrush")
-                        }
-                    }
-
-                    Divider()
-
-                    Button {
-                        activity.isArchived = true
-                    } label: {
-                        Label("Archive", systemImage: "archivebox")
-                    }
-
-                    Button(role: .destructive) {
-                        initiateDelete(activity)
-                    } label: {
-                        Label("Delete", systemImage: "trash")
+                Button("Remove Everywhere", role: .destructive) {
+                    if let child = removeTarget {
+                        modelContext.delete(child)
                     }
                 }
-
-            // Collapsible children for containers
-            if activity.type == .container && expandedContainers.contains(activity.id) {
-                let children = activity.children.sorted { $0.sortOrder < $1.sortOrder }
-                ForEach(children) { child in
-                    HStack(spacing: 0) {
-                        Rectangle()
-                            .fill(Color(hex: activity.hexColor).opacity(0.3))
-                            .frame(width: 3)
-                            .padding(.leading, 12)
-
-                        Button {
-                            editingActivity = child
-                        } label: {
-                            HStack(spacing: 10) {
-                                Image(systemName: child.icon)
-                                    .font(.system(size: 13))
-                                    .foregroundStyle(Color(hex: child.hexColor))
-                                    .frame(width: 22)
-
-                                Text(child.name)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.primary)
-
-                                Spacer()
-
-                                infoTags(for: child)
-                            }
-                            .padding(.vertical, 6)
-                            .padding(.horizontal, 10)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("\"Future Only\" archives the activity (past data preserved). \"Remove Everywhere\" deletes it and all logs.")
             }
         }
     }
 
+    // MARK: - Container Section (Header Style)
+
     @ViewBuilder
-    private func activityRowContent(_ activity: Activity) -> some View {
+    private func containerSection(_ container: Activity) -> some View {
+        // Header row — styled as section divider
         Button {
-            if activity.type == .container {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    if expandedContainers.contains(activity.id) {
-                        expandedContainers.remove(activity.id)
-                    } else {
-                        expandedContainers.insert(activity.id)
+            withAnimation(.easeInOut(duration: 0.2)) {
+                if expandedContainers.contains(container.id) {
+                    expandedContainers.remove(container.id)
+                } else {
+                    expandedContainers.insert(container.id)
+                }
+            }
+        } label: {
+            HStack(spacing: 10) {
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(Color(hex: container.hexColor))
+                    .frame(width: 4, height: 28)
+
+                Image(systemName: container.icon)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Color(hex: container.hexColor))
+
+                Text(container.name)
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.primary)
+
+                Text("\(container.children.count)")
+                    .font(.caption2.weight(.medium))
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(Color(hex: container.hexColor).opacity(0.15))
+                    .foregroundStyle(Color(hex: container.hexColor))
+                    .clipShape(Capsule())
+
+                Spacer()
+
+                Button {
+                    if !expandedContainers.contains(container.id) {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            expandedContainers.insert(container.id)
+                        }
                     }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                        inlineFocusedContainer = container.id
+                    }
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 18))
+                        .foregroundStyle(Color(hex: container.hexColor).opacity(0.6))
+                }
+                .buttonStyle(.plain)
+
+                Image(systemName: expandedContainers.contains(container.id) ? "chevron.down" : "chevron.right")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.vertical, 4)
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button {
+                editingActivity = container
+            } label: {
+                Label("Edit Container", systemImage: "pencil")
+            }
+
+            Button {
+                cascadeAppearance(container)
+            } label: {
+                Label("Apply Style to Children", systemImage: "paintbrush")
+            }
+
+            Divider()
+
+            Button {
+                container.isArchived = true
+            } label: {
+                Label("Archive", systemImage: "archivebox")
+            }
+
+            Button(role: .destructive) {
+                initiateDelete(container)
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        }
+
+        // Expanded children
+        if expandedContainers.contains(container.id) {
+            let children = container.children.sorted { $0.sortOrder < $1.sortOrder }
+            ForEach(children) { child in
+                childActivityRow(child, containerColor: Color(hex: container.hexColor))
+            }
+
+            // Inline quick-add for sub-activities
+            inlineChildAddRow(container: container)
+        }
+    }
+
+    // MARK: - Child Activity Row
+
+    @ViewBuilder
+    private func childActivityRow(_ child: Activity, containerColor: Color) -> some View {
+        HStack(spacing: 0) {
+            Rectangle()
+                .fill(containerColor.opacity(0.25))
+                .frame(width: 3)
+                .padding(.leading, 8)
+
+            HStack(spacing: 10) {
+                Image(systemName: child.icon)
+                    .font(.system(size: 14))
+                    .foregroundStyle(Color(hex: child.hexColor))
+                    .frame(width: 24)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(child.name)
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+
+                    infoTags(for: child)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.caption2)
+                    .foregroundStyle(.quaternary)
+            }
+            .padding(.vertical, 6)
+            .padding(.horizontal, 10)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                editingActivity = child
+            }
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button(role: .destructive) {
+                initiateDelete(child)
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+
+            Button {
+                editingActivity = child
+            } label: {
+                Label("Edit", systemImage: "pencil")
+            }
+            .tint(.blue)
+        }
+        .contextMenu {
+            Button {
+                editingActivity = child
+            } label: {
+                Label("Edit", systemImage: "pencil")
+            }
+
+            Button {
+                removeTarget = child
+                showRemoveDialog = true
+            } label: {
+                Label("Remove from Container", systemImage: "arrow.up.right.square")
+            }
+
+            Divider()
+
+            if child.isStopped {
+                Button {
+                    child.stoppedAt = nil
+                } label: {
+                    Label("Resume Tracking", systemImage: "play.fill")
                 }
             } else {
-                editingActivity = activity
+                Button {
+                    child.stoppedAt = Date().startOfDay
+                } label: {
+                    Label("Stop Tracking", systemImage: "pause.fill")
+                }
             }
+
+            Button {
+                child.isArchived = true
+            } label: {
+                Label("Archive", systemImage: "archivebox")
+            }
+
+            Button(role: .destructive) {
+                initiateDelete(child)
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        }
+    }
+
+    // MARK: - Standalone Activity Row
+
+    @ViewBuilder
+    private func standaloneActivityRow(_ activity: Activity) -> some View {
+        Button {
+            editingActivity = activity
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: activity.icon)
@@ -230,32 +407,173 @@ struct ActivitiesListView: View {
                     .frame(width: 28)
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(activity.name)
-                        .font(.body)
-                        .foregroundStyle(.primary)
+                    HStack(spacing: 6) {
+                        Text(activity.name)
+                            .font(.body)
+                            .foregroundStyle(activity.isStopped ? .secondary : .primary)
+
+                        if activity.isStopped {
+                            Text("Stopped")
+                                .font(.caption2.weight(.medium))
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(Color.orange.opacity(0.15))
+                                .foregroundStyle(.orange)
+                                .clipShape(Capsule())
+                        }
+                    }
 
                     infoTags(for: activity)
                 }
 
                 Spacer()
 
-                if activity.type == .container {
-                    HStack(spacing: 4) {
-                        Text("\(activity.children.count)")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                        Image(systemName: expandedContainers.contains(activity.id) ? "chevron.down" : "chevron.right")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                    }
-                } else {
-                    Image(systemName: "chevron.right")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
+                Image(systemName: "chevron.right")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
         }
         .buttonStyle(.plain)
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button(role: .destructive) {
+                initiateDelete(activity)
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        }
+        .contextMenu {
+            Button {
+                editingActivity = activity
+            } label: {
+                Label("Edit", systemImage: "pencil")
+            }
+
+            Divider()
+
+            if activity.isStopped {
+                Button {
+                    activity.stoppedAt = nil
+                } label: {
+                    Label("Resume Tracking", systemImage: "play.fill")
+                }
+            } else {
+                Button {
+                    activity.stoppedAt = Date().startOfDay
+                } label: {
+                    Label("Stop Tracking", systemImage: "pause.fill")
+                }
+            }
+
+            Button {
+                activity.isArchived = true
+            } label: {
+                Label("Archive", systemImage: "archivebox")
+            }
+
+            Button(role: .destructive) {
+                initiateDelete(activity)
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        }
+    }
+
+    // MARK: - Inline Quick-Add
+
+    @ViewBuilder
+    private func inlineAddRow(category: Category?) -> some View {
+        let sectionID = category?.id ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+        HStack(spacing: 8) {
+            Image(systemName: inlineIsContainer ? "folder.badge.plus" : "plus.circle")
+                .font(.system(size: 14))
+                .foregroundStyle(.tertiary)
+
+            TextField(inlineIsContainer ? "New container…" : "New activity…", text: $inlineText)
+                .font(.subheadline)
+                .textFieldStyle(.plain)
+                .focused($inlineFocusedSection, equals: sectionID)
+                .onSubmit {
+                    let trimmed = inlineText.trimmingCharacters(in: .whitespaces)
+                    guard !trimmed.isEmpty else { return }
+                    quickCreateActivity(name: trimmed, isContainer: inlineIsContainer, category: category)
+                    inlineText = ""
+                }
+
+            // Type toggle pill
+            Button {
+                inlineIsContainer.toggle()
+            } label: {
+                Text(inlineIsContainer ? "Container" : "Activity")
+                    .font(.caption2.weight(.medium))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(inlineIsContainer ? Color.orange.opacity(0.15) : Color.blue.opacity(0.12))
+                    .foregroundStyle(inlineIsContainer ? .orange : .blue)
+                    .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.vertical, 4)
+    }
+
+    @ViewBuilder
+    private func inlineChildAddRow(container: Activity) -> some View {
+        HStack(spacing: 0) {
+            Rectangle()
+                .fill(Color(hex: container.hexColor).opacity(0.25))
+                .frame(width: 3)
+                .padding(.leading, 8)
+
+            HStack(spacing: 8) {
+                Image(systemName: "plus")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Color(hex: container.hexColor).opacity(0.5))
+
+                TextField("Add sub-activity…", text: Binding(
+                    get: { inlineContainerText[container.id] ?? "" },
+                    set: { inlineContainerText[container.id] = $0 }
+                ))
+                .font(.caption)
+                .textFieldStyle(.plain)
+                .focused($inlineFocusedContainer, equals: container.id)
+                .onSubmit {
+                    let trimmed = (inlineContainerText[container.id] ?? "").trimmingCharacters(in: .whitespaces)
+                    guard !trimmed.isEmpty else { return }
+                    quickCreateChildActivity(name: trimmed, parent: container)
+                    inlineContainerText[container.id] = ""
+                }
+            }
+            .padding(.vertical, 6)
+            .padding(.horizontal, 10)
+        }
+    }
+
+    // MARK: - Quick Create Helpers
+
+    private func quickCreateActivity(name: String, isContainer: Bool, category: Category?) {
+        let nextSort = (allActivities.map(\.sortOrder).max() ?? 0) + 1
+        let activity = Activity(
+            name: name,
+            type: isContainer ? .container : .checkbox,
+            schedule: .daily,
+            category: category,
+            sortOrder: nextSort
+        )
+        modelContext.insert(activity)
+    }
+
+    private func quickCreateChildActivity(name: String, parent: Activity) {
+        let nextSort = (parent.children.map(\.sortOrder).max() ?? 0) + 1
+        let child = Activity(
+            name: name,
+            icon: parent.icon,
+            hexColor: parent.hexColor,
+            type: .checkbox,
+            schedule: .daily,
+            sortOrder: nextSort
+        )
+        child.parent = parent
+        modelContext.insert(child)
     }
 
     // MARK: - Info Tags
@@ -269,6 +587,17 @@ struct ActivitiesListView: View {
             // Schedule
             tagView(scheduleLabel(activity.schedule), color: .secondary, isText: true)
 
+            // Time slot
+            if let tw = activity.timeWindow, tw.slot != .allDay {
+                tagView(tw.slot.displayName, color: .indigo, icon: tw.slot.icon)
+            }
+
+            // Multi-session
+            if activity.isMultiSession {
+                let count = activity.timeSlots.count
+                tagView("\(count)× Daily", color: .teal, icon: "arrow.triangle.2.circlepath")
+            }
+
             // Target
             if let target = activity.targetValue {
                 let unitStr = activity.unit ?? ""
@@ -280,9 +609,15 @@ struct ActivitiesListView: View {
                 tagView("HealthKit", color: .red, icon: "heart.fill")
             }
 
-            // Photo
+            // Photo + cadence
             if activity.allowsPhoto {
-                tagView("Photo", color: .purple, icon: "camera.fill")
+                let cadenceStr = activity.photoCadence != .never ? ": \(activity.photoCadence.rawValue.capitalized)" : ""
+                tagView("Photo\(cadenceStr)", color: .purple, icon: "camera.fill")
+            }
+
+            // Notes
+            if activity.allowsNotes {
+                tagView("Notes", color: .mint, icon: "note.text")
             }
 
             // Weight (only if non-default)
@@ -379,8 +714,6 @@ struct ActivitiesListView: View {
     }
 
     private func archiveActivity(_ activity: Activity) {
-        let dateStr = Date().formatted(date: .numeric, time: .omitted)
-        activity.name = "[Deprecated \(dateStr)] \(activity.name)"
         activity.isArchived = true
     }
 

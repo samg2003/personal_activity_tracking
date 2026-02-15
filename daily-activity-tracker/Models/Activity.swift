@@ -18,6 +18,7 @@ final class Activity {
     var typeRaw: String = ActivityType.checkbox.rawValue
     var scheduleData: Data?
     var timeWindowData: Data?
+    var timeSlotsData: Data?  // Encoded [TimeSlot] for multi-session
     var reminderData: Data?
 
     var targetValue: Double?
@@ -29,6 +30,7 @@ final class Activity {
     var sortOrder: Int = 0
     var isArchived: Bool = false
     var createdAt: Date = Date()
+    var stoppedAt: Date?  // Non-nil = stopped tracking on this date
 
     // HealthKit (future)
     var healthKitTypeID: String?
@@ -44,6 +46,9 @@ final class Activity {
 
     @Relationship(deleteRule: .cascade, inverse: \ActivityLog.activity)
     var logs: [ActivityLog] = []
+
+    @Relationship(deleteRule: .cascade, inverse: \ActivityConfigSnapshot.activity)
+    var configSnapshots: [ActivityConfigSnapshot] = []
 
     // MARK: - Computed (type-safe access to encoded properties)
 
@@ -90,6 +95,55 @@ final class Activity {
     var photoCadence: PhotoCadence {
         get { PhotoCadence(rawValue: photoCadenceRaw) ?? .never }
         set { photoCadenceRaw = newValue.rawValue }
+    }
+
+    /// Multiple time slots for multi-session activities (e.g., morning + evening)
+    var timeSlots: [TimeSlot] {
+        get {
+            if let data = timeSlotsData,
+               let slots = try? JSONDecoder().decode([TimeSlot].self, from: data),
+               !slots.isEmpty {
+                return slots
+            }
+            // Fallback: single slot from legacy timeWindow
+            return [timeWindow?.slot ?? .allDay]
+        }
+        set {
+            if newValue.count <= 1 {
+                timeSlotsData = nil
+            } else {
+                timeSlotsData = try? JSONEncoder().encode(newValue)
+            }
+        }
+    }
+
+    var isMultiSession: Bool { timeSlots.count > 1 }
+
+    var isStopped: Bool { stoppedAt != nil }
+
+    // MARK: - History-Aware Helpers
+
+    /// Returns the config snapshot active on a given date, if any
+    func configSnapshot(for date: Date) -> ActivityConfigSnapshot? {
+        let day = date.startOfDay
+        return configSnapshots.first { snap in
+            snap.effectiveFrom <= day && day <= snap.effectiveUntil
+        }
+    }
+
+    /// Schedule that was active on a given date (snapshot or current)
+    func scheduleActive(on date: Date) -> Schedule {
+        configSnapshot(for: date)?.schedule ?? schedule
+    }
+
+    /// Number of daily sessions active on a given date
+    func sessionsPerDay(on date: Date) -> Int {
+        configSnapshot(for: date)?.sessionsPerDay ?? max(timeSlots.count, 1)
+    }
+
+    /// Parent container ID on a given date (snapshot or current)
+    func parentID(on date: Date) -> UUID? {
+        configSnapshot(for: date)?.parentID ?? parent?.id
     }
 
     // MARK: - Init

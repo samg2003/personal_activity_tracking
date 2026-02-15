@@ -17,6 +17,8 @@ struct AddActivityView: View {
     @State private var scheduleType: ScheduleType = .daily
     @State private var selectedWeekdays: Set<Int> = []
     @State private var selectedSlot: TimeSlot = .morning
+    @State private var isMultiSession: Bool = false
+    @State private var selectedSlots: Set<TimeSlot> = [.morning, .evening]
     @State private var selectedCategory: Category?
 
     // Value / Cumulative config
@@ -47,8 +49,16 @@ struct AddActivityView: View {
     @State private var selectedParent: Activity?
     @State private var isSubActivity = false
     
+    // Edit scope dialog (Future Only vs All Changes)
+    @State private var showEditScopeDialog = false
+    @State private var pendingSchedule: Schedule?
+    @State private var pendingReminder: ReminderPreset?
+    
     // Edit Mode
     var activityToEdit: Activity?
+    
+    // Pre-configuration (e.g. quick-add from container)
+    var presetParent: Activity?
 
     private let iconOptions = [
         "circle", "star", "heart", "bolt", "flame",
@@ -92,8 +102,24 @@ struct AddActivityView: View {
                 
                 if activityToEdit != nil {
                     Section {
+                        if activityToEdit?.isStopped == true {
+                            Button("Resume Tracking") {
+                                resumeTracking()
+                            }
+                            .foregroundStyle(.green)
+                        } else {
+                            Button("Stop Tracking") {
+                                stopTracking()
+                            }
+                            .foregroundStyle(.orange)
+                        }
+
                         Button("Archive Activity", role: .destructive) {
                             archiveActivity()
+                        }
+                    } footer: {
+                        if activityToEdit?.isStopped == true {
+                            Text("This activity is paused. Past records are preserved.")
                         }
                     }
                 }
@@ -115,7 +141,33 @@ struct AddActivityView: View {
             .onAppear {
                 if let activity = activityToEdit {
                     loadData(from: activity)
+                } else if let parent = presetParent {
+                    isSubActivity = true
+                    selectedParent = parent
                 }
+            }
+            .confirmationDialog(
+                "How should this change apply?",
+                isPresented: $showEditScopeDialog,
+                titleVisibility: .visible
+            ) {
+                Button("Future Only") {
+                    guard let activity = activityToEdit,
+                          let sched = pendingSchedule,
+                          let rem = pendingReminder else { return }
+                    performSave(activity: activity, schedule: sched, reminder: rem, futureOnly: true)
+                    dismiss()
+                }
+                Button("All Changes") {
+                    guard let activity = activityToEdit,
+                          let sched = pendingSchedule,
+                          let rem = pendingReminder else { return }
+                    performSave(activity: activity, schedule: sched, reminder: rem, futureOnly: false)
+                    dismiss()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("\"Future Only\" preserves past analytics with the old settings. \"All Changes\" updates everything retroactively.")
             }
         }
     }
@@ -145,6 +197,11 @@ struct AddActivityView: View {
         // Restore TimeWindow
         if let tw = activity.timeWindow {
             selectedSlot = tw.slot
+        }
+        // Restore multi-session
+        if activity.isMultiSession {
+            isMultiSession = true
+            selectedSlots = Set(activity.timeSlots)
         }
         
         // Restore Config
@@ -358,12 +415,50 @@ struct AddActivityView: View {
 
     private var timeWindowSection: some View {
         Section("Time of Day") {
-            Picker("When", selection: $selectedSlot) {
-                ForEach([TimeSlot.allDay, .morning, .afternoon, .evening], id: \.self) { slot in
-                    Label(slot.displayName, systemImage: slot.icon).tag(slot)
+            if !isMultiSession {
+                Picker("When", selection: $selectedSlot) {
+                    ForEach([TimeSlot.allDay, .morning, .afternoon, .evening], id: \.self) { slot in
+                        Label(slot.displayName, systemImage: slot.icon).tag(slot)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+
+            if selectedSlot != .allDay || isMultiSession {
+                Toggle("Repeat across time periods", isOn: $isMultiSession)
+                    .onChange(of: isMultiSession) { _, on in
+                        if on {
+                            // Default to morning + evening if nothing selected
+                            if selectedSlots.isEmpty {
+                                selectedSlots = [.morning, .evening]
+                            }
+                        }
+                    }
+            }
+
+            if isMultiSession {
+                ForEach([TimeSlot.morning, .afternoon, .evening], id: \.self) { slot in
+                    Button {
+                        if selectedSlots.contains(slot) {
+                            if selectedSlots.count > 1 { selectedSlots.remove(slot) }
+                        } else {
+                            selectedSlots.insert(slot)
+                        }
+                    } label: {
+                        HStack {
+                            Image(systemName: slot.icon)
+                                .foregroundStyle(selectedSlots.contains(slot) ? .primary : .secondary)
+                            Text(slot.displayName)
+                            Spacer()
+                            if selectedSlots.contains(slot) {
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(.blue)
+                            }
+                        }
+                    }
+                    .foregroundStyle(.primary)
                 }
             }
-            .pickerStyle(.segmented)
         }
     }
 
@@ -579,70 +674,15 @@ struct AddActivityView: View {
         }
 
         if let activity = activityToEdit {
-            // Update Existing
-            activity.name = trimmed
-            activity.icon = selectedIcon
-            activity.hexColor = selectedColor
-            activity.type = selectedType
-            // Updating schedule/timeWindow relies on the new struct being encoded.
-            // But Activity model has computed properties that wrap this.
-            // Wait, Activity model has `scheduleData` not `schedule`.
-            // And I need to verify if setting `activity.schedule` (computed) actually updates `scheduleData`.
-            // I recall Step 737 viewing `Activity.swift` only showed `init`.
-            // I should assume the computed property HAS a setter. If not, I need to check.
-            // Let's assume it does for now, or use the init logic to encode.
-            // Actually, `Activity.swift` snippets in Step 737 showed:
-            // var scheduleData: Data?
-            // ...
-            // var schedule: Schedule { get { ... } }
-            // It did NOT show a setter.
-            // I must verify this. If no setter, I have to manually encode.
-            // Checking `view_code_item` output from earlier:
-            // "var type: ActivityType { get { ... } set { ... } }" -> Setter exists for type.
-            // But schedule?
-            
-            // To be safe, I will re-instantiate or explicitly encode functionality if needed.
-            // Let's check Activity.swift quickly before finalizing this write?
-            // NO, I'll assume for now and compile-fix if needed.
-            // Actually, best strictly safe way:
-            // `activity.scheduleData = try? JSONEncoder().encode(schedule)`
-            
-            activity.scheduleData = try? JSONEncoder().encode(schedule)
-            activity.category = selectedCategory
-            activity.reminderData = try? JSONEncoder().encode(reminder)
-            
-            if selectedType != .container {
-                activity.timeWindowData = try? JSONEncoder().encode(TimeWindow(slot: selectedSlot))
-                activity.allowsPhoto = allowsPhoto
-                activity.photoCadence = allowsPhoto ? photoCadence : .never
-                activity.allowsNotes = allowsNotes
-            } else {
-                activity.timeWindowData = nil
-                activity.allowsPhoto = false
-                activity.allowsNotes = false
+            // Always ask when activity has logs — simpler, more robust
+            if !activity.logs.isEmpty {
+                pendingSchedule = schedule
+                pendingReminder = reminder
+                showEditScopeDialog = true
+                return
             }
-            
-            if selectedType == .value || selectedType == .cumulative {
-                activity.unit = unit.isEmpty ? nil : unit
-            }
-            if selectedType == .cumulative, let target = Double(targetValueText) {
-                activity.targetValue = target
-            }
-            
-            if isSubActivity, let parent = selectedParent {
-                activity.parent = parent
-            } else {
-                activity.parent = nil
-            }
-            
-            if enableHealthKit {
-                activity.healthKitTypeID = hkType
-                activity.healthKitModeRaw = hkMode
-            } else {
-                activity.healthKitTypeID = nil
-                activity.healthKitModeRaw = nil
-            }
-            
+
+            performSave(activity: activity, schedule: schedule, reminder: reminder, futureOnly: false)
         } else {
             // Insert New
             let activity = Activity(
@@ -651,9 +691,14 @@ struct AddActivityView: View {
                 hexColor: selectedColor,
                 type: selectedType,
                 schedule: schedule,
-                timeWindow: selectedType != .container ? TimeWindow(slot: selectedSlot) : nil,
+                timeWindow: selectedType != .container ? TimeWindow(slot: isMultiSession ? (selectedSlots.sorted().first ?? .morning) : selectedSlot) : nil,
                 category: selectedCategory
             )
+
+            // Multi-session support
+            if isMultiSession && selectedSlots.count > 1 {
+                activity.timeSlots = selectedSlots.sorted()
+            }
             
             activity.reminder = reminder
             
@@ -689,6 +734,91 @@ struct AddActivityView: View {
         if let activity = activityToEdit {
             activity.isArchived = true
             dismiss()
+        }
+    }
+
+    private func stopTracking() {
+        if let activity = activityToEdit {
+            activity.stoppedAt = Date().startOfDay
+            dismiss()
+        }
+    }
+
+    private func resumeTracking() {
+        if let activity = activityToEdit {
+            activity.stoppedAt = nil
+            dismiss()
+        }
+    }
+
+
+    // MARK: - Perform Save (with optional snapshot)
+
+    private func performSave(activity: Activity, schedule: Schedule, reminder: ReminderPreset, futureOnly: Bool) {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+
+        // Snapshot current config before mutation if future-only
+        if futureOnly {
+            let effectiveFrom = activity.configSnapshots
+                .compactMap { $0.effectiveUntil }
+                .max()
+                .map { Calendar.current.date(byAdding: .day, value: 1, to: $0) ?? $0 }
+                ?? activity.createdAt
+
+            let snapshot = ActivityConfigSnapshot(
+                activity: activity,
+                effectiveFrom: effectiveFrom,
+                effectiveUntil: Calendar.current.date(byAdding: .day, value: -1, to: Date().startOfDay) ?? Date().startOfDay
+            )
+            modelContext.insert(snapshot)
+        }
+
+        // Apply all changes to the activity
+        activity.name = trimmed
+        activity.icon = selectedIcon
+        activity.hexColor = selectedColor
+        activity.type = selectedType
+        activity.scheduleData = try? JSONEncoder().encode(schedule)
+        activity.category = selectedCategory
+        activity.reminderData = try? JSONEncoder().encode(reminder)
+
+        if selectedType != .container {
+            if isMultiSession && selectedSlots.count > 1 {
+                let primarySlot = selectedSlots.sorted().first ?? .morning
+                activity.timeWindowData = try? JSONEncoder().encode(TimeWindow(slot: primarySlot))
+                activity.timeSlots = selectedSlots.sorted()
+            } else {
+                activity.timeWindowData = try? JSONEncoder().encode(TimeWindow(slot: selectedSlot))
+                activity.timeSlotsData = nil
+            }
+            activity.allowsPhoto = allowsPhoto
+            activity.photoCadence = allowsPhoto ? photoCadence : .never
+            activity.allowsNotes = allowsNotes
+        } else {
+            activity.timeWindowData = nil
+            activity.allowsPhoto = false
+            activity.allowsNotes = false
+        }
+
+        if selectedType == .value || selectedType == .cumulative {
+            activity.unit = unit.isEmpty ? nil : unit
+        }
+        if selectedType == .cumulative, let target = Double(targetValueText) {
+            activity.targetValue = target
+        }
+
+        if isSubActivity, let parent = selectedParent {
+            activity.parent = parent
+        } else {
+            activity.parent = nil
+        }
+
+        if enableHealthKit {
+            activity.healthKitTypeID = hkType
+            activity.healthKitModeRaw = hkMode
+        } else {
+            activity.healthKitTypeID = nil
+            activity.healthKitModeRaw = nil
         }
     }
 }

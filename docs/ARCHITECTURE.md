@@ -58,6 +58,7 @@ erDiagram
     Activity ||--o{ Activity : "parent → children"
     Activity ||--o{ ActivityLog : "has logs"
     Activity }o--o{ Activity : "sortAfter"
+    Activity ||--o{ ActivityConfigSnapshot : "has snapshots"
 
     Category {
         UUID id PK
@@ -75,6 +76,7 @@ erDiagram
         Enum type "checkbox|value|cumulative|container"
         JSON schedule "Codable struct"
         JSON timeWindow "Codable struct (optional)"
+        JSON timeSlotsData "multi-session slots (optional)"
         Double targetValue "optional"
         String unit "optional"
         Bool allowsPhoto
@@ -85,6 +87,7 @@ erDiagram
         JSON reminderPreset "Codable enum (optional)"
         Bool isArchived
         Date createdAt
+        Date stoppedAt "optional - stop tracking date"
     }
 
     ActivityLog {
@@ -95,12 +98,26 @@ erDiagram
         String photoFilename "optional"
         String note "optional"
         String skipReason "optional"
+        String timeSlotRaw "session slot (optional)"
         Date completedAt "optional"
     }
 
     VacationDay {
         UUID id PK
         Date date "normalized startOfDay"
+    }
+
+    ActivityConfigSnapshot {
+        UUID id PK
+        Date effectiveFrom
+        Date effectiveUntil
+        Data scheduleData "snapshot"
+        Data timeWindowData "snapshot"
+        Data timeSlotsData "snapshot"
+        String typeRaw "snapshot"
+        Double targetValue "snapshot"
+        String unit "snapshot"
+        UUID parentID "container at that time"
     }
 ```
 
@@ -262,6 +279,14 @@ daily-activity-tracker/
 ### ADR-5: Protocol-Based Services
 **Decision**: Every service is a protocol with a concrete implementation.
 **Rationale**: Enables unit testing with mocks, supports future swapping (e.g., different notification strategies), keeps ViewModels testable without real HealthKit/EventKit.
+
+### ADR-6: Multi-Session via TimeSlots Array
+**Decision**: Store `[TimeSlot]` as `timeSlotsData` on Activity, add `timeSlotRaw` to ActivityLog.
+**Rationale**: Keeps backward compatibility (single-session activities have `timeSlotsData = nil`). Dashboard expands multi-session activities into one row per slot. Each completion/skip log records its slot. This is more flexible than cloning activities per session.
+
+### ADR-7: Config Snapshots for Non-Retroactive Edits
+**Decision**: When a user edits structural fields (schedule, type, time window, target, parent) and chooses "Future Only", the current config is saved as an `ActivityConfigSnapshot` with date range. Analytics uses the snapshot for historical dates.
+**Rationale**: Avoids cloning activities (which breaks relationships and creates identity problems). Snapshots are lightweight, backward-compatible (no snapshots = current behavior), and compose well with the existing model. `stoppedAt` on Activity handles the "stop doing it" case.
 
 ---
 

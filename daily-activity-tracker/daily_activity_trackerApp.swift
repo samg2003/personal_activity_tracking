@@ -8,6 +8,7 @@ struct daily_activity_trackerApp: App {
             Category.self,
             Activity.self,
             ActivityLog.self,
+            ActivityConfigSnapshot.self,
             VacationDay.self,
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
