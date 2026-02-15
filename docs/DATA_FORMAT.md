@@ -61,14 +61,11 @@ Defines the trackers themselves.
   "typeRaw": "cumulative",
   "targetValue": 2500,
   "unit": "ml",
-  "weight": 1.0,
+  "metricKindRaw": null,
   "sortOrder": 0,
   "isArchived": false,
   "createdAt": "2026-01-01T00:00:00Z",
   "categoryID": "UUID-OF-CATEGORY",
-  "allowsPhoto": false,
-  "photoCadenceRaw": "never",
-  "allowsNotes": false,
   
   // Encoded Schedule (Daily by default if null)
   "scheduleData": "BASE64-ENCODED-JSON-STRING",
@@ -86,7 +83,8 @@ Defines the trackers themselves.
 
 ### Key Fields
 
-- **`typeRaw`**: One of `"checkbox"`, `"value"`, `"cumulative"`, `"container"`.
+- **`typeRaw`**: One of `"checkbox"`, `"value"`, `"cumulative"`, `"container"`, `"metric"`.
+- **`metricKindRaw`**: Only for `metric` type — one of `"photo"`, `"value"`, `"checkbox"`, `"notes"`.
 - **`scheduleData`** / **`timeWindowData`**: These are `Data` blobs in Swift, serialized as Base64 strings in the JSON.
     - *Note for manual editing*: It is difficult to manually construct these Base64 strings. It is recommended to create a dummy activity in the app, export it, and copy the strings if needed.
 

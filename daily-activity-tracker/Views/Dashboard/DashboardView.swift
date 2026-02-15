@@ -108,12 +108,25 @@ struct DashboardView: View {
     }
 
     private var groupedBySlot: [(slot: TimeSlot, activities: [Activity])] {
-        // Build slot→activities mapping, expanding multi-session activities
         var slotMap: [TimeSlot: [Activity]] = [:]
         for activity in pendingTimed {
-            if activity.isMultiSession {
+            if activity.type == .container {
+                // Expand container to each slot where it has applicable children
+                let children = activity.historicalChildren(on: today, from: allActivities)
+                    .filter { scheduleEngine.shouldShow($0, on: today) }
+                for slot in [TimeSlot.morning, .afternoon, .evening] {
+                    let hasChildInSlot = children.contains { child in
+                        if child.isMultiSession {
+                            return child.timeSlots.contains(slot)
+                        }
+                        return (child.timeWindow?.slot ?? .morning) == slot
+                    }
+                    if hasChildInSlot {
+                        slotMap[slot, default: []].append(activity)
+                    }
+                }
+            } else if activity.isMultiSession {
                 for slot in activity.timeSlots {
-                    // Only include in this slot if the session isn't already completed/skipped
                     if !isSessionCompleted(activity, slot: slot)
                         && !isSessionSkipped(activity, slot: slot) {
                         slotMap[slot, default: []].append(activity)
@@ -465,7 +478,7 @@ struct DashboardView: View {
     private func activityView(for activity: Activity, inSlot slot: TimeSlot?) -> some View {
         Group {
             switch activity.type {
-            case .checkbox:
+            case .checkbox, .metric:
                 if activity.isMultiSession, let slot {
                     ActivityRowView(
                         activity: activity,
@@ -489,9 +502,7 @@ struct DashboardView: View {
                     currentValue: latestValue(for: activity),
                     onLog: { value in logValue(activity, value: value) },
                     onRemove: { removeValueLog(activity) },
-                    onTakePhoto: activity.allowsPhoto ? {
-                        triggerPhotoPrompt(for: activity)
-                    } : nil
+                    onTakePhoto: nil
                 )
             case .cumulative:
                 ValueInputRow(
@@ -508,7 +519,8 @@ struct DashboardView: View {
                     today: today,
                     allActivities: allActivities,
                     onCompleteChild: { child in completeCheckbox(child) },
-                    onSkipChild: { child, reason in skipActivity(child, reason: reason) }
+                    onSkipChild: { child, reason in skipActivity(child, reason: reason) },
+                    slotFilter: slot
                 )
             }
         }
@@ -518,7 +530,7 @@ struct DashboardView: View {
 
     private func isFullyCompleted(_ activity: Activity) -> Bool {
         switch activity.type {
-        case .checkbox:
+        case .checkbox, .metric:
             if activity.isMultiSession {
                 // ALL sessions must have a completion log
                 return activity.timeSlots.allSatisfy { slot in
@@ -569,32 +581,9 @@ struct DashboardView: View {
         }
     }
 
-    /// Checks whether a photo prompt should be triggered based on cadence
+    /// Checks whether a photo prompt should be triggered (only for photo-metric activities)
     private func isPhotoDue(for activity: Activity) -> Bool {
-        let cadence = activity.photoCadence
-        guard cadence != .never else { return false }
-        if cadence == .everyTime { return true }
-
-        // Find the most recent log with a photo for this activity
-        let logsWithPhotos = allLogs.filter {
-            $0.activity?.id == activity.id && $0.photoFilename != nil
-        }
-        guard let lastPhotoDate = logsWithPhotos.map({ $0.date }).max() else {
-            return true // Never taken a photo, definitely due
-        }
-
-        let calendar = Calendar.current
-        let now = Date()
-        switch cadence {
-        case .weekly:
-            let daysSince = calendar.dateComponents([.day], from: lastPhotoDate, to: now).day ?? 0
-            return daysSince >= 7
-        case .monthly:
-            let daysSince = calendar.dateComponents([.day], from: lastPhotoDate, to: now).day ?? 0
-            return daysSince >= 30
-        case .everyTime, .never:
-            return false
-        }
+        return activity.type == .metric && activity.metricKind == .photo
     }
 
     /// Trigger photo capture sheet, optionally attaching to a specific log
@@ -629,7 +618,7 @@ struct DashboardView: View {
             modelContext.insert(log)
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
 
-            if activity.allowsPhoto && isPhotoDue(for: activity) {
+            if isPhotoDue(for: activity) {
                 triggerPhotoPrompt(for: activity, log: log)
             }
             showUndo("Completed \(activity.name) (\(slot.displayName))") { [log] in
@@ -658,7 +647,7 @@ struct DashboardView: View {
         NotificationService.shared.cancelReminders(for: activity.id)
         writeToHealthKit(activity: activity, value: 1.0)
         
-        if activity.allowsPhoto && isPhotoDue(for: activity) {
+        if isPhotoDue(for: activity) {
             triggerPhotoPrompt(for: activity, log: log)
         }
         
@@ -679,7 +668,7 @@ struct DashboardView: View {
         writeToHealthKit(activity: activity, value: value)
 
         // Photo cadence check for value activities
-        if activity.allowsPhoto && isPhotoDue(for: activity) {
+        if isPhotoDue(for: activity) {
             photoPromptLog = log
             photoPromptActivity = activity
         }

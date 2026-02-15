@@ -134,10 +134,10 @@ struct GoalDetailView: View {
             }
 
             // Type-specific display
-            if activity.type == .checkbox {
-                booleanMetricDisplay(activity: activity)
-            } else if activity.allowsPhoto {
+            if activity.type == .metric && activity.metricKind == .photo {
                 photoMetricDisplay(activity: activity)
+            } else if activity.type == .checkbox || (activity.type == .metric && activity.metricKind == .checkbox) {
+                booleanMetricDisplay(activity: activity)
             } else {
                 numericMetricDisplay(link: link, activity: activity)
             }
@@ -486,38 +486,10 @@ struct GoalDetailView: View {
         for link in goal.activityLinks {
             guard let activity = link.activity else { continue }
             let w = link.weight
-            var completed = 0
-            var expected = 0
+            let rate = activityRate(activity)
 
-            for offset in 0..<7 {
-                guard let day = calendar.date(byAdding: .day, value: -offset, to: today) else { continue }
-                if vacationSet.contains(day) { continue }
-                if day < activity.createdAt.startOfDay { continue }
-                if let stopped = activity.stoppedAt, day > stopped { continue }
-
-                let schedule = activity.scheduleActive(on: day)
-                let scheduled: Bool
-                switch schedule.type {
-                case .daily: scheduled = true
-                case .weekly: scheduled = (schedule.weekdays ?? []).contains(day.weekdayISO)
-                case .monthly: scheduled = (schedule.monthDays ?? []).contains(day.dayOfMonth)
-                default: scheduled = false
-                }
-
-                if scheduled {
-                    let sessions = activity.sessionsPerDay(on: day)
-                    expected += sessions
-                    let dayCompleted = allLogs.filter {
-                        $0.activity?.id == activity.id &&
-                        $0.status == .completed &&
-                        $0.date.isSameDay(as: day)
-                    }.count
-                    completed += min(dayCompleted, sessions)
-                }
-            }
-
-            if expected > 0 {
-                totalWeighted += (Double(completed) / Double(expected)) * w
+            if rate >= 0 {
+                totalWeighted += rate * w
                 totalWeight += w
             }
         }
@@ -527,6 +499,10 @@ struct GoalDetailView: View {
     }
 
     private func activityRate(_ activity: Activity) -> Double {
+        if activity.type == .container {
+            return containerRate(activity)
+        }
+
         let calendar = Calendar.current
         let today = Date().startOfDay
         let vacationSet = Set(vacationDays.map { $0.date.startOfDay })
@@ -562,6 +538,51 @@ struct GoalDetailView: View {
 
         guard expected > 0 else { return 0 }
         return Double(completed) / Double(expected)
+    }
+
+    /// Container consistency: fraction of days where ALL children were completed
+    private func containerRate(_ container: Activity) -> Double {
+        let calendar = Calendar.current
+        let today = Date().startOfDay
+        let vacationSet = Set(vacationDays.map { $0.date.startOfDay })
+        let children = container.children.filter { !$0.isArchived }
+
+        guard !children.isEmpty else { return 0 }
+
+        var fullyCompleted = 0
+        var expected = 0
+
+        for offset in 0..<7 {
+            guard let day = calendar.date(byAdding: .day, value: -offset, to: today) else { continue }
+            if vacationSet.contains(day) { continue }
+            if day < container.createdAt.startOfDay { continue }
+
+            // Check container's own schedule
+            let schedule = container.scheduleActive(on: day)
+            let scheduled: Bool
+            switch schedule.type {
+            case .daily: scheduled = true
+            case .weekly: scheduled = (schedule.weekdays ?? []).contains(day.weekdayISO)
+            case .monthly: scheduled = (schedule.monthDays ?? []).contains(day.dayOfMonth)
+            default: scheduled = false
+            }
+
+            guard scheduled else { continue }
+            expected += 1
+
+            // All children must be completed on this day
+            let allDone = children.allSatisfy { child in
+                allLogs.contains {
+                    $0.activity?.id == child.id &&
+                    $0.status == .completed &&
+                    $0.date.isSameDay(as: day)
+                }
+            }
+            if allDone { fullyCompleted += 1 }
+        }
+
+        guard expected > 0 else { return 0 }
+        return Double(fullyCompleted) / Double(expected)
     }
 
     private func scoreColor(_ score: Double) -> Color {

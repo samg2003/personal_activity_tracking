@@ -29,16 +29,8 @@ struct AddActivityView: View {
     @State private var selectedMonthDays: Set<Int> = []
     @State private var adhocDate = Date()
 
-    // Composable inputs
-    @State private var allowsPhoto = false
-    @State private var photoCadence: PhotoCadence = .never
-    @State private var allowsNotes = false
-
-    // Reminders
-    @State private var enableReminder = false
-    @State private var reminderType: ReminderType = .time
-    @State private var reminderTime = Date()
-    @State private var periodicInterval = 4
+    // Metric config (only when type == .metric)
+    @State private var selectedMetricKind: MetricKind = .value
 
     // HealthKit
     @State private var enableHealthKit = false
@@ -49,10 +41,12 @@ struct AddActivityView: View {
     @State private var selectedParent: Activity?
     @State private var isSubActivity = false
     
+    // Tracks whether appearance was auto-set (reset on manual override)
+    @State private var appearanceAutoSet = true
+    
     // Edit scope dialog (Future Only vs All Changes)
     @State private var showEditScopeDialog = false
     @State private var pendingSchedule: Schedule?
-    @State private var pendingReminder: ReminderPreset?
     
     // Edit Mode
     var activityToEdit: Activity?
@@ -93,12 +87,10 @@ struct AddActivityView: View {
                     timeWindowSection
                 }
                 parentSection
-                appearanceSection
-                composableInputsSection
-                notificationsSection
-                if selectedType != .container {
+                if selectedType != .container && selectedType != .metric {
                     healthKitSection
                 }
+                appearanceSection
                 
                 if activityToEdit != nil {
                     Section {
@@ -153,16 +145,14 @@ struct AddActivityView: View {
             ) {
                 Button("Future Only") {
                     guard let activity = activityToEdit,
-                          let sched = pendingSchedule,
-                          let rem = pendingReminder else { return }
-                    performSave(activity: activity, schedule: sched, reminder: rem, futureOnly: true)
+                          let sched = pendingSchedule else { return }
+                    performSave(activity: activity, schedule: sched, futureOnly: true)
                     dismiss()
                 }
                 Button("All Changes") {
                     guard let activity = activityToEdit,
-                          let sched = pendingSchedule,
-                          let rem = pendingReminder else { return }
-                    performSave(activity: activity, schedule: sched, reminder: rem, futureOnly: false)
+                          let sched = pendingSchedule else { return }
+                    performSave(activity: activity, schedule: sched, futureOnly: false)
                     dismiss()
                 }
                 Button("Cancel", role: .cancel) {}
@@ -178,7 +168,8 @@ struct AddActivityView: View {
         name = activity.name
         selectedIcon = activity.icon
         selectedColor = activity.hexColor
-        selectedType = activity.type 
+        selectedType = activity.type
+        appearanceAutoSet = false
         
         // Restore Schedule
         let schedule = activity.schedule
@@ -208,42 +199,16 @@ struct AddActivityView: View {
         if let u = activity.unit { unit = u }
         if let t = activity.targetValue { targetValueText = String(format: "%.0f", t) }
         
-        allowsPhoto = activity.allowsPhoto
-        photoCadence = activity.photoCadence
-        allowsNotes = activity.allowsNotes
+        // Restore Metric Kind
+        if let kind = activity.metricKind {
+            selectedMetricKind = kind
+        }
         
         // Restore Category/Parent
         selectedCategory = activity.category
         if let parent = activity.parent {
             isSubActivity = true
             selectedParent = parent
-        }
-        
-        // Restore Reminder
-        if let reminder = activity.reminder {
-            switch reminder {
-            case .none:
-                enableReminder = false
-            case .morningNudge:
-                enableReminder = true
-                reminderType = .morning
-            case .eveningCheckIn:
-                enableReminder = true
-                reminderType = .evening
-            case .periodic(let hours):
-                enableReminder = true
-                reminderType = .periodic
-                periodicInterval = hours
-            case .remindAt(let h, let m):
-                enableReminder = true
-                reminderType = .time
-                var comps = DateComponents()
-                comps.hour = h
-                comps.minute = m
-                reminderTime = Calendar.current.date(from: comps) ?? Date()
-            }
-        } else {
-            enableReminder = false
         }
         
         // Restore HealthKit
@@ -260,6 +225,14 @@ struct AddActivityView: View {
         Section {
             TextField("Activity name", text: $name)
                 .font(.title3)
+                .onChange(of: name) { _, newName in
+                    guard appearanceAutoSet else { return }
+                    let suggestion = ActivityAppearance.suggest(
+                        for: newName, type: selectedType, metricKind: selectedMetricKind
+                    )
+                    selectedIcon = suggestion.icon
+                    selectedColor = suggestion.color
+                }
         }
     }
 
@@ -295,6 +268,26 @@ struct AddActivityView: View {
                 Text("Container will derive completion from its sub-activities.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+        case .metric:
+            Section {
+                Picker("Tracking Method", selection: $selectedMetricKind) {
+                    ForEach(MetricKind.allCases) { kind in
+                        Label(kind.displayName, systemImage: kind.systemImage).tag(kind)
+                    }
+                }
+                if selectedMetricKind == .value {
+                    TextField("Unit (e.g., kg, %, seconds)", text: $unit)
+                }
+            } header: {
+                Text("Metric Configuration")
+            } footer: {
+                switch selectedMetricKind {
+                case .photo: Text("Log progress photos each time you track.")
+                case .value: Text("Log a numeric value each time you track.")
+                case .checkbox: Text("Mark a milestone as achieved or not yet.")
+                case .notes: Text("Write qualitative observations.")
+                }
             }
         case .checkbox:
             EmptyView()
@@ -492,84 +485,67 @@ struct AddActivityView: View {
 
     private var appearanceSection: some View {
         Section("Appearance") {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
-                    ForEach(iconOptions, id: \.self) { icon in
-                        Button { selectedIcon = icon } label: {
-                            Image(systemName: icon)
-                                .font(.system(size: 18))
-                                .frame(width: 38, height: 38)
-                                .background(selectedIcon == icon ? Color(hex: selectedColor).opacity(0.3) : Color(.tertiarySystemFill))
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
-                                .foregroundStyle(selectedIcon == icon ? Color(hex: selectedColor) : .secondary)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.vertical, 4)
-            }
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(colorOptions, id: \.self) { color in
-                        Button { selectedColor = color } label: {
-                            Circle()
-                                .fill(Color(hex: color))
-                                .frame(width: 30, height: 30)
-                                .overlay {
-                                    if selectedColor == color {
-                                        Image(systemName: "checkmark")
-                                            .font(.caption).fontWeight(.bold)
-                                            .foregroundStyle(.white)
-                                    }
-                                }
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.vertical, 4)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var composableInputsSection: some View {
-        if selectedType != .container {
-            Section("Composable Inputs") {
-                // Photos don't apply to cumulative activities
-                if selectedType != .cumulative {
-                    Toggle(isOn: $allowsPhoto) {
-                        Label("Photo Tracking", systemImage: "camera")
-                    }
-                    if allowsPhoto {
-                        Picker(selection: $photoCadence) {
-                            ForEach(PhotoCadence.allCases.filter { $0 != .never }) { cadence in
-                                Text(cadence.displayName).tag(cadence)
-                            }
-                        } label: {
-                            Label("Capture Cadence", systemImage: "clock.arrow.circlepath")
-                        }
-                        Text(photoCadence.description)
+            HStack {
+                Image(systemName: selectedIcon)
+                    .font(.title2)
+                    .foregroundStyle(Color(hex: selectedColor))
+                    .frame(width: 44, height: 44)
+                    .background(Color(hex: selectedColor).opacity(0.15))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Icon & Color")
+                    if appearanceAutoSet {
+                        Text("Auto-suggested from name")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
-                Toggle(isOn: $allowsNotes) {
-                    Label("Notes", systemImage: "note.text")
-                }
+                Spacer()
             }
-            .onChange(of: allowsPhoto) { _, newValue in
-                if newValue && photoCadence == .never {
-                    photoCadence = .weekly
+
+            DisclosureGroup("Customize") {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        ForEach(iconOptions, id: \.self) { icon in
+                            Button {
+                                selectedIcon = icon
+                                appearanceAutoSet = false
+                            } label: {
+                                Image(systemName: icon)
+                                    .font(.system(size: 18))
+                                    .frame(width: 38, height: 38)
+                                    .background(selectedIcon == icon ? Color(hex: selectedColor).opacity(0.3) : Color(.tertiarySystemFill))
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                                    .foregroundStyle(selectedIcon == icon ? Color(hex: selectedColor) : .secondary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.vertical, 4)
                 }
-                if !newValue {
-                    photoCadence = .never
-                }
-            }
-            .onChange(of: selectedType) { _, newType in
-                if newType == .cumulative {
-                    allowsPhoto = false
-                    photoCadence = .never
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(colorOptions, id: \.self) { color in
+                            Button {
+                                selectedColor = color
+                                appearanceAutoSet = false
+                            } label: {
+                                Circle()
+                                    .fill(Color(hex: color))
+                                    .frame(width: 30, height: 30)
+                                    .overlay {
+                                        if selectedColor == color {
+                                            Image(systemName: "checkmark")
+                                                .font(.caption).fontWeight(.bold)
+                                                .foregroundStyle(.white)
+                                        }
+                                    }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.vertical, 4)
                 }
             }
         }
@@ -577,38 +553,6 @@ struct AddActivityView: View {
 
     // MARK: - Advanced Integrations
 
-    @ViewBuilder
-    private var notificationsSection: some View {
-        if selectedType == .container {
-            Section("Reminders") {
-                Toggle("Nudge if incomplete", isOn: $enableReminder)
-                if enableReminder {
-                    Text("You'll get an evening reminder if any child activity is incomplete.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        } else {
-            Section("Reminders") {
-                Toggle("Enable Reminder", isOn: $enableReminder)
-
-                if enableReminder {
-                    Picker("Type", selection: $reminderType) {
-                        Text("Time").tag(ReminderType.time)
-                        Text("Morning Nudge").tag(ReminderType.morning)
-                        Text("Evening Check-In").tag(ReminderType.evening)
-                        Text("Periodic").tag(ReminderType.periodic)
-                    }
-
-                    if reminderType == .time {
-                        DatePicker("At", selection: $reminderTime, displayedComponents: .hourAndMinute)
-                    } else if reminderType == .periodic {
-                        Stepper("Every \(periodicInterval) hours", value: $periodicInterval, in: 1...12)
-                    }
-                }
-            }
-        }
-    }
 
     private var healthKitSection: some View {
         Section("HealthKit") {
@@ -642,7 +586,7 @@ struct AddActivityView: View {
 
         let schedule: Schedule
         if selectedType == .container {
-            schedule = .daily // containers auto-show based on children
+            schedule = .daily
         } else {
             switch scheduleType {
             case .daily: schedule = .daily
@@ -652,39 +596,15 @@ struct AddActivityView: View {
             case .adhoc: schedule = .adhoc(adhocDate)
             }
         }
-        
-        // Reminder
-        let reminder: ReminderPreset
-        if enableReminder {
-            if selectedType == .container {
-                // Container nudge: evening check-in for incomplete children
-                reminder = .eveningCheckIn
-            } else {
-                switch reminderType {
-                case .time:
-                    let comps = Calendar.current.dateComponents([.hour, .minute], from: reminderTime)
-                    reminder = .remindAt(hour: comps.hour ?? 9, minute: comps.minute ?? 0)
-                case .morning: reminder = .morningNudge
-                case .evening: reminder = .eveningCheckIn
-                case .periodic: reminder = .periodic(hours: periodicInterval)
-                }
-            }
-        } else {
-            reminder = .none
-        }
 
         if let activity = activityToEdit {
-            // Always ask when activity has logs — simpler, more robust
             if !activity.logs.isEmpty {
                 pendingSchedule = schedule
-                pendingReminder = reminder
                 showEditScopeDialog = true
                 return
             }
-
-            performSave(activity: activity, schedule: schedule, reminder: reminder, futureOnly: false)
+            performSave(activity: activity, schedule: schedule, futureOnly: false)
         } else {
-            // Insert New
             let activity = Activity(
                 name: trimmed,
                 icon: selectedIcon,
@@ -695,41 +615,36 @@ struct AddActivityView: View {
                 category: selectedCategory
             )
 
-            // Multi-session support
             if isMultiSession && selectedSlots.count > 1 {
                 activity.timeSlots = selectedSlots.sorted()
             }
-            
-            activity.reminder = reminder
-            
-            if selectedType != .container {
-                activity.allowsPhoto = allowsPhoto
-                activity.photoCadence = allowsPhoto ? photoCadence : .never
-                activity.allowsNotes = allowsNotes
+
+            if selectedType == .metric {
+                activity.metricKind = selectedMetricKind
             }
-            
-            if selectedType == .value || selectedType == .cumulative {
+
+            if selectedType == .value || selectedType == .cumulative || (selectedType == .metric && selectedMetricKind == .value) {
                 activity.unit = unit.isEmpty ? nil : unit
             }
             if selectedType == .cumulative, let target = Double(targetValueText) {
                 activity.targetValue = target
             }
-            
+
             if isSubActivity, let parent = selectedParent {
                 activity.parent = parent
             }
-            
-            if selectedType != .container && enableHealthKit {
+
+            if selectedType != .container && selectedType != .metric && enableHealthKit {
                 activity.healthKitTypeID = hkType
                 activity.healthKitModeRaw = hkMode
             }
-            
+
             modelContext.insert(activity)
         }
-        
+
         dismiss()
     }
-    
+
     private func archiveActivity() {
         if let activity = activityToEdit {
             activity.isArchived = true
@@ -751,13 +666,11 @@ struct AddActivityView: View {
         }
     }
 
-
     // MARK: - Perform Save (with optional snapshot)
 
-    private func performSave(activity: Activity, schedule: Schedule, reminder: ReminderPreset, futureOnly: Bool) {
+    private func performSave(activity: Activity, schedule: Schedule, futureOnly: Bool) {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
 
-        // Snapshot current config before mutation if future-only
         if futureOnly {
             let effectiveFrom = activity.configSnapshots
                 .compactMap { $0.effectiveUntil }
@@ -773,14 +686,16 @@ struct AddActivityView: View {
             modelContext.insert(snapshot)
         }
 
-        // Apply all changes to the activity
         activity.name = trimmed
         activity.icon = selectedIcon
         activity.hexColor = selectedColor
         activity.type = selectedType
         activity.scheduleData = try? JSONEncoder().encode(schedule)
         activity.category = selectedCategory
-        activity.reminderData = try? JSONEncoder().encode(reminder)
+
+        if selectedType == .metric {
+            activity.metricKind = selectedMetricKind
+        }
 
         if selectedType != .container {
             if isMultiSession && selectedSlots.count > 1 {
@@ -791,16 +706,11 @@ struct AddActivityView: View {
                 activity.timeWindowData = try? JSONEncoder().encode(TimeWindow(slot: selectedSlot))
                 activity.timeSlotsData = nil
             }
-            activity.allowsPhoto = allowsPhoto
-            activity.photoCadence = allowsPhoto ? photoCadence : .never
-            activity.allowsNotes = allowsNotes
         } else {
             activity.timeWindowData = nil
-            activity.allowsPhoto = false
-            activity.allowsNotes = false
         }
 
-        if selectedType == .value || selectedType == .cumulative {
+        if selectedType == .value || selectedType == .cumulative || (selectedType == .metric && selectedMetricKind == .value) {
             activity.unit = unit.isEmpty ? nil : unit
         }
         if selectedType == .cumulative, let target = Double(targetValueText) {
@@ -813,20 +723,14 @@ struct AddActivityView: View {
             activity.parent = nil
         }
 
-        if enableHealthKit {
+        if selectedType != .container && selectedType != .metric && enableHealthKit {
             activity.healthKitTypeID = hkType
             activity.healthKitModeRaw = hkMode
-        } else {
+        } else if selectedType == .container || selectedType == .metric {
             activity.healthKitTypeID = nil
             activity.healthKitModeRaw = nil
         }
     }
-}
-
-// Helper Enums for UI state
-enum ReminderType: String, CaseIterable, Identifiable {
-    case time, morning, evening, periodic
-    var id: String { rawValue }
 }
 
 enum ScheduleMode {

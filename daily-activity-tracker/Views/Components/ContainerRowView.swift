@@ -10,30 +10,43 @@ struct ContainerRowView: View {
     let onCompleteChild: (Activity) -> Void
     let onSkipChild: (Activity, String) -> Void
 
+    /// When set, only show children applicable to this time slot
+    var slotFilter: TimeSlot? = nil
+
     @State private var isExpanded = false
     @State private var showSkipSheet = false
 
     private static let skipReasons = ["Injury", "Weather", "Sick", "Not Feeling Well", "Other"]
 
-    /// Children that should appear today (respecting historical membership + schedules)
+    /// Children that should appear today, optionally filtered by time slot
     private var todayChildren: [Activity] {
-        activity.historicalChildren(on: today, from: allActivities)
+        let base = activity.historicalChildren(on: today, from: allActivities)
             .filter { scheduleEngine.shouldShow($0, on: today) }
-            .sorted { $0.sortOrder < $1.sortOrder }
+
+        let filtered: [Activity]
+        if let slot = slotFilter {
+            filtered = base.filter { child in
+                if child.isMultiSession {
+                    return child.timeSlots.contains(slot)
+                }
+                return (child.timeWindow?.slot ?? .morning) == slot
+            }
+        } else {
+            filtered = base
+        }
+
+        return filtered.sorted { $0.sortOrder < $1.sortOrder }
     }
 
-    /// Partial completion score based on weighted children
+    /// Partial completion score based on children (equal weight)
     private var completionScore: Double {
         let applicable = todayChildren
         guard !applicable.isEmpty else { return 1.0 }
 
-        let totalWeight = applicable.reduce(0.0) { $0 + $1.weight }
-        guard totalWeight > 0 else { return 1.0 }
-
-        let completedWeight = applicable.reduce(0.0) { sum, child in
-            sum + (childCompletion(child) * child.weight)
+        let completedSum = applicable.reduce(0.0) { sum, child in
+            sum + childCompletion(child)
         }
-        return completedWeight / totalWeight
+        return completedSum / Double(applicable.count)
     }
 
     /// Completion fraction for a single child (0 or 1 for checkbox, proportional for cumulative)
@@ -41,7 +54,7 @@ struct ContainerRowView: View {
         let childLogs = todayLogs.filter { $0.activity?.id == child.id }
 
         switch child.type {
-        case .checkbox:
+        case .checkbox, .metric:
             return childLogs.contains(where: { $0.status == .completed }) ? 1.0 : 0.0
         case .value:
             return childLogs.contains(where: { $0.status == .completed }) ? 1.0 : 0.0

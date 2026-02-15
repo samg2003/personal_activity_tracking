@@ -23,8 +23,8 @@ struct ActivityDetailView: View {
                 // Header
                 headerSection
 
-                // Photo Timeline (only for activities with photos)
-                if activity.allowsPhoto {
+                // Photo Timeline (only for photo-metric activities)
+                if activity.type == .metric && activity.metricKind == .photo {
                     photoSection
                 }
 
@@ -37,7 +37,7 @@ struct ActivityDetailView: View {
         .navigationTitle(activity.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if activity.allowsPhoto {
+            if activity.type == .metric && activity.metricKind == .photo {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { showCamera = true } label: {
                         Image(systemName: "camera.fill")

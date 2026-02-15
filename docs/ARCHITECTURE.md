@@ -75,18 +75,15 @@ erDiagram
         String name
         String icon
         String hexColor
-        Enum type "checkbox|value|cumulative|container"
+        Enum type "checkbox|value|cumulative|container|metric"
         JSON schedule "Codable struct"
         JSON timeWindow "Codable struct (optional)"
         JSON timeSlotsData "multi-session slots (optional)"
         Double targetValue "optional"
         String unit "optional"
-        Bool allowsPhoto
-        Bool allowsNotes
-        Double weight "default 1.0"
+        Enum metricKindRaw "photo|value|checkbox|notes (optional, metric only)"
         String healthKitTypeID "optional"
         Enum healthKitMode "read|write|both (optional)"
-        JSON reminderPreset "Codable enum (optional)"
         Bool isArchived
         Date createdAt
         Date stoppedAt "optional - stop tracking date"
@@ -313,6 +310,26 @@ daily-activity-tracker/
 ### ADR-8: Metrics as Activities
 **Decision**: Goals are linked to Activities via `GoalActivity` junction table with a `role` field (`.activity` for contributing habits, `.metric` for outcome measurements). Metric config (baseline, target, direction) lives on the GoalActivity link, not on the Goal. GoalMeasurement was removed — measurements are just ActivityLog entries on metric-role activities. A goal can have up to 5 metrics.
 **Rationale**: Measuring something (body fat, deadhang time) IS an activity you schedule and track. The existing `ActivityLog` already captures values (numeric), photos (visual progress), and completion status (boolean milestones). Duplicating this with a separate GoalMeasurement model was unnecessary complexity. This design also means metric activities get consistency tracking for free ("did you actually measure this week?").
+
+### ADR-9: Activity Model Simplification
+**Decision**: Removed `allowsPhoto`, `photoCadenceRaw`, `allowsNotes`, `reminderData`, and `weight` from `Activity`. Added `.metric` to `ActivityType` with a `MetricKind` enum (photo, value, checkbox, notes). Photo tracking is now a metric activity with `metricKind == .photo`. Per-activity reminders removed in favor of global notifications (Phase 2). Container children use equal weighting.
+**Rationale**: The old composable-inputs approach (`allowsPhoto + photoCadence + allowsNotes`) created a combinatorial explosion of UI states. With metrics-as-activities, photo tracking is just another metric kind. Activity-level weight was rarely used and conflated with goal-level weighting. Per-activity reminders had low engagement; global day-part nudges are more effective.
+
+### ADR-10: Smart Appearance Auto-Pick
+**Decision**: `ActivityAppearance` service uses a curated keyword→(icon, color) dictionary (100+ entries) to auto-suggest icon and color from the activity name. Manual override is available via a `DisclosureGroup` at the bottom of the form. Editing an existing activity disables auto-suggest.
+**Rationale**: Reduces friction during activity creation — users rarely care about icons. Keyword matching is simple, zero-latency, and covers 90%+ of common activity names. The `DisclosureGroup` keeps the manual option accessible without cluttering the primary creation flow.
+
+### ADR-11: Container Multi-Session Expansion
+**Decision**: Containers appear in each time slot where they have applicable children. `ContainerRowView` accepts a `slotFilter` parameter to show only children active in that slot. `groupedBySlot` expands containers by iterating over slots and checking children's time windows.
+**Rationale**: A container like "Morning Routine" with children in both morning and evening slots must show in both buckets. Without expansion, the container only appeared in one slot (defaulting to morning), hiding evening children.
+
+### ADR-12: Global Day-Part Notifications
+**Decision**: Replaced per-activity `ReminderPreset` with three global day-part reminders (morning/afternoon/evening) stored in `UserDefaults`. Each has an enable toggle and configurable time. Configured in `SettingsView`.
+**Rationale**: Per-activity reminders had low engagement and added setup friction. Global day-part nudges are simpler, more effective, and don't require activity-level configuration.
+
+### ADR-13: Container Goal-Linking
+**Decision**: Containers can be linked to goals in the `.activity` (habit) role only. Container consistency = fraction of scheduled days where ALL non-archived children have completion logs. Containers cannot be metrics.
+**Rationale**: A container like "Workout Routine" represents a unit of work — if all exercises are done, the routine is complete. Individual children can also be linked separately as metrics if needed.
 
 ---
 

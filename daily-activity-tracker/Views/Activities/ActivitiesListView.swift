@@ -609,20 +609,9 @@ struct ActivitiesListView: View {
                 tagView("HealthKit", color: .red, icon: "heart.fill")
             }
 
-            // Photo + cadence
-            if activity.allowsPhoto {
-                let cadenceStr = activity.photoCadence != .never ? ": \(activity.photoCadence.rawValue.capitalized)" : ""
-                tagView("Photo\(cadenceStr)", color: .purple, icon: "camera.fill")
-            }
-
-            // Notes
-            if activity.allowsNotes {
-                tagView("Notes", color: .mint, icon: "note.text")
-            }
-
-            // Weight (only if non-default)
-            if activity.weight != 1.0 {
-                tagView("Weight: \(formatValue(activity.weight))", color: .orange)
+            // Metric kind
+            if activity.type == .metric, let kind = activity.metricKind {
+                tagView(kind.displayName, color: .purple, icon: kind.systemImage)
             }
         }
     }

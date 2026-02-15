@@ -5,6 +5,7 @@ enum ActivityType: String, Codable, CaseIterable, Identifiable {
     case value
     case cumulative
     case container
+    case metric
 
     var id: String { rawValue }
 
@@ -14,6 +15,7 @@ enum ActivityType: String, Codable, CaseIterable, Identifiable {
         case .value: return "Value"
         case .cumulative: return "Cumulative"
         case .container: return "Container"
+        case .metric: return "Metric"
         }
     }
 
@@ -23,6 +25,7 @@ enum ActivityType: String, Codable, CaseIterable, Identifiable {
         case .value: return "number"
         case .cumulative: return "chart.bar.fill"
         case .container: return "folder"
+        case .metric: return "chart.line.uptrend.xyaxis"
         }
     }
 }

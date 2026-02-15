@@ -31,7 +31,7 @@ struct AddGoalView: View {
     ]
 
     private var linkableActivities: [Activity] {
-        allActivities.filter { !$0.isArchived && $0.type != .container }
+        allActivities.filter { !$0.isArchived }
     }
 
     private var metricCount: Int {
@@ -205,16 +205,22 @@ struct AddGoalView: View {
                 }
                 Spacer()
 
-                // Role toggle
-                Picker("", selection: item.role) {
-                    Text("Habit").tag(GoalActivityRole.activity)
-                    Text("Metric").tag(GoalActivityRole.metric)
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 140)
-                .onChange(of: item.wrappedValue.role) { _, newRole in
-                    if newRole == .metric && metricCount > 5 {
-                        item.wrappedValue.role = .activity
+                // Role toggle (containers are always "Habit" role)
+                if activity?.type == .container {
+                    Text("Habit")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Picker("", selection: item.role) {
+                        Text("Habit").tag(GoalActivityRole.activity)
+                        Text("Metric").tag(GoalActivityRole.metric)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 140)
+                    .onChange(of: item.wrappedValue.role) { _, newRole in
+                        if newRole == .metric && metricCount > 5 {
+                            item.wrappedValue.role = .activity
+                        }
                     }
                 }
             }

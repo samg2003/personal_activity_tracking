@@ -19,14 +19,10 @@ final class Activity {
     var scheduleData: Data?
     var timeWindowData: Data?
     var timeSlotsData: Data?  // Encoded [TimeSlot] for multi-session
-    var reminderData: Data?
 
     var targetValue: Double?
     var unit: String?
-    var allowsPhoto: Bool = false
-    var photoCadenceRaw: String = PhotoCadence.never.rawValue
-    var allowsNotes: Bool = false
-    var weight: Double = 1.0
+    var metricKindRaw: String?  // Only when type == .metric
     var sortOrder: Int = 0
     var isArchived: Bool = false
     var createdAt: Date = Date()
@@ -77,24 +73,14 @@ final class Activity {
         }
     }
 
-    var reminder: ReminderPreset? {
-        get {
-            guard let data = reminderData else { return nil }
-            return try? JSONDecoder().decode(ReminderPreset.self, from: data)
-        }
-        set {
-            reminderData = newValue.flatMap { try? JSONEncoder().encode($0) }
-        }
+    var metricKind: MetricKind? {
+        get { metricKindRaw.flatMap { MetricKind(rawValue: $0) } }
+        set { metricKindRaw = newValue?.rawValue }
     }
 
     var healthKitMode: HealthKitMode? {
         get { healthKitModeRaw.flatMap { HealthKitMode(rawValue: $0) } }
         set { healthKitModeRaw = newValue?.rawValue }
-    }
-
-    var photoCadence: PhotoCadence {
-        get { PhotoCadence(rawValue: photoCadenceRaw) ?? .never }
-        set { photoCadenceRaw = newValue.rawValue }
     }
 
     /// Multiple time slots for multi-session activities (e.g., morning + evening)

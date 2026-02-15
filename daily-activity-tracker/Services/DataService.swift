@@ -36,12 +36,9 @@ final class DataService {
         let scheduleData: Data?
         let timeWindowData: Data?
         let timeSlotsData: Data?
-        let reminderData: Data?
         let targetValue: Double?
         let unit: String?
-        let allowsPhoto: Bool
-        let allowsNotes: Bool
-        let weight: Double
+        let metricKindRaw: String?
         let sortOrder: Int
         let isArchived: Bool
         let createdAt: Date
@@ -53,19 +50,18 @@ final class DataService {
 
         init(id: UUID, name: String, icon: String, hexColor: String,
              typeRaw: String, scheduleData: Data?, timeWindowData: Data?,
-             timeSlotsData: Data?, reminderData: Data?,
-             targetValue: Double?, unit: String?,
-             allowsPhoto: Bool, allowsNotes: Bool,
-             weight: Double, sortOrder: Int, isArchived: Bool,
+             timeSlotsData: Data?,
+             targetValue: Double?, unit: String?, metricKindRaw: String?,
+             sortOrder: Int, isArchived: Bool,
              createdAt: Date, categoryID: UUID?, parentID: UUID?,
              stoppedAt: Date? = nil,
              healthKitTypeID: String? = nil, healthKitModeRaw: String? = nil) {
             self.id = id; self.name = name; self.icon = icon; self.hexColor = hexColor
             self.typeRaw = typeRaw; self.scheduleData = scheduleData
             self.timeWindowData = timeWindowData; self.timeSlotsData = timeSlotsData
-            self.reminderData = reminderData; self.targetValue = targetValue; self.unit = unit
-            self.allowsPhoto = allowsPhoto; self.allowsNotes = allowsNotes
-            self.weight = weight; self.sortOrder = sortOrder; self.isArchived = isArchived
+            self.targetValue = targetValue; self.unit = unit
+            self.metricKindRaw = metricKindRaw
+            self.sortOrder = sortOrder; self.isArchived = isArchived
             self.createdAt = createdAt; self.categoryID = categoryID; self.parentID = parentID
             self.stoppedAt = stoppedAt; self.healthKitTypeID = healthKitTypeID
             self.healthKitModeRaw = healthKitModeRaw
@@ -81,12 +77,9 @@ final class DataService {
             scheduleData = try c.decodeIfPresent(Data.self, forKey: .scheduleData)
             timeWindowData = try c.decodeIfPresent(Data.self, forKey: .timeWindowData)
             timeSlotsData = try c.decodeIfPresent(Data.self, forKey: .timeSlotsData)
-            reminderData = try c.decodeIfPresent(Data.self, forKey: .reminderData)
             targetValue = try c.decodeIfPresent(Double.self, forKey: .targetValue)
             unit = try c.decodeIfPresent(String.self, forKey: .unit)
-            allowsPhoto = try c.decodeIfPresent(Bool.self, forKey: .allowsPhoto) ?? false
-            allowsNotes = try c.decodeIfPresent(Bool.self, forKey: .allowsNotes) ?? false
-            weight = try c.decodeIfPresent(Double.self, forKey: .weight) ?? 1.0
+            metricKindRaw = try c.decodeIfPresent(String.self, forKey: .metricKindRaw)
             sortOrder = try c.decodeIfPresent(Int.self, forKey: .sortOrder) ?? 0
             isArchived = try c.decodeIfPresent(Bool.self, forKey: .isArchived) ?? false
             createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
@@ -95,6 +88,7 @@ final class DataService {
             stoppedAt = try c.decodeIfPresent(Date.self, forKey: .stoppedAt)
             healthKitTypeID = try c.decodeIfPresent(String.self, forKey: .healthKitTypeID)
             healthKitModeRaw = try c.decodeIfPresent(String.self, forKey: .healthKitModeRaw)
+            // Old fields silently ignored: allowsPhoto, allowsNotes, weight, reminderData
         }
     }
     
@@ -260,12 +254,9 @@ final class DataService {
                 scheduleData: $0.scheduleData,
                 timeWindowData: $0.timeWindowData,
                 timeSlotsData: $0.timeSlotsData,
-                reminderData: $0.reminderData,
                 targetValue: $0.targetValue,
                 unit: $0.unit,
-                allowsPhoto: $0.allowsPhoto,
-                allowsNotes: $0.allowsNotes,
-                weight: $0.weight,
+                metricKindRaw: $0.metricKindRaw,
                 sortOrder: $0.sortOrder,
                 isArchived: $0.isArchived,
                 createdAt: $0.createdAt,
@@ -399,12 +390,9 @@ final class DataService {
             act.scheduleData = dto.scheduleData
             act.timeWindowData = dto.timeWindowData
             act.timeSlotsData = dto.timeSlotsData
-            act.reminderData = dto.reminderData
             act.targetValue = dto.targetValue
             act.unit = dto.unit
-            act.allowsPhoto = dto.allowsPhoto
-            act.allowsNotes = dto.allowsNotes
-            act.weight = dto.weight
+            act.metricKindRaw = dto.metricKindRaw
             act.sortOrder = dto.sortOrder
             act.isArchived = dto.isArchived
             act.createdAt = dto.createdAt

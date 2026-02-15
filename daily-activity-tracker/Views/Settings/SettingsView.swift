@@ -12,10 +12,39 @@ struct SettingsView: View {
     @State private var exportURL: URL?
     @State private var alertMessage = ""
     @State private var showAlert = false
+
+    // Notification state (synced with UserDefaults via NotificationService)
+    @State private var morningEnabled = NotificationService.shared.morningConfig.enabled
+    @State private var morningTime = Self.dateFrom(NotificationService.shared.morningConfig)
+    @State private var afternoonEnabled = NotificationService.shared.afternoonConfig.enabled
+    @State private var afternoonTime = Self.dateFrom(NotificationService.shared.afternoonConfig)
+    @State private var eveningEnabled = NotificationService.shared.eveningConfig.enabled
+    @State private var eveningTime = Self.dateFrom(NotificationService.shared.eveningConfig)
+
+    private static func dateFrom(_ config: NotificationService.DayPartConfig) -> Date {
+        Calendar.current.date(from: DateComponents(hour: config.hour, minute: config.minute)) ?? Date()
+    }
     
     var body: some View {
         NavigationStack {
             List {
+                Section("Reminders") {
+                    reminderRow(
+                        label: "Morning", icon: "sunrise.fill", color: .orange,
+                        enabled: $morningEnabled, time: $morningTime
+                    )
+                    reminderRow(
+                        label: "Afternoon", icon: "sun.max.fill", color: .yellow,
+                        enabled: $afternoonEnabled, time: $afternoonTime
+                    )
+                    reminderRow(
+                        label: "Evening", icon: "moon.fill", color: .indigo,
+                        enabled: $eveningEnabled, time: $eveningTime
+                    )
+                } footer: {
+                    Text("Get a daily nudge to check your activities.")
+                }
+
                 Section("Data Management") {
                     Button {
                         exportData()
@@ -160,6 +189,49 @@ struct SettingsView: View {
             alertMessage = "Failed to clear data: \(error.localizedDescription)"
             showAlert = true
         }
+    }
+
+    // MARK: - Reminder Helpers
+
+    @ViewBuilder
+    private func reminderRow(
+        label: String, icon: String, color: Color,
+        enabled: Binding<Bool>, time: Binding<Date>
+    ) -> some View {
+        VStack(spacing: 4) {
+            Toggle(isOn: enabled) {
+                Label(label, systemImage: icon)
+                    .foregroundStyle(color)
+            }
+            .onChange(of: enabled.wrappedValue) { _, _ in saveNotificationSettings() }
+
+            if enabled.wrappedValue {
+                DatePicker("Time", selection: time, displayedComponents: .hourAndMinute)
+                    .datePickerStyle(.compact)
+                    .onChange(of: time.wrappedValue) { _, _ in saveNotificationSettings() }
+            }
+        }
+    }
+
+    private func saveNotificationSettings() {
+        let cal = Calendar.current
+
+        let mc = cal.dateComponents([.hour, .minute], from: morningTime)
+        NotificationService.shared.morningConfig = .init(
+            enabled: morningEnabled, hour: mc.hour ?? 8, minute: mc.minute ?? 0
+        )
+
+        let ac = cal.dateComponents([.hour, .minute], from: afternoonTime)
+        NotificationService.shared.afternoonConfig = .init(
+            enabled: afternoonEnabled, hour: ac.hour ?? 13, minute: ac.minute ?? 0
+        )
+
+        let ec = cal.dateComponents([.hour, .minute], from: eveningTime)
+        NotificationService.shared.eveningConfig = .init(
+            enabled: eveningEnabled, hour: ec.hour ?? 20, minute: ec.minute ?? 0
+        )
+
+        NotificationService.shared.rescheduleAll()
     }
 }
 
