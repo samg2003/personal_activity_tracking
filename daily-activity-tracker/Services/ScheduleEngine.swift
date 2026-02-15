@@ -9,7 +9,11 @@ protocol ScheduleEngineProtocol {
 final class ScheduleEngine: ScheduleEngineProtocol {
 
     func shouldShow(_ activity: Activity, on date: Date) -> Bool {
-        guard !activity.isArchived else { return false }
+        // Archived activities: only show on historical dates before they were stopped
+        if activity.isArchived {
+            guard let stopped = activity.stoppedAt,
+                  date.startOfDay <= stopped else { return false }
+        }
         // Don't show activities before they were created
         if date.startOfDay < activity.createdAt.startOfDay { return false }
         // Stopped activities don't appear after their stop date
@@ -40,7 +44,7 @@ final class ScheduleEngine: ScheduleEngineProtocol {
         }
 
         return activities
-            .filter { $0.parent == nil }   // only top-level
+            .filter { $0.parent == nil && $0.parentID(on: date) == nil }  // only top-level (current + historical)
             .filter { shouldShow($0, on: date) }
             .sorted { $0.sortOrder < $1.sortOrder }
     }

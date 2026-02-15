@@ -146,6 +146,20 @@ final class Activity {
         configSnapshot(for: date)?.parentID ?? parent?.id
     }
 
+    /// Returns children that belonged to this container on a given date.
+    /// Includes current children AND any activity whose snapshot places it here historically.
+    func historicalChildren(on date: Date, from allActivities: [Activity]) -> [Activity] {
+        guard type == .container else { return [] }
+        var result = Set(children.map { $0.id })
+        // Also include activities whose snapshot parentID matches this container on that date
+        for act in allActivities where act.parent?.id != self.id {
+            if act.parentID(on: date) == self.id {
+                result.insert(act.id)
+            }
+        }
+        return allActivities.filter { result.contains($0.id) }
+    }
+
     // MARK: - Init
 
     init(

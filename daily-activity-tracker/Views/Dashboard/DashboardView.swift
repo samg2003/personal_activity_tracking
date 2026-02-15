@@ -506,6 +506,7 @@ struct DashboardView: View {
                     todayLogs: todayLogs,
                     scheduleEngine: scheduleEngine,
                     today: today,
+                    allActivities: allActivities,
                     onCompleteChild: { child in completeCheckbox(child) },
                     onSkipChild: { child, reason in skipActivity(child, reason: reason) }
                 )
@@ -531,7 +532,7 @@ struct DashboardView: View {
             guard let target = activity.targetValue, target > 0 else { return false }
             return cumulativeTotal(for: activity) >= target
         case .container:
-            let applicable = activity.children.filter { scheduleEngine.shouldShow($0, on: today) }
+            let applicable = activity.historicalChildren(on: today, from: allActivities).filter { scheduleEngine.shouldShow($0, on: today) }
             guard !applicable.isEmpty else { return true }
             return applicable.allSatisfy { isFullyCompleted($0) }
         }
@@ -539,7 +540,7 @@ struct DashboardView: View {
 
     private func isSkipped(_ activity: Activity) -> Bool {
         if activity.type == .container {
-            let applicable = activity.children.filter { scheduleEngine.shouldShow($0, on: today) }
+            let applicable = activity.historicalChildren(on: today, from: allActivities).filter { scheduleEngine.shouldShow($0, on: today) }
             guard !applicable.isEmpty else { return false }
             return applicable.allSatisfy { child in
                 todayLogs.contains { $0.activity?.id == child.id && $0.status == .skipped }
@@ -761,7 +762,7 @@ struct DashboardView: View {
 
     private func unskipActivity(_ activity: Activity) {
         if activity.type == .container {
-            let applicable = activity.children.filter { scheduleEngine.shouldShow($0, on: today) }
+            let applicable = activity.historicalChildren(on: today, from: allActivities).filter { scheduleEngine.shouldShow($0, on: today) }
             for child in applicable {
                 if let skipLog = todayLogs.first(where: {
                     $0.activity?.id == child.id && $0.status == .skipped
@@ -788,7 +789,7 @@ struct DashboardView: View {
     private func skipReason(for activity: Activity) -> String? {
         if activity.type == .container {
             // Return the first child's skip reason
-            let applicable = activity.children.filter { scheduleEngine.shouldShow($0, on: today) }
+            let applicable = activity.historicalChildren(on: today, from: allActivities).filter { scheduleEngine.shouldShow($0, on: today) }
             return applicable.compactMap { child in
                 todayLogs.first(where: { $0.activity?.id == child.id && $0.status == .skipped })?.skipReason
             }.first

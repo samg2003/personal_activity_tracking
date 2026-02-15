@@ -6,6 +6,7 @@ struct ContainerRowView: View {
     let todayLogs: [ActivityLog]
     let scheduleEngine: ScheduleEngineProtocol
     let today: Date
+    let allActivities: [Activity]
     let onCompleteChild: (Activity) -> Void
     let onSkipChild: (Activity, String) -> Void
 
@@ -14,9 +15,9 @@ struct ContainerRowView: View {
 
     private static let skipReasons = ["Injury", "Weather", "Sick", "Not Feeling Well", "Other"]
 
-    /// Children that should appear today (respecting their own schedules)
+    /// Children that should appear today (respecting historical membership + schedules)
     private var todayChildren: [Activity] {
-        (activity.children)
+        activity.historicalChildren(on: today, from: allActivities)
             .filter { scheduleEngine.shouldShow($0, on: today) }
             .sorted { $0.sortOrder < $1.sortOrder }
     }

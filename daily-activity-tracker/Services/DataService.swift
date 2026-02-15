@@ -46,10 +46,54 @@ final class DataService {
         let categoryID: UUID?
         let parentID: UUID?
         var stoppedAt: Date?
-        
-        // Advanced
         let healthKitTypeID: String?
         let healthKitModeRaw: String?
+
+        init(id: UUID, name: String, icon: String, hexColor: String,
+             typeRaw: String, scheduleData: Data?, timeWindowData: Data?,
+             timeSlotsData: Data?, reminderData: Data?,
+             targetValue: Double?, unit: String?,
+             allowsPhoto: Bool, allowsNotes: Bool,
+             weight: Double, sortOrder: Int, isArchived: Bool,
+             createdAt: Date, categoryID: UUID?, parentID: UUID?,
+             stoppedAt: Date? = nil,
+             healthKitTypeID: String? = nil, healthKitModeRaw: String? = nil) {
+            self.id = id; self.name = name; self.icon = icon; self.hexColor = hexColor
+            self.typeRaw = typeRaw; self.scheduleData = scheduleData
+            self.timeWindowData = timeWindowData; self.timeSlotsData = timeSlotsData
+            self.reminderData = reminderData; self.targetValue = targetValue; self.unit = unit
+            self.allowsPhoto = allowsPhoto; self.allowsNotes = allowsNotes
+            self.weight = weight; self.sortOrder = sortOrder; self.isArchived = isArchived
+            self.createdAt = createdAt; self.categoryID = categoryID; self.parentID = parentID
+            self.stoppedAt = stoppedAt; self.healthKitTypeID = healthKitTypeID
+            self.healthKitModeRaw = healthKitModeRaw
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            id = try c.decode(UUID.self, forKey: .id)
+            name = try c.decode(String.self, forKey: .name)
+            icon = try c.decodeIfPresent(String.self, forKey: .icon) ?? "star.fill"
+            hexColor = try c.decodeIfPresent(String.self, forKey: .hexColor) ?? "#007AFF"
+            typeRaw = try c.decodeIfPresent(String.self, forKey: .typeRaw) ?? "checkbox"
+            scheduleData = try c.decodeIfPresent(Data.self, forKey: .scheduleData)
+            timeWindowData = try c.decodeIfPresent(Data.self, forKey: .timeWindowData)
+            timeSlotsData = try c.decodeIfPresent(Data.self, forKey: .timeSlotsData)
+            reminderData = try c.decodeIfPresent(Data.self, forKey: .reminderData)
+            targetValue = try c.decodeIfPresent(Double.self, forKey: .targetValue)
+            unit = try c.decodeIfPresent(String.self, forKey: .unit)
+            allowsPhoto = try c.decodeIfPresent(Bool.self, forKey: .allowsPhoto) ?? false
+            allowsNotes = try c.decodeIfPresent(Bool.self, forKey: .allowsNotes) ?? false
+            weight = try c.decodeIfPresent(Double.self, forKey: .weight) ?? 1.0
+            sortOrder = try c.decodeIfPresent(Int.self, forKey: .sortOrder) ?? 0
+            isArchived = try c.decodeIfPresent(Bool.self, forKey: .isArchived) ?? false
+            createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+            categoryID = try c.decodeIfPresent(UUID.self, forKey: .categoryID)
+            parentID = try c.decodeIfPresent(UUID.self, forKey: .parentID)
+            stoppedAt = try c.decodeIfPresent(Date.self, forKey: .stoppedAt)
+            healthKitTypeID = try c.decodeIfPresent(String.self, forKey: .healthKitTypeID)
+            healthKitModeRaw = try c.decodeIfPresent(String.self, forKey: .healthKitModeRaw)
+        }
     }
     
     struct LogDTO: Codable {
@@ -63,6 +107,29 @@ final class DataService {
         let timeSlotRaw: String?
         let completedAt: Date?
         let activityID: UUID
+
+        init(id: UUID, date: Date, statusRaw: String, value: Double?,
+             photoFilename: String?, note: String?, skipReason: String?,
+             timeSlotRaw: String?, completedAt: Date?, activityID: UUID) {
+            self.id = id; self.date = date; self.statusRaw = statusRaw
+            self.value = value; self.photoFilename = photoFilename; self.note = note
+            self.skipReason = skipReason; self.timeSlotRaw = timeSlotRaw
+            self.completedAt = completedAt; self.activityID = activityID
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            id = try c.decode(UUID.self, forKey: .id)
+            date = try c.decode(Date.self, forKey: .date)
+            statusRaw = try c.decodeIfPresent(String.self, forKey: .statusRaw) ?? "completed"
+            value = try c.decodeIfPresent(Double.self, forKey: .value)
+            photoFilename = try c.decodeIfPresent(String.self, forKey: .photoFilename)
+            note = try c.decodeIfPresent(String.self, forKey: .note)
+            skipReason = try c.decodeIfPresent(String.self, forKey: .skipReason)
+            timeSlotRaw = try c.decodeIfPresent(String.self, forKey: .timeSlotRaw)
+            completedAt = try c.decodeIfPresent(Date.self, forKey: .completedAt)
+            activityID = try c.decode(UUID.self, forKey: .activityID)
+        }
     }
     
     struct VacationDTO: Codable {
@@ -81,6 +148,31 @@ final class DataService {
         let targetValue: Double?
         let unit: String?
         let parentID: UUID?
+
+        init(id: UUID, activityID: UUID, effectiveFrom: Date, effectiveUntil: Date,
+             scheduleData: Data?, timeWindowData: Data?, timeSlotsData: Data?,
+             typeRaw: String, targetValue: Double?, unit: String?, parentID: UUID?) {
+            self.id = id; self.activityID = activityID
+            self.effectiveFrom = effectiveFrom; self.effectiveUntil = effectiveUntil
+            self.scheduleData = scheduleData; self.timeWindowData = timeWindowData
+            self.timeSlotsData = timeSlotsData; self.typeRaw = typeRaw
+            self.targetValue = targetValue; self.unit = unit; self.parentID = parentID
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            id = try c.decode(UUID.self, forKey: .id)
+            activityID = try c.decode(UUID.self, forKey: .activityID)
+            effectiveFrom = try c.decode(Date.self, forKey: .effectiveFrom)
+            effectiveUntil = try c.decode(Date.self, forKey: .effectiveUntil)
+            scheduleData = try c.decodeIfPresent(Data.self, forKey: .scheduleData)
+            timeWindowData = try c.decodeIfPresent(Data.self, forKey: .timeWindowData)
+            timeSlotsData = try c.decodeIfPresent(Data.self, forKey: .timeSlotsData)
+            typeRaw = try c.decodeIfPresent(String.self, forKey: .typeRaw) ?? "checkbox"
+            targetValue = try c.decodeIfPresent(Double.self, forKey: .targetValue)
+            unit = try c.decodeIfPresent(String.self, forKey: .unit)
+            parentID = try c.decodeIfPresent(UUID.self, forKey: .parentID)
+        }
     }
     
     // MARK: - Export
