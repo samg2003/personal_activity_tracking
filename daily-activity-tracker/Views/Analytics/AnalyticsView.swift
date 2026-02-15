@@ -159,10 +159,24 @@ struct AnalyticsView: View {
 
     private func completionRate(for activity: Activity) -> Double {
         let logs = logsByActivity[activity.id] ?? []
-        // Last 7 days
-        let cutoff = Calendar.current.date(byAdding: .day, value: -7, to: Date())!
-        let relevantCount = logs.filter { $0.status == .completed && $0.date > cutoff }.count
-        return Double(relevantCount) / 7.0
+        let calendar = Calendar.current
+        let today = Date().startOfDay
+        let vacationDateSet = Set(vacationDays.map { $0.date.startOfDay })
+        
+        // Count non-vacation days in last 7
+        let eligibleDays = (0..<7).filter { offset in
+            guard let d = calendar.date(byAdding: .day, value: -offset, to: today) else { return false }
+            return !vacationDateSet.contains(d)
+        }.count
+        
+        guard eligibleDays > 0 else { return 0 }
+        
+        let cutoff = calendar.date(byAdding: .day, value: -7, to: today)!
+        let relevantCount = logs.filter {
+            $0.status == .completed && $0.date > cutoff &&
+            !vacationDateSet.contains($0.date.startOfDay)
+        }.count
+        return Double(relevantCount) / Double(eligibleDays)
     }
 
     private var doingWell: [Activity] {

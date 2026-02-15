@@ -6,6 +6,7 @@
 graph TB
     subgraph Views["Views (SwiftUI)"]
         DashboardView
+        ActivitiesListView
         ActivityEditorView
         ActivityDetailView
         AnalyticsView
@@ -222,6 +223,8 @@ daily-activity-tracker/
 │   │   │   ├── ActivityDetailView.swift
 │   │   │   ├── HeatmapView.swift
 │   │   │   └── ValueChartView.swift
+│   │   ├── Activities/
+│   │   │   └── ActivitiesListView.swift
 │   │   ├── Analytics/
 │   │   │   └── GlobalAnalyticsView.swift
 │   │   ├── Browser/

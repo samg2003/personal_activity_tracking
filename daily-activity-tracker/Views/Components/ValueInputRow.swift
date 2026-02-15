@@ -7,6 +7,7 @@ struct ValueInputRow: View {
     let onLog: (Double) -> Void
     var onRemove: (() -> Void)?
     var onShowLogs: (() -> Void)?
+    var onTakePhoto: (() -> Void)?
 
     @State private var showInput = false
     @State private var inputText = ""
@@ -45,6 +46,18 @@ struct ValueInputRow: View {
                 Text("Log \(unitLabel)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+
+            // Camera shortcut for photo-enabled activities
+            if let onTakePhoto {
+                Button {
+                    onTakePhoto()
+                } label: {
+                    Image(systemName: "camera")
+                        .font(.system(size: 14))
+                        .foregroundStyle(Color(hex: activity.hexColor).opacity(0.7))
+                }
+                .buttonStyle(.plain)
             }
         }
         .padding(.vertical, 8)
@@ -87,6 +100,14 @@ struct ValueInputRow: View {
                     onRemove()
                 } label: {
                     Label("Clear Value", systemImage: "trash")
+                }
+            }
+
+            if let onTakePhoto {
+                Button {
+                    onTakePhoto()
+                } label: {
+                    Label("Add Photo", systemImage: "camera")
                 }
             }
         }

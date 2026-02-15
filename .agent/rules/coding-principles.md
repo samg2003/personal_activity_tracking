@@ -10,4 +10,5 @@ trigger: always_on
 - Assume requirements can be changing, do not hardcode solutions, keep it generalizble and flexible. If design principles are followed, changing requirements should not warrant complete re-factoring
 - If something looks messy, fix it as you see!
 - Make sure everything is version controlled locally, but .gitignore anything that's not relevant etc.
-- If you are fixing Bugs from BUGS.MD promote your fix to human review section, also if asked to pick a bug, prioritize feeback of any pending human review ready bug before taking new bug.
+- If you are fixing Bugs from BUGS.MD promote your fix to human review section, also if asked to pick a bug, prioritize feeback of any pending human review ready bug before taking new bug. Add AI reply after each change in "promote your fix to human review section"
+- MAke sure to keep updating ARCHITECTURE.md and DATA_FORMAT.md as you make changes. Never make changes to REQUIREMENTS.md but feel free to suggest them to user via prompt.

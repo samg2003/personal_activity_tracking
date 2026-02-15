@@ -28,8 +28,9 @@ struct DashboardView: View {
     // Cumulative log sheet state
     @State private var logSheetActivity: Activity?
     
-    // Detail navigation state
-    @State private var detailActivity: Activity?
+    // Photo prompt state
+    @State private var photoPromptActivity: Activity?
+    @State private var photoPromptLog: ActivityLog?
 
 
     private let scheduleEngine: ScheduleEngineProtocol = ScheduleEngine()
@@ -69,6 +70,10 @@ struct DashboardView: View {
 
     private var completed: [Activity] {
         todayActivities.filter { isFullyCompleted($0) }
+    }
+
+    private var skippedActivities: [Activity] {
+        todayActivities.filter { isSkipped($0) && !isFullyCompleted($0) }
     }
 
     private var completionFraction: Double {
@@ -121,6 +126,7 @@ struct DashboardView: View {
                     timeBucketSections
                     backlogSection
                     completedSection
+                    skippedSection
                 }
                 .padding()
             }
@@ -158,15 +164,34 @@ struct DashboardView: View {
             .sheet(item: $logSheetActivity) { activity in
                 CumulativeLogSheet(activity: activity, date: today)
             }
+            .sheet(item: $photoPromptActivity) { activity in
+                NavigationStack {
+                    CameraView(
+                        activityID: activity.id,
+                        activityName: activity.name
+                    ) { image in
+                        if let filename = MediaService.shared.savePhoto(image, activityID: activity.id, date: today) {
+                            photoPromptLog?.photoFilename = filename
+                        }
+                        photoPromptActivity = nil
+                        photoPromptLog = nil
+                    }
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button("Skip Photo") {
+                                photoPromptActivity = nil
+                                photoPromptLog = nil
+                            }
+                        }
+                    }
+                }
+            }
             .sheet(isPresented: $showSettings) {
                 SettingsView()
             }
             .undoToast(isPresented: $showUndoToast, message: undoMessage, onUndo: undoAction)
             .overlay(alignment: .bottomTrailing) {
                 floatingActionButton
-            }
-            .navigationDestination(for: Activity.self) { activity in
-                ActivityDetailView(activity: activity)
             }
             .onAppear { syncHealthKit() }
             .onChange(of: scenePhase) { _, newPhase in
@@ -230,7 +255,6 @@ struct DashboardView: View {
     private var headerSection: some View {
         VStack(spacing: 8) {
             ProgressRingView(progress: completionFraction)
-                .frame(height: 110)
 
             if todayActivities.isEmpty {
                 Text("No activities for today")
@@ -239,7 +263,6 @@ struct DashboardView: View {
                     .padding(.top, 8)
             }
         }
-        .padding(.bottom, 8)
     }
 
     @ViewBuilder
@@ -247,7 +270,8 @@ struct DashboardView: View {
         AllDaySection(
             activities: allDayActivities,
             cumulativeValues: { cumulativeTotal(for: $0) },
-            onAdd: { activity, value in addCumulativeLog(activity, value: value) }
+            onAdd: { activity, value in addCumulativeLog(activity, value: value) },
+            onShowLogs: { activity in logSheetActivity = activity }
         )
     }
 
@@ -322,6 +346,72 @@ struct DashboardView: View {
         }
     }
 
+    @ViewBuilder
+    private var skippedSection: some View {
+        if !skippedActivities.isEmpty {
+            DisclosureGroup {
+                ForEach(skippedActivities) { activity in
+                    HStack(spacing: 10) {
+                        Image(systemName: "forward.fill")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.orange)
+
+                        Image(systemName: activity.icon)
+                            .font(.system(size: 14))
+                            .foregroundStyle(Color(hex: activity.hexColor).opacity(0.5))
+                            .frame(width: 24)
+
+                        Text(activity.name)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .strikethrough(true, color: .secondary)
+
+                        if let reason = skipReason(for: activity) {
+                            Text(reason)
+                                .font(.caption2)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(.orange.opacity(0.15))
+                                .foregroundStyle(.orange)
+                                .clipShape(Capsule())
+                        }
+
+                        Spacer()
+
+                        Button {
+                            unskipActivity(activity)
+                        } label: {
+                            Text(activity.type == .container ? "Unskip All" : "Unskip")
+                                .font(.caption.bold())
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 4)
+                                .background(Color.orange.opacity(0.15))
+                                .foregroundStyle(.orange)
+                                .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 14)
+                    .background(Color(.secondarySystemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+            } label: {
+                HStack {
+                    Image(systemName: "forward.fill")
+                        .foregroundStyle(.orange)
+                    Text("SKIPPED")
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundStyle(.secondary)
+                    Text("(\(skippedActivities.count))")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .tint(.secondary)
+        }
+    }
+
     // MARK: - Type-Dispatched Row
 
     @ViewBuilder
@@ -341,7 +431,10 @@ struct DashboardView: View {
                     activity: activity,
                     currentValue: latestValue(for: activity),
                     onLog: { value in logValue(activity, value: value) },
-                    onRemove: { removeValueLog(activity) }
+                    onRemove: { removeValueLog(activity) },
+                    onTakePhoto: activity.allowsPhoto ? {
+                        triggerPhotoPrompt(for: activity)
+                    } : nil
                 )
             case .cumulative:
                 ValueInputRow(
@@ -359,23 +452,6 @@ struct DashboardView: View {
                     onCompleteChild: { child in completeCheckbox(child) },
                     onSkipChild: { child, reason in skipActivity(child, reason: reason) }
                 )
-            }
-        }
-        .contextMenu {
-            NavigationLink(value: activity) {
-                Label("View Details", systemImage: "info.circle")
-            }
-            
-            Button {
-                editingActivity = activity
-            } label: {
-                Label("Edit", systemImage: "pencil")
-            }
-            
-            Button(role: .destructive) {
-                modelContext.delete(activity)
-            } label: {
-                Label("Delete", systemImage: "trash")
             }
         }
     }
@@ -400,10 +476,53 @@ struct DashboardView: View {
     }
 
     private func isSkipped(_ activity: Activity) -> Bool {
-        todayLogs.contains { $0.activity?.id == activity.id && $0.status == .skipped }
+        if activity.type == .container {
+            let applicable = activity.children.filter { scheduleEngine.shouldShow($0, on: today) }
+            guard !applicable.isEmpty else { return false }
+            // Container is skipped when ALL children are skipped (none pending, none completed-only)
+            return applicable.allSatisfy { child in
+                todayLogs.contains { $0.activity?.id == child.id && $0.status == .skipped }
+            }
+        }
+        return todayLogs.contains { $0.activity?.id == activity.id && $0.status == .skipped }
     }
 
-    // MARK: - Mutations
+    /// Checks whether a photo prompt should be triggered based on cadence
+    private func isPhotoDue(for activity: Activity) -> Bool {
+        let cadence = activity.photoCadence
+        guard cadence != .never else { return false }
+        if cadence == .everyTime { return true }
+
+        // Find the most recent log with a photo for this activity
+        let logsWithPhotos = allLogs.filter {
+            $0.activity?.id == activity.id && $0.photoFilename != nil
+        }
+        guard let lastPhotoDate = logsWithPhotos.map({ $0.date }).max() else {
+            return true // Never taken a photo, definitely due
+        }
+
+        let calendar = Calendar.current
+        let now = Date()
+        switch cadence {
+        case .weekly:
+            let daysSince = calendar.dateComponents([.day], from: lastPhotoDate, to: now).day ?? 0
+            return daysSince >= 7
+        case .monthly:
+            let daysSince = calendar.dateComponents([.day], from: lastPhotoDate, to: now).day ?? 0
+            return daysSince >= 30
+        case .everyTime, .never:
+            return false
+        }
+    }
+
+    /// Trigger photo capture sheet, optionally attaching to a specific log
+    private func triggerPhotoPrompt(for activity: Activity, log: ActivityLog? = nil) {
+        let targetLog = log ?? todayLogs.first(where: {
+            $0.activity?.id == activity.id && $0.status == .completed
+        })
+        photoPromptLog = targetLog
+        photoPromptActivity = activity
+    }
 
     private func completeCheckbox(_ activity: Activity) {
         if isFullyCompleted(activity) {
@@ -427,6 +546,11 @@ struct DashboardView: View {
         NotificationService.shared.cancelReminders(for: activity.id)
         writeToHealthKit(activity: activity, value: 1.0)
         
+        // Photo cadence check
+        if activity.allowsPhoto && isPhotoDue(for: activity) {
+            triggerPhotoPrompt(for: activity, log: log)
+        }
+        
         showUndo("Completed \(activity.name)") { [log] in
             modelContext.delete(log)
         }
@@ -442,6 +566,12 @@ struct DashboardView: View {
         // Integrations
         NotificationService.shared.cancelReminders(for: activity.id)
         writeToHealthKit(activity: activity, value: value)
+
+        // Photo cadence check for value activities
+        if activity.allowsPhoto && isPhotoDue(for: activity) {
+            photoPromptLog = log
+            photoPromptActivity = activity
+        }
     }
 
     private func addCumulativeLog(_ activity: Activity, value: Double) {
@@ -505,6 +635,38 @@ struct DashboardView: View {
         showUndo("Skipped \(activity.name)") { [log] in
             modelContext.delete(log)
         }
+    }
+
+    private func unskipActivity(_ activity: Activity) {
+        if activity.type == .container {
+            // Unskip all children
+            let applicable = activity.children.filter { scheduleEngine.shouldShow($0, on: today) }
+            for child in applicable {
+                if let skipLog = todayLogs.first(where: {
+                    $0.activity?.id == child.id && $0.status == .skipped
+                }) {
+                    modelContext.delete(skipLog)
+                }
+            }
+            return
+        }
+        guard let skipLog = todayLogs.first(where: {
+            $0.activity?.id == activity.id && $0.status == .skipped
+        }) else { return }
+        modelContext.delete(skipLog)
+    }
+
+    private func skipReason(for activity: Activity) -> String? {
+        if activity.type == .container {
+            // Return the first child's skip reason
+            let applicable = activity.children.filter { scheduleEngine.shouldShow($0, on: today) }
+            return applicable.compactMap { child in
+                todayLogs.first(where: { $0.activity?.id == child.id && $0.status == .skipped })?.skipReason
+            }.first
+        }
+        return todayLogs.first(where: {
+            $0.activity?.id == activity.id && $0.status == .skipped
+        })?.skipReason
     }
 
     private func showUndo(_ message: String, action: @escaping () -> Void) {

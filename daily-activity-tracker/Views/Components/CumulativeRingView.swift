@@ -5,6 +5,7 @@ struct CumulativeRingView: View {
     let activity: Activity
     let currentValue: Double
     let onAdd: (Double) -> Void
+    var onShowLogs: (() -> Void)?
 
     @State private var showInput = false
     @State private var inputText = ""
@@ -12,43 +13,75 @@ struct CumulativeRingView: View {
     private var target: Double { activity.targetValue ?? 1 }
     private var progress: Double { min(currentValue / target, 1.0) }
     private var unitLabel: String { activity.unit ?? "" }
+    private var color: Color { Color(hex: activity.hexColor) }
 
     var body: some View {
-        VStack(spacing: 6) {
-            ZStack {
-                Circle()
-                    .stroke(Color(.systemGray5), lineWidth: 6)
-                Circle()
-                    .trim(from: 0, to: progress)
-                    .stroke(
-                        Color(hex: activity.hexColor),
-                        style: StrokeStyle(lineWidth: 6, lineCap: .round)
-                    )
-                    .rotationEffect(.degrees(-90))
-                    .animation(.easeInOut(duration: 0.3), value: progress)
+        HStack(spacing: 12) {
+            // Activity icon
+            Image(systemName: activity.icon)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(color)
+                .frame(width: 24)
 
-                VStack(spacing: 0) {
-                    Text(formatValue(currentValue))
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
-                    if !unitLabel.isEmpty {
-                        Text(unitLabel)
-                            .font(.system(size: 9))
-                            .foregroundStyle(.secondary)
+            // Name + progress bar
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text(activity.name)
+                        .font(.subheadline.weight(.medium))
+                        .lineLimit(1)
+                    
+                    Spacer()
+                    
+                    Text("\(formatValue(currentValue))/\(formatValue(target)) \(unitLabel)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                // Flat progress bar
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(Color(.systemGray5))
+                            .frame(height: 6)
+
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(color)
+                            .frame(width: geo.size.width * progress, height: 6)
+                            .animation(.easeInOut(duration: 0.3), value: progress)
                     }
                 }
+                .frame(height: 6)
             }
-            .frame(width: 60, height: 60)
-            .onTapGesture { showInput = true }
 
-            HStack(spacing: 4) {
-                Image(systemName: activity.icon)
-                    .font(.system(size: 10))
-                    .foregroundStyle(Color(hex: activity.hexColor))
-                Text(activity.name)
-                    .font(.system(size: 11, weight: .medium))
-                    .lineLimit(1)
+            // Quick add button
+            Button {
+                showInput = true
+            } label: {
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 20))
+                    .foregroundStyle(color)
             }
-            .foregroundStyle(.secondary)
+            .buttonStyle(.plain)
+        }
+        .padding(.vertical, 10)
+        .padding(.horizontal, 14)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .onTapGesture { showInput = true }
+        .contextMenu {
+            Button {
+                showInput = true
+            } label: {
+                Label("Add Entry", systemImage: "plus.circle")
+            }
+            
+            if let onShowLogs {
+                Button {
+                    onShowLogs()
+                } label: {
+                    Label("View Entries", systemImage: "list.bullet")
+                }
+            }
         }
         .alert("Add \(activity.name)", isPresented: $showInput) {
             TextField("Amount", text: $inputText)

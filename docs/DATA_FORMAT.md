@@ -62,6 +62,7 @@ Defines the trackers themselves.
   "createdAt": "2026-01-01T00:00:00Z",
   "categoryID": "UUID-OF-CATEGORY",
   "allowsPhoto": false,
+  "photoCadenceRaw": "never",
   "allowsNotes": false,
   
   // Encoded Schedule (Daily by default if null)
@@ -91,7 +92,9 @@ Records of activity completion.
   "date": "2026-02-15T00:00:00Z",
   "statusRaw": "completed",
   "value": 500,
-  "completedAt": "2026-02-15T08:30:00Z"
+  "completedAt": "2026-02-15T08:30:00Z",
+  "photoFilename": null,
+  "skipReason": null
 }
 ```
 

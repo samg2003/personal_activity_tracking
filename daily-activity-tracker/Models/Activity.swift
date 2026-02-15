@@ -23,6 +23,7 @@ final class Activity {
     var targetValue: Double?
     var unit: String?
     var allowsPhoto: Bool = false
+    var photoCadenceRaw: String = PhotoCadence.never.rawValue
     var allowsNotes: Bool = false
     var weight: Double = 1.0
     var sortOrder: Int = 0
@@ -84,6 +85,11 @@ final class Activity {
     var healthKitMode: HealthKitMode? {
         get { healthKitModeRaw.flatMap { HealthKitMode(rawValue: $0) } }
         set { healthKitModeRaw = newValue?.rawValue }
+    }
+
+    var photoCadence: PhotoCadence {
+        get { PhotoCadence(rawValue: photoCadenceRaw) ?? .never }
+        set { photoCadenceRaw = newValue.rawValue }
     }
 
     // MARK: - Init

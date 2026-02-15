@@ -10,6 +10,9 @@ struct ContainerRowView: View {
     let onSkipChild: (Activity, String) -> Void
 
     @State private var isExpanded = false
+    @State private var showSkipSheet = false
+
+    private static let skipReasons = ["Injury", "Weather", "Sick", "Not Feeling Well", "Other"]
 
     /// Children that should appear today (respecting their own schedules)
     private var todayChildren: [Activity] {
@@ -62,6 +65,18 @@ struct ContainerRowView: View {
         todayChildren.filter { isChildCompleted($0) }.count
     }
 
+    private var pendingChildren: [Activity] {
+        todayChildren.filter { !isChildCompleted($0) && !isChildSkipped($0) }
+    }
+    
+    private var completedChildren: [Activity] {
+        todayChildren.filter { isChildCompleted($0) }
+    }
+    
+    private var skippedChildren: [Activity] {
+        todayChildren.filter { isChildSkipped($0) }
+    }
+
     var body: some View {
         VStack(spacing: 4) {
             // Parent header row
@@ -105,11 +120,45 @@ struct ContainerRowView: View {
             .padding(.horizontal, 14)
             .background(Color(.secondarySystemBackground))
             .clipShape(RoundedRectangle(cornerRadius: 12))
+            .contextMenu {
+                if !pendingChildren.isEmpty {
+                    Button {
+                        pendingChildren
+                            .filter { $0.type == .checkbox }
+                            .forEach { onCompleteChild($0) }
+                    } label: {
+                        Label("Complete All", systemImage: "checkmark.circle")
+                    }
+
+                    Button {
+                        showSkipSheet = true
+                    } label: {
+                        Label("Skip All Pending", systemImage: "forward")
+                    }
+                }
+                
+                if !completedChildren.isEmpty {
+                    Button(role: .destructive) {
+                        completedChildren.forEach { onCompleteChild($0) }
+                    } label: {
+                        Label("Undo All", systemImage: "arrow.uturn.backward")
+                    }
+                }
+            }
+            .confirmationDialog("Reason for skipping", isPresented: $showSkipSheet) {
+                ForEach(Self.skipReasons, id: \.self) { reason in
+                    Button(reason) {
+                        pendingChildren.forEach { onSkipChild($0, reason) }
+                    }
+                }
+                Button("Cancel", role: .cancel) { }
+            }
 
             // Expanded children
             if isExpanded {
                 VStack(spacing: 4) {
-                    ForEach(todayChildren) { child in
+                    // Pending children
+                    ForEach(pendingChildren) { child in
                         HStack {
                             Rectangle()
                                 .fill(Color(hex: activity.hexColor).opacity(0.3))
@@ -119,9 +168,69 @@ struct ContainerRowView: View {
                             childRow(child)
                         }
                     }
+                    
+                    // Completed children
+                    ForEach(completedChildren) { child in
+                        HStack {
+                            Rectangle()
+                                .fill(Color.green.opacity(0.3))
+                                .frame(width: 2)
+                                .padding(.leading, 20)
 
-                    // "Mark All Done" shortcut
-                    if doneCount < todayChildren.count {
+                            childRow(child)
+                        }
+                    }
+                    
+                    // Skipped children
+                    if !skippedChildren.isEmpty {
+                        HStack {
+                            Rectangle()
+                                .fill(Color.orange.opacity(0.3))
+                                .frame(width: 2)
+                                .padding(.leading, 20)
+                            
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "forward.fill")
+                                        .font(.caption2)
+                                        .foregroundStyle(.orange)
+                                    Text("Skipped (\(skippedChildren.count))")
+                                        .font(.caption)
+                                        .foregroundStyle(.orange)
+                                }
+                                
+                                ForEach(skippedChildren) { child in
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "forward.fill")
+                                            .font(.system(size: 12))
+                                            .foregroundStyle(.orange)
+                                        Text(child.name)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .strikethrough(true, color: .secondary)
+                                        
+                                        Spacer()
+                                        
+                                        if let reason = skipReason(for: child) {
+                                            Text(reason)
+                                                .font(.caption2)
+                                                .padding(.horizontal, 6)
+                                                .padding(.vertical, 2)
+                                                .background(.orange.opacity(0.15))
+                                                .foregroundStyle(.orange)
+                                                .clipShape(Capsule())
+                                        }
+                                    }
+                                    .padding(.vertical, 4)
+                                    .padding(.horizontal, 10)
+                                }
+                            }
+                            .padding(.vertical, 6)
+                        }
+                    }
+
+                    // "Mark All Done" shortcut — only if there are still pending children
+                    if !pendingChildren.isEmpty {
                         Button {
                             todayChildren
                                 .filter { !isChildCompleted($0) && !isChildSkipped($0) && $0.type == .checkbox }
@@ -165,5 +274,9 @@ struct ContainerRowView: View {
                 onSkip: { reason in onSkipChild(child, reason) }
             )
         }
+    }
+    
+    private func skipReason(for child: Activity) -> String? {
+        todayLogs.first(where: { $0.activity?.id == child.id && $0.status == .skipped })?.skipReason
     }
 }

@@ -29,6 +29,7 @@ struct AddActivityView: View {
 
     // Composable inputs
     @State private var allowsPhoto = false
+    @State private var photoCadence: PhotoCadence = .never
     @State private var allowsNotes = false
 
     // Reminders
@@ -151,6 +152,7 @@ struct AddActivityView: View {
         if let t = activity.targetValue { targetValueText = String(format: "%.0f", t) }
         
         allowsPhoto = activity.allowsPhoto
+        photoCadence = activity.photoCadence
         allowsNotes = activity.allowsNotes
         
         // Restore Category/Parent
@@ -439,11 +441,40 @@ struct AddActivityView: View {
     private var composableInputsSection: some View {
         if selectedType != .container {
             Section("Composable Inputs") {
-                Toggle(isOn: $allowsPhoto) {
-                    Label("Photo Tracking", systemImage: "camera")
+                // Photos don't apply to cumulative activities
+                if selectedType != .cumulative {
+                    Toggle(isOn: $allowsPhoto) {
+                        Label("Photo Tracking", systemImage: "camera")
+                    }
+                    if allowsPhoto {
+                        Picker(selection: $photoCadence) {
+                            ForEach(PhotoCadence.allCases.filter { $0 != .never }) { cadence in
+                                Text(cadence.displayName).tag(cadence)
+                            }
+                        } label: {
+                            Label("Capture Cadence", systemImage: "clock.arrow.circlepath")
+                        }
+                        Text(photoCadence.description)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Toggle(isOn: $allowsNotes) {
                     Label("Notes", systemImage: "note.text")
+                }
+            }
+            .onChange(of: allowsPhoto) { _, newValue in
+                if newValue && photoCadence == .never {
+                    photoCadence = .weekly
+                }
+                if !newValue {
+                    photoCadence = .never
+                }
+            }
+            .onChange(of: selectedType) { _, newType in
+                if newType == .cumulative {
+                    allowsPhoto = false
+                    photoCadence = .never
                 }
             }
         }
@@ -583,6 +614,7 @@ struct AddActivityView: View {
             if selectedType != .container {
                 activity.timeWindowData = try? JSONEncoder().encode(TimeWindow(slot: selectedSlot))
                 activity.allowsPhoto = allowsPhoto
+                activity.photoCadence = allowsPhoto ? photoCadence : .never
                 activity.allowsNotes = allowsNotes
             } else {
                 activity.timeWindowData = nil
@@ -627,6 +659,7 @@ struct AddActivityView: View {
             
             if selectedType != .container {
                 activity.allowsPhoto = allowsPhoto
+                activity.photoCadence = allowsPhoto ? photoCadence : .never
                 activity.allowsNotes = allowsNotes
             }
             

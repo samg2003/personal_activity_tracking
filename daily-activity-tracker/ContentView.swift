@@ -9,7 +9,11 @@ struct ContentView: View {
                     Label("Today", systemImage: "checkmark.circle")
                 }
 
-            // Placeholder for future Analytics tab
+            ActivitiesListView()
+                .tabItem {
+                    Label("Activities", systemImage: "list.bullet")
+                }
+
             AnalyticsView()
                 .tabItem {
                     Label("Analytics", systemImage: "chart.bar")

@@ -5,10 +5,11 @@ struct AllDaySection: View {
     let activities: [Activity]
     let cumulativeValues: (Activity) -> Double
     let onAdd: (Activity, Double) -> Void
+    var onShowLogs: ((Activity) -> Void)?
 
     var body: some View {
         if !activities.isEmpty {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Image(systemName: "arrow.2.circlepath")
                         .font(.system(size: 14, weight: .semibold))
@@ -19,22 +20,15 @@ struct AllDaySection: View {
                     Spacer()
                 }
 
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 16) {
-                        ForEach(activities) { activity in
-                            CumulativeRingView(
-                                activity: activity,
-                                currentValue: cumulativeValues(activity),
-                                onAdd: { value in onAdd(activity, value) }
-                            )
-                        }
-                    }
-                    .padding(.horizontal, 4)
+                ForEach(activities) { activity in
+                    CumulativeRingView(
+                        activity: activity,
+                        currentValue: cumulativeValues(activity),
+                        onAdd: { value in onAdd(activity, value) },
+                        onShowLogs: onShowLogs.map { closure in { closure(activity) } }
+                    )
                 }
             }
-            .padding(14)
-            .background(Color(.secondarySystemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 16))
         }
     }
 }
