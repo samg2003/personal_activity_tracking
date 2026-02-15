@@ -103,7 +103,7 @@ struct GoalDetailView: View {
             sectionLabel("Metrics", icon: "chart.line.uptrend.xyaxis")
 
             ForEach(goal.metricLinks) { link in
-                if let activity = link.activity {
+                if let activity = link.activity, activity.modelContext != nil {
                     metricRow(link: link, activity: activity)
                 }
             }
@@ -268,7 +268,7 @@ struct GoalDetailView: View {
                 .padding(.vertical, 12)
             } else {
                 ForEach(goal.activityLinks.sorted(by: { ($0.activity?.name ?? "") < ($1.activity?.name ?? "") })) { link in
-                    if let activity = link.activity {
+                    if let activity = link.activity, activity.modelContext != nil {
                         activityRow(activity: activity, weight: link.weight)
                     }
                 }
@@ -304,7 +304,7 @@ struct GoalDetailView: View {
 
             // Per-activity rows (includes both habits and metrics)
             ForEach(goal.linkedActivities.sorted(by: { ($0.activity?.name ?? "") < ($1.activity?.name ?? "") })) { link in
-                if let activity = link.activity {
+                if let activity = link.activity, activity.modelContext != nil {
                     HStack(spacing: 0) {
                         HStack(spacing: 4) {
                             if link.role == .metric {
@@ -377,15 +377,29 @@ struct GoalDetailView: View {
     }
 
     private func dayCell(activity: Activity, date: Date) -> some View {
-        let completed = allLogs.contains {
-            $0.activity?.id == activity.id &&
-            $0.status == .completed &&
-            $0.date.isSameDay(as: date)
-        }
         let vacationSet = Set(vacationDays.map { $0.date.startOfDay })
         let isVacation = vacationSet.contains(date.startOfDay)
-        let beforeCreated = date.startOfDay < activity.createdAt.startOfDay
+        let beforeCreated = date.startOfDay < activity.createdDate.startOfDay
         let afterStopped = activity.stoppedAt.map { date.startOfDay > $0 } ?? false
+
+        // Container: check if all children completed on that day
+        let completed: Bool
+        if activity.type == .container {
+            let children = activity.children.filter { !$0.isArchived }
+            completed = !children.isEmpty && children.allSatisfy { child in
+                allLogs.contains {
+                    $0.activity?.id == child.id &&
+                    $0.status == .completed &&
+                    $0.date.isSameDay(as: date)
+                }
+            }
+        } else {
+            completed = allLogs.contains {
+                $0.activity?.id == activity.id &&
+                $0.status == .completed &&
+                $0.date.isSameDay(as: date)
+            }
+        }
 
         let color: Color
         if isVacation {
@@ -484,7 +498,7 @@ struct GoalDetailView: View {
         var totalWeight = 0.0
 
         for link in goal.activityLinks {
-            guard let activity = link.activity else { continue }
+            guard let activity = link.activity, activity.modelContext != nil else { continue }
             let w = link.weight
             let rate = activityRate(activity)
 
@@ -512,7 +526,7 @@ struct GoalDetailView: View {
         for offset in 0..<7 {
             guard let day = calendar.date(byAdding: .day, value: -offset, to: today) else { continue }
             if vacationSet.contains(day) { continue }
-            if day < activity.createdAt.startOfDay { continue }
+            if day < activity.createdDate.startOfDay { continue }
             if let stopped = activity.stoppedAt, day > stopped { continue }
 
             let schedule = activity.scheduleActive(on: day)
@@ -555,7 +569,7 @@ struct GoalDetailView: View {
         for offset in 0..<7 {
             guard let day = calendar.date(byAdding: .day, value: -offset, to: today) else { continue }
             if vacationSet.contains(day) { continue }
-            if day < container.createdAt.startOfDay { continue }
+            if day < container.createdDate.startOfDay { continue }
 
             // Check container's own schedule
             let schedule = container.scheduleActive(on: day)
@@ -570,8 +584,26 @@ struct GoalDetailView: View {
             guard scheduled else { continue }
             expected += 1
 
-            // All children must be completed on this day
-            let allDone = children.allSatisfy { child in
+            // Only check children that are themselves scheduled on this day
+            let scheduledChildren = children.filter { child in
+                if day < child.createdDate.startOfDay { return false }
+                if let stopped = child.stoppedAt, day > stopped { return false }
+                let childSchedule = child.scheduleActive(on: day)
+                switch childSchedule.type {
+                case .daily: return true
+                case .weekly: return (childSchedule.weekdays ?? []).contains(day.weekdayISO)
+                case .monthly: return (childSchedule.monthDays ?? []).contains(day.dayOfMonth)
+                default: return false
+                }
+            }
+
+            // If no children scheduled today, count as done
+            guard !scheduledChildren.isEmpty else {
+                fullyCompleted += 1
+                continue
+            }
+
+            let allDone = scheduledChildren.allSatisfy { child in
                 allLogs.contains {
                     $0.activity?.id == child.id &&
                     $0.status == .completed &&

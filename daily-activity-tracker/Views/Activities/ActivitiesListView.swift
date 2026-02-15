@@ -178,7 +178,7 @@ struct ActivitiesListView: View {
                                 .compactMap { $0.effectiveUntil }
                                 .max()
                                 .map { Calendar.current.date(byAdding: .day, value: 1, to: $0) ?? $0 }
-                                ?? child.createdAt,
+                                ?? child.createdDate,
                             effectiveUntil: Calendar.current.date(byAdding: .day, value: -1, to: Date().startOfDay) ?? Date().startOfDay
                         )
                         modelContext.insert(snap)
@@ -552,9 +552,13 @@ struct ActivitiesListView: View {
 
     private func quickCreateActivity(name: String, isContainer: Bool, category: Category?) {
         let nextSort = (allActivities.map(\.sortOrder).max() ?? 0) + 1
+        let type: ActivityType = isContainer ? .container : .checkbox
+        let appearance = ActivityAppearance.suggest(for: name, type: type)
         let activity = Activity(
             name: name,
-            type: isContainer ? .container : .checkbox,
+            icon: appearance.icon,
+            hexColor: appearance.color,
+            type: type,
             schedule: .daily,
             category: category,
             sortOrder: nextSort
@@ -564,10 +568,11 @@ struct ActivitiesListView: View {
 
     private func quickCreateChildActivity(name: String, parent: Activity) {
         let nextSort = (parent.children.map(\.sortOrder).max() ?? 0) + 1
+        let appearance = ActivityAppearance.suggest(for: name, type: .checkbox)
         let child = Activity(
             name: name,
-            icon: parent.icon,
-            hexColor: parent.hexColor,
+            icon: appearance.icon,
+            hexColor: appearance.color,
             type: .checkbox,
             schedule: .daily,
             sortOrder: nextSort
@@ -704,6 +709,12 @@ struct ActivitiesListView: View {
 
     private func archiveActivity(_ activity: Activity) {
         activity.isArchived = true
+        // Cascade archive to children so they don't appear as orphans
+        if activity.type == .container {
+            for child in activity.children {
+                child.isArchived = true
+            }
+        }
     }
 
     private func hardDelete(_ activity: Activity) {

@@ -28,7 +28,7 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("Reminders") {
+                Section {
                     reminderRow(
                         label: "Morning", icon: "sunrise.fill", color: .orange,
                         enabled: $morningEnabled, time: $morningTime
@@ -41,6 +41,8 @@ struct SettingsView: View {
                         label: "Evening", icon: "moon.fill", color: .indigo,
                         enabled: $eveningEnabled, time: $eveningTime
                     )
+                } header: {
+                    Text("Reminders")
                 } footer: {
                     Text("Get a daily nudge to check your activities.")
                 }

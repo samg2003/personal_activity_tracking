@@ -55,6 +55,18 @@ struct ContainerRowView: View {
 
         switch child.type {
         case .checkbox, .metric:
+            if child.isMultiSession {
+                // Check per-slot if filtered, otherwise check all sessions
+                if let slot = slotFilter {
+                    return childLogs.contains(where: { $0.status == .completed && $0.timeSlot == slot }) ? 1.0 : 0.0
+                }
+                let total = child.timeSlots.count
+                guard total > 0 else { return 0 }
+                let done = child.timeSlots.filter { slot in
+                    childLogs.contains(where: { $0.status == .completed && $0.timeSlot == slot })
+                }.count
+                return Double(done) / Double(total)
+            }
             return childLogs.contains(where: { $0.status == .completed }) ? 1.0 : 0.0
         case .value:
             return childLogs.contains(where: { $0.status == .completed }) ? 1.0 : 0.0
@@ -63,7 +75,7 @@ struct ContainerRowView: View {
             let target = child.targetValue ?? 1
             return min(total / target, 1.0)
         case .container:
-            return 0.0 // nested containers handled recursively in future
+            return 0.0
         }
     }
 
@@ -247,7 +259,7 @@ struct ContainerRowView: View {
                     if !pendingChildren.isEmpty {
                         Button {
                             todayChildren
-                                .filter { !isChildCompleted($0) && !isChildSkipped($0) && $0.type == .checkbox }
+                                .filter { !isChildCompleted($0) && !isChildSkipped($0) && $0.type != .container }
                                 .forEach { onCompleteChild($0) }
                         } label: {
                             Text("Mark All Done")

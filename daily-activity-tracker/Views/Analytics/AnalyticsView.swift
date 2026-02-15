@@ -6,178 +6,180 @@ struct AnalyticsView: View {
     @Query(sort: \ActivityLog.date, order: .reverse) private var allLogs: [ActivityLog]
     @Query private var vacationDays: [VacationDay]
 
+    @State private var showAllStreaks = false
+
     private var topLevelActivities: [Activity] {
         allActivities.filter { $0.parent == nil && !$0.isArchived }
     }
 
     private var valueActivities: [Activity] {
-        allActivities.filter { ($0.type == .value || $0.type == .cumulative) && !$0.isArchived }
+        allActivities.filter {
+            !$0.isArchived && ($0.type == .value || $0.type == .cumulative)
+        }
     }
 
     // MARK: - Optimization Caches
-    
+
     private var logsByActivity: [UUID: [ActivityLog]] {
         Dictionary(grouping: allLogs) { $0.activity?.id ?? UUID() }
     }
 
-    // MARK: - Streak computation
+    // MARK: - Streak Computation
 
     private func streakFor(_ activity: Activity) -> Int {
+        let calendar = Calendar.current
+
+        // Container: streak = consecutive scheduled days where all children completed
+        if activity.type == .container {
+            var streak = 0
+            var day = Date().startOfDay
+            if !isContainerCompleted(activity, on: day) {
+                guard let prev = calendar.date(byAdding: .day, value: -1, to: day) else { return 0 }
+                day = prev
+            }
+            for _ in 0..<3650 {
+                if day < activity.createdDate.startOfDay { break }
+                if let stopped = activity.stoppedAt, day > stopped { break }
+                let schedule = activity.scheduleActive(on: day)
+                let isScheduled: Bool
+                switch schedule.type {
+                case .daily: isScheduled = true
+                case .weekly: isScheduled = (schedule.weekdays ?? []).contains(day.weekdayISO)
+                case .monthly: isScheduled = (schedule.monthDays ?? []).contains(day.dayOfMonth)
+                default: isScheduled = false
+                }
+                if !isScheduled {
+                    // skip non-scheduled days
+                } else if isContainerCompleted(activity, on: day) {
+                    streak += 1
+                } else if vacationDays.contains(where: { $0.date.isSameDay(as: day) }) {
+                    // vacation — don't break
+                } else {
+                    break
+                }
+                guard let prev = calendar.date(byAdding: .day, value: -1, to: day) else { break }
+                day = prev
+            }
+            return streak
+        }
+
         let logs = logsByActivity[activity.id] ?? []
         let completedDates = Set(
-            logs
-                .filter { $0.status == .completed }
-                .map { $0.date.startOfDay }
+            logs.filter { $0.status == .completed }.map { $0.date.startOfDay }
         )
-        
+
         var streak = 0
         var day = Date().startOfDay
-        // Check today or yesterday to start streak (allow for today not done yet)
         if !completedDates.contains(day) {
-            guard let prev = Calendar.current.date(byAdding: .day, value: -1, to: day) else { return 0 }
+            guard let prev = calendar.date(byAdding: .day, value: -1, to: day) else { return 0 }
             day = prev
         }
-        
+
         for _ in 0..<3650 {
-            // Skip days after activity was stopped
+            if day < activity.createdDate.startOfDay { break }
             if let stopped = activity.stoppedAt, day > stopped { break }
 
-            if completedDates.contains(day) {
+            let schedule = activity.scheduleActive(on: day)
+            let isScheduled: Bool
+            switch schedule.type {
+            case .daily: isScheduled = true
+            case .weekly: isScheduled = (schedule.weekdays ?? []).contains(day.weekdayISO)
+            case .monthly: isScheduled = (schedule.monthDays ?? []).contains(day.dayOfMonth)
+            default: isScheduled = false
+            }
+
+            if !isScheduled {
+                // skip
+            } else if completedDates.contains(day) {
                 streak += 1
             } else if vacationDays.contains(where: { $0.date.isSameDay(as: day) }) {
-                 // Vacation: maintain streak, don't increment, don't break
+                // vacation
             } else {
                 break
             }
-            
-            guard let prev = Calendar.current.date(byAdding: .day, value: -1, to: day) else { break }
+
+            guard let prev = calendar.date(byAdding: .day, value: -1, to: day) else { break }
             day = prev
         }
 
         return streak
     }
 
-    private var topStreak: (name: String, count: Int)? {
-        let streaks = topLevelActivities.map { (name: $0.name, count: streakFor($0)) }
-        return streaks.max(by: { $0.count < $1.count })
-    }
-    
-    // MARK: - Most Improved
-    
-    private var mostImproved: (name: String, delta: Double)? {
-        let now = Date().startOfDay
-        let calendar = Calendar.current
-        
-        guard let startOfThisWeek = calendar.date(byAdding: .day, value: -6, to: now),
-              let startOfLastWeek = calendar.date(byAdding: .day, value: -13, to: now),
-              let endOfLastWeek = calendar.date(byAdding: .day, value: -7, to: now)
-        else { return nil }
-        
-        // Pre-compute vacation date set for fast lookup
-        let vacationDateSet = Set(vacationDays.map { $0.date.startOfDay })
-        
-        // Count non-vacation days in each period for normalization
-        let thisWeekDays = (0...6).filter { offset in
-            guard let d = calendar.date(byAdding: .day, value: -offset, to: now) else { return false }
-            return !vacationDateSet.contains(d)
-        }.count
-        let lastWeekDays = (7...13).filter { offset in
-            guard let d = calendar.date(byAdding: .day, value: -offset, to: now) else { return false }
-            return !vacationDateSet.contains(d)
-        }.count
-        
-        guard thisWeekDays > 0, lastWeekDays > 0 else { return nil }
-        
-        var bestDelta = 0.0
-        var bestActivity: Activity?
-        
-        for activity in topLevelActivities {
-            let logs = logsByActivity[activity.id] ?? []
-            
-            let thisWeekCount = logs.filter {
-                $0.status == .completed &&
-                $0.date >= startOfThisWeek && $0.date <= now &&
-                !vacationDateSet.contains($0.date.startOfDay)
-            }.count
-            
-            let lastWeekCount = logs.filter {
-                $0.status == .completed &&
-                $0.date >= startOfLastWeek && $0.date <= endOfLastWeek &&
-                !vacationDateSet.contains($0.date.startOfDay)
-            }.count
-            
-            // Normalize: rate this week vs rate last week
-            let thisRate = Double(thisWeekCount) / Double(thisWeekDays)
-            let lastRate = Double(lastWeekCount) / Double(lastWeekDays)
-            let delta = thisRate - lastRate
-            
-            if delta > bestDelta {
-                bestDelta = delta
-                bestActivity = activity
+    private func isContainerCompleted(_ container: Activity, on day: Date) -> Bool {
+        let children = container.children.filter { !$0.isArchived }
+        guard !children.isEmpty else { return false }
+        return children.allSatisfy { child in
+            allLogs.contains {
+                $0.activity?.id == child.id && $0.status == .completed && $0.date.isSameDay(as: day)
             }
         }
-        
-        if let best = bestActivity, bestDelta > 0 {
-            return (best.name, bestDelta)
-        }
-        return nil
     }
 
-    /// Overall 7-day average completion score
-    private var overallScore: Double {
-        let calendar = Calendar.current
-        let today = Date().startOfDay
-        var totalScore = 0.0
-        var countedDays = 0
-        
-        // Improve: Use pre-grouped logs
-        // Group logs by Date (StartOfDay)
-        let logsByDate = Dictionary(grouping: allLogs) { $0.date.startOfDay }
+    // MARK: - Streak Leaderboard
 
-        for offset in 0..<7 {
-            guard let date = calendar.date(byAdding: .day, value: -offset, to: today) else { continue }
-            if vacationDays.contains(where: { $0.date.isSameDay(as: date) }) { continue }
-            
-            let dayLogs = logsByDate[date] ?? []
-            let completedCount = topLevelActivities.filter { activity in
-                dayLogs.contains { $0.activity?.id == activity.id && $0.status == .completed }
-            }.count
-            
-            guard !topLevelActivities.isEmpty else { continue }
-            totalScore += Double(completedCount) / Double(topLevelActivities.count)
-            countedDays += 1
-        }
-        return countedDays > 0 ? totalScore / Double(countedDays) : 0
+    private var sortedStreaks: [(activity: Activity, streak: Int)] {
+        topLevelActivities
+            .map { (activity: $0, streak: streakFor($0)) }
+            .sorted { $0.streak > $1.streak }
     }
 
-    // MARK: - Category Scorecards
-    
-    // Kept simple, relies on filtered logsByActivity implicitly for optimization if rewritten
-    // But since it's just categories, the current implementation filters `allLogs` for Today only.
-    // That's O(M) where M is logs. Acceptable.
+    private var bestStreak: (name: String, count: Int)? {
+        sortedStreaks.first.map { ($0.activity.name, $0.streak) }
+    }
 
-    // MARK: - Insights
+    // MARK: - Behind Schedule
 
     private func completionRate(for activity: Activity) -> Double {
-        let logs = logsByActivity[activity.id] ?? []
         let calendar = Calendar.current
         let today = Date().startOfDay
         let vacationDateSet = Set(vacationDays.map { $0.date.startOfDay })
-        let cutoff = calendar.date(byAdding: .day, value: -7, to: today)!
 
+        if activity.type == .container {
+            var totalDays = 0
+            var completedDays = 0
+            for offset in 0..<7 {
+                guard let day = calendar.date(byAdding: .day, value: -offset, to: today) else { continue }
+                if vacationDateSet.contains(day) { continue }
+                if let stopped = activity.stoppedAt, day > stopped { continue }
+                if day < activity.createdDate.startOfDay { continue }
+                let schedule = activity.scheduleActive(on: day)
+                let scheduled: Bool
+                switch schedule.type {
+                case .daily: scheduled = true
+                case .weekly: scheduled = (schedule.weekdays ?? []).contains(day.weekdayISO)
+                case .monthly: scheduled = (schedule.monthDays ?? []).contains(day.dayOfMonth)
+                default: scheduled = false
+                }
+                guard scheduled else { continue }
+                totalDays += 1
+                if isContainerCompleted(activity, on: day) { completedDays += 1 }
+            }
+            guard totalDays > 0 else { return 0 }
+            return Double(completedDays) / Double(totalDays)
+        }
+
+        let logs = logsByActivity[activity.id] ?? []
         var totalExpected = 0
         var totalCompleted = 0
 
         for offset in 0..<7 {
             guard let day = calendar.date(byAdding: .day, value: -offset, to: today) else { continue }
             if vacationDateSet.contains(day) { continue }
-            // Skip days after activity was stopped
             if let stopped = activity.stoppedAt, day > stopped { continue }
+            if day < activity.createdDate.startOfDay { continue }
 
-            // Use version-appropriate sessions for this day
+            let schedule = activity.scheduleActive(on: day)
+            let scheduled: Bool
+            switch schedule.type {
+            case .daily: scheduled = true
+            case .weekly: scheduled = (schedule.weekdays ?? []).contains(day.weekdayISO)
+            case .monthly: scheduled = (schedule.monthDays ?? []).contains(day.dayOfMonth)
+            default: scheduled = false
+            }
+            guard scheduled else { continue }
+
             let sessions = activity.sessionsPerDay(on: day)
             totalExpected += sessions
-
             let dayCompleted = logs.filter {
                 $0.status == .completed && $0.date.startOfDay == day
             }.count
@@ -188,36 +190,78 @@ struct AnalyticsView: View {
         return Double(totalCompleted) / Double(totalExpected)
     }
 
-    private var doingWell: [Activity] {
+    private var behindSchedule: [(activity: Activity, rate: Double)] {
         topLevelActivities
-            .filter { completionRate(for: $0) >= 0.8 }
-            .sorted { completionRate(for: $0) > completionRate(for: $1) }
+            .map { (activity: $0, rate: completionRate(for: $0)) }
+            .filter { $0.rate < 0.5 && $0.rate > 0 }
+            .sorted { $0.rate < $1.rate }
     }
 
-    private var needsAttention: [Activity] {
-        topLevelActivities
-            .filter { rate in
-                let r = completionRate(for: rate)
-                return r < 0.5 && r > 0
+    // MARK: - Biggest Wins (metric improvements this week vs last)
+
+    private var biggestWins: [(activity: Activity, delta: String)] {
+        let calendar = Calendar.current
+        let now = Date().startOfDay
+        guard let startOfThisWeek = calendar.date(byAdding: .day, value: -6, to: now),
+              let startOfLastWeek = calendar.date(byAdding: .day, value: -13, to: now),
+              let endOfLastWeek = calendar.date(byAdding: .day, value: -7, to: now)
+        else { return [] }
+
+        var results: [(activity: Activity, delta: Double, formatted: String)] = []
+
+        for activity in valueActivities {
+            let logs = logsByActivity[activity.id] ?? []
+            let thisWeekLogs = logs.filter {
+                $0.status == .completed && $0.value != nil &&
+                $0.date >= startOfThisWeek && $0.date <= now
             }
-            .sorted { completionRate(for: $0) < completionRate(for: $1) }
+            let lastWeekLogs = logs.filter {
+                $0.status == .completed && $0.value != nil &&
+                $0.date >= startOfLastWeek && $0.date <= endOfLastWeek
+            }
+
+            guard !thisWeekLogs.isEmpty, !lastWeekLogs.isEmpty else { continue }
+
+            let thisAvg = thisWeekLogs.compactMap(\.value).reduce(0, +) / Double(thisWeekLogs.count)
+            let lastAvg = lastWeekLogs.compactMap(\.value).reduce(0, +) / Double(lastWeekLogs.count)
+
+            let delta = thisAvg - lastAvg
+            guard abs(delta) > 0.01 else { continue }
+
+            let unit = activity.unit ?? ""
+            let sign = delta > 0 ? "+" : ""
+            let formatted: String
+            if abs(delta) >= 10 {
+                formatted = "\(sign)\(Int(delta))\(unit)/wk"
+            } else {
+                formatted = "\(sign)\(String(format: "%.1f", delta))\(unit)/wk"
+            }
+
+            results.append((activity, abs(delta), formatted))
+        }
+
+        return results
+            .sorted { $0.delta > $1.delta }
+            .prefix(3)
+            .map { ($0.activity, $0.formatted) }
     }
-    
+
     // MARK: - Body
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 24) {
-                    EncouragementBanner(
-                        topStreak: topStreak,
-                        mostImproved: mostImproved?.name,
-                        overallScore: overallScore
+                    // 1. Insight Summary
+                    InsightSummaryCard(
+                        bestStreak: bestStreak,
+                        biggestWin: biggestWins.first.map { ($0.activity.name, $0.delta) },
+                        behindCount: behindSchedule.count
                     )
 
-                    // Global Heatmap
+                    // 2. Consistency Map (Heatmap)
                     VStack(alignment: .leading, spacing: 8) {
-                        sectionHeader("Overall Activity", icon: "square.grid.3x3.fill")
+                        sectionHeader("Consistency Map", icon: "square.grid.3x3.fill")
                         HeatmapView(
                             activities: topLevelActivities,
                             logs: allLogs,
@@ -225,41 +269,99 @@ struct AnalyticsView: View {
                         )
                     }
 
-                    // Insights: Doing Well vs Needs Attention
-                    VStack(alignment: .leading, spacing: 16) {
-                        if !doingWell.isEmpty {
-                            VStack(alignment: .leading, spacing: 8) {
-                                sectionHeader("Doing Well 🌟", icon: "star.fill")
-                                ForEach(doingWell, id: \.id) { activity in
-                                    insightRow(activity, score: completionRate(for: activity))
+                    // 3. Behind Schedule
+                    if !behindSchedule.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            sectionHeader("Behind Schedule", icon: "exclamationmark.triangle.fill")
+                            ForEach(behindSchedule, id: \.activity.id) { item in
+                                NavigationLink {
+                                    ActivityAnalyticsView(
+                                        activity: item.activity,
+                                        allLogs: allLogs,
+                                        vacationDays: vacationDays,
+                                        allActivities: allActivities
+                                    )
+                                } label: {
+                                    behindRow(item.activity, rate: item.rate)
                                 }
-                            }
-                        }
-
-                        if !needsAttention.isEmpty {
-                            VStack(alignment: .leading, spacing: 8) {
-                                sectionHeader("Needs Attention ⚠️", icon: "exclamationmark.triangle.fill")
-                                ForEach(needsAttention, id: \.id) { activity in
-                                    insightRow(activity, score: completionRate(for: activity))
-                                }
+                                .buttonStyle(.plain)
                             }
                         }
                     }
 
-                    // Old Per-Activity Streaks (kept as "All Streaks")
+                    // 4. Streak Leaderboard
                     VStack(alignment: .leading, spacing: 8) {
-                        sectionHeader("All Streaks", icon: "flame.fill")
-                        ForEach(topLevelActivities) { activity in
-                            streakRow(activity)
+                        sectionHeader("Streak Leaderboard", icon: "flame.fill")
+
+                        let visibleStreaks = showAllStreaks
+                            ? sortedStreaks
+                            : Array(sortedStreaks.prefix(5))
+
+                        ForEach(visibleStreaks, id: \.activity.id) { item in
+                            NavigationLink {
+                                ActivityAnalyticsView(
+                                    activity: item.activity,
+                                    allLogs: allLogs,
+                                    vacationDays: vacationDays,
+                                    allActivities: allActivities
+                                )
+                            } label: {
+                                streakRow(item.activity, streak: item.streak)
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        if sortedStreaks.count > 5 {
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.25)) {
+                                    showAllStreaks.toggle()
+                                }
+                            } label: {
+                                Text(showAllStreaks ? "Show Less" : "Show All (\(sortedStreaks.count))")
+                                    .font(.caption.bold())
+                                    .foregroundStyle(Color.accentColor)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 8)
+                            }
                         }
                     }
 
-                    // Value Charts
+                    // 5. Biggest Wins
+                    if !biggestWins.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            sectionHeader("Biggest Wins", icon: "arrow.up.right")
+                            ForEach(biggestWins, id: \.activity.id) { item in
+                                NavigationLink {
+                                    ActivityAnalyticsView(
+                                        activity: item.activity,
+                                        allLogs: allLogs,
+                                        vacationDays: vacationDays,
+                                        allActivities: allActivities
+                                    )
+                                } label: {
+                                    winRow(item.activity, delta: item.delta)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+
+                    // 6. Trends (Value Charts)
                     if !valueActivities.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
                             sectionHeader("Trends", icon: "chart.line.uptrend.xyaxis")
                             ForEach(valueActivities) { activity in
-                                ValueChartView(activity: activity, logs: allLogs)
+                                NavigationLink {
+                                    ActivityAnalyticsView(
+                                        activity: activity,
+                                        allLogs: allLogs,
+                                        vacationDays: vacationDays,
+                                        allActivities: allActivities
+                                    )
+                                } label: {
+                                    ValueChartView(activity: activity, logs: allLogs)
+                                }
+                                .buttonStyle(.plain)
                             }
                         }
                     }
@@ -270,9 +372,9 @@ struct AnalyticsView: View {
             .navigationTitle("Analytics")
         }
     }
-    
+
     // MARK: - Sub-views
-    
+
     private func sectionHeader(_ title: String, icon: String) -> some View {
         HStack {
             Image(systemName: icon)
@@ -285,9 +387,8 @@ struct AnalyticsView: View {
         }
     }
 
-    private func streakRow(_ activity: Activity) -> some View {
-        let streak = streakFor(activity)
-        return HStack {
+    private func streakRow(_ activity: Activity, streak: Int) -> some View {
+        HStack {
             Image(systemName: activity.icon)
                 .font(.system(size: 14))
                 .foregroundStyle(Color(hex: activity.hexColor))
@@ -301,8 +402,8 @@ struct AnalyticsView: View {
             if streak > 0 {
                 HStack(spacing: 4) {
                     Image(systemName: "flame.fill")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.orange)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.orange)
                     Text("\(streak)d")
                         .font(.system(.caption, design: .rounded, weight: .bold))
                         .foregroundStyle(.orange)
@@ -313,62 +414,70 @@ struct AnalyticsView: View {
                     .foregroundStyle(.tertiary)
             }
         }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 12)
         .background(Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
-    private func insightRow(_ activity: Activity, score: Double) -> some View {
-        HStack {
+    private func behindRow(_ activity: Activity, rate: Double) -> some View {
+        HStack(spacing: 10) {
             Image(systemName: activity.icon)
+                .font(.system(size: 14))
                 .foregroundStyle(Color(hex: activity.hexColor))
+                .frame(width: 24)
+
             Text(activity.name)
                 .font(.subheadline)
-            Spacer()
-            Text("\(Int(score * 100))%")
-                .font(.caption.bold())
-                .foregroundStyle(score >= 0.8 ? .green : .orange)
-        }
-        .padding(.vertical, 6)
-        .padding(.horizontal, 12)
-        .background(Color(.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-    }
-
-
-
-    private func categoryRow(_ score: (name: String, color: String, score: Double)) -> some View {
-        HStack {
-            Circle()
-                .fill(Color(hex: score.color))
-                .frame(width: 8, height: 8)
-            Text(score.name)
-                .font(.subheadline)
+                .lineLimit(1)
 
             Spacer()
 
-            // Progress bar
+            // Mini progress bar
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 4)
+                    RoundedRectangle(cornerRadius: 3)
                         .fill(Color(.systemGray5))
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(Color(hex: score.color))
-                        .frame(width: geo.size.width * score.score)
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(rate < 0.25 ? Color.red.opacity(0.7) : Color.orange.opacity(0.7))
+                        .frame(width: geo.size.width * rate)
                 }
             }
-            .frame(width: 80, height: 8)
+            .frame(width: 60, height: 6)
 
-            Text("\(Int(score.score * 100))%")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(width: 36, alignment: .trailing)
+            Text("\(Int(rate * 100))%")
+                .font(.system(.caption, design: .rounded, weight: .bold))
+                .foregroundStyle(rate < 0.25 ? .red : .orange)
+                .frame(width: 32, alignment: .trailing)
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 8)
         .padding(.horizontal, 12)
         .background(Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
+    private func winRow(_ activity: Activity, delta: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: activity.icon)
+                .font(.system(size: 14))
+                .foregroundStyle(Color(hex: activity.hexColor))
+                .frame(width: 24)
+
+            Text(activity.name)
+                .font(.subheadline)
+                .lineLimit(1)
+
+            Spacer()
+
+            Text(delta)
+                .font(.system(.caption, design: .rounded, weight: .bold))
+                .foregroundStyle(.green)
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 12)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
 }
 
 extension Date {

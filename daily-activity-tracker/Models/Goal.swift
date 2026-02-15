@@ -37,8 +37,11 @@ final class Goal {
     var hexColor: String = "#FF3B30"
     var deadline: Date?
     var isArchived: Bool = false
-    var createdAt: Date = Date()
+    var createdAt: Date?
     var sortOrder: Int = 0
+
+    /// Safe accessor for createdAt
+    var createdDate: Date { createdAt ?? Date.distantPast }
 
     // Relationships
     @Relationship(deleteRule: .cascade, inverse: \GoalActivity.goal)
@@ -60,6 +63,7 @@ final class Goal {
     var activities: [Activity] {
         activityLinks
             .compactMap { $0.activity }
+            .filter { $0.modelContext != nil }
             .sorted { $0.sortOrder < $1.sortOrder }
     }
 
@@ -67,6 +71,7 @@ final class Goal {
     var metrics: [Activity] {
         metricLinks
             .compactMap { $0.activity }
+            .filter { $0.modelContext != nil }
             .sorted { $0.sortOrder < $1.sortOrder }
     }
 
@@ -74,6 +79,7 @@ final class Goal {
     func metricProgress(for link: GoalActivity) -> Double? {
         guard link.role == .metric,
               let activity = link.activity,
+              activity.modelContext != nil,
               let baseline = link.metricBaseline,
               let target = link.metricTarget,
               abs(target - baseline) > 0.001
@@ -93,7 +99,7 @@ final class Goal {
 
     /// Latest measurement value for a metric link
     func latestValue(for link: GoalActivity) -> Double? {
-        guard let activity = link.activity else { return nil }
+        guard let activity = link.activity, activity.modelContext != nil else { return nil }
         return activity.logs
             .filter { $0.status == .completed && $0.value != nil }
             .sorted { $0.date > $1.date }

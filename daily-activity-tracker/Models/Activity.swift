@@ -25,7 +25,7 @@ final class Activity {
     var metricKindRaw: String?  // Only when type == .metric
     var sortOrder: Int = 0
     var isArchived: Bool = false
-    var createdAt: Date = Date()
+    var createdAt: Date?
     var stoppedAt: Date?  // Non-nil = stopped tracking on this date
 
     // HealthKit (future)
@@ -45,6 +45,9 @@ final class Activity {
 
     @Relationship(deleteRule: .cascade, inverse: \ActivityConfigSnapshot.activity)
     var configSnapshots: [ActivityConfigSnapshot] = []
+
+    @Relationship(deleteRule: .nullify, inverse: \GoalActivity.activity)
+    var goalLinks: [GoalActivity] = []
 
     // MARK: - Computed (type-safe access to encoded properties)
 
@@ -106,6 +109,9 @@ final class Activity {
     var isMultiSession: Bool { timeSlots.count > 1 }
 
     var isStopped: Bool { stoppedAt != nil }
+
+    /// Safe accessor for createdAt (handles nil for pre-migration records)
+    var createdDate: Date { createdAt ?? Date.distantPast }
 
     // MARK: - History-Aware Helpers
 

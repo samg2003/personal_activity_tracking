@@ -1,9 +1,37 @@
 import SwiftUI
 import SwiftData
+import SQLite3
 
 @main
 struct daily_activity_trackerApp: App {
+
+    /// Repair corrupted SwiftData store BEFORE ModelContainer opens it.
+    /// Fixes orphaned GoalActivity rows referencing deleted Activities (causes
+    /// "backing data could no longer be found" fatal error).
+    private static func repairStoreIfNeeded() {
+        let appSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory, in: .userDomainMask
+        ).first!
+        let storeURL = appSupport.appending(path: "default.store")
+        guard FileManager.default.fileExists(atPath: storeURL.path) else { return }
+
+        var db: OpaquePointer?
+        guard sqlite3_open(storeURL.path, &db) == SQLITE_OK else { return }
+        defer { sqlite3_close(db) }
+
+        // Remove GoalActivity rows whose Activity was deleted
+        sqlite3_exec(db,
+            "DELETE FROM ZGOALACTIVITY WHERE ZACTIVITY IS NOT NULL AND ZACTIVITY NOT IN (SELECT Z_PK FROM ZACTIVITY)",
+            nil, nil, nil)
+
+        // Backfill NULL createdAt (seconds since 2001-01-01 reference date; 0 = Jan 1 2001)
+        sqlite3_exec(db, "UPDATE ZACTIVITY SET ZCREATEDAT = 0 WHERE ZCREATEDAT IS NULL", nil, nil, nil)
+        sqlite3_exec(db, "UPDATE ZGOAL SET ZCREATEDAT = 0 WHERE ZCREATEDAT IS NULL", nil, nil, nil)
+    }
     var sharedModelContainer: ModelContainer = {
+        // Fix corrupted data BEFORE SwiftData opens the store
+        repairStoreIfNeeded()
+
         let schema = Schema([
             Category.self,
             Activity.self,

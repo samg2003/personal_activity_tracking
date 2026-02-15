@@ -115,6 +115,18 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
             ID.morning, ID.afternoon, ID.evening
         ])
 
+        let hasAnyEnabled = morningConfig.enabled || afternoonConfig.enabled || eveningConfig.enabled
+        guard hasAnyEnabled else { return }
+
+        // Ensure permission before scheduling
+        center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
+            guard granted else { return }
+            DispatchQueue.main.async { self.scheduleEnabled() }
+        }
+    }
+
+    private func scheduleEnabled() {
+
         let morning = morningConfig
         if morning.enabled {
             scheduleDaily(

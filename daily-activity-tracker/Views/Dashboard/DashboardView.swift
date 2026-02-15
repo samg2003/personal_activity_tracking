@@ -88,19 +88,29 @@ struct DashboardView: View {
 
     private var completionFraction: Double {
         // Multi-session activities count as N items (one per slot)
+        // Containers count as number of children
         var total = 0
         var done = 0
         for activity in todayActivities {
             if isSkipped(activity) { continue }
-            let sessions = activity.isMultiSession ? activity.timeSlots.count : 1
-            total += sessions
-            if isFullyCompleted(activity) {
-                done += sessions
+            if activity.type == .container {
+                let children = activity.historicalChildren(on: today, from: allActivities)
+                    .filter { scheduleEngine.shouldShow($0, on: today) }
+                total += max(children.count, 1)
+                done += children.filter { isFullyCompleted($0) }.count
             } else if activity.isMultiSession {
-                // Count individually completed sessions
-                for slot in activity.timeSlots {
-                    if isSessionCompleted(activity, slot: slot) { done += 1 }
+                let sessions = activity.timeSlots.count
+                total += sessions
+                if isFullyCompleted(activity) {
+                    done += sessions
+                } else {
+                    for slot in activity.timeSlots {
+                        if isSessionCompleted(activity, slot: slot) { done += 1 }
+                    }
                 }
+            } else {
+                total += 1
+                if isFullyCompleted(activity) { done += 1 }
             }
         }
         guard total > 0 else { return 1.0 }
@@ -111,17 +121,21 @@ struct DashboardView: View {
         var slotMap: [TimeSlot: [Activity]] = [:]
         for activity in pendingTimed {
             if activity.type == .container {
-                // Expand container to each slot where it has applicable children
+                // Expand container to each slot where it has pending children
                 let children = activity.historicalChildren(on: today, from: allActivities)
                     .filter { scheduleEngine.shouldShow($0, on: today) }
                 for slot in [TimeSlot.morning, .afternoon, .evening] {
-                    let hasChildInSlot = children.contains { child in
+                    let hasPendingChildInSlot = children.contains { child in
+                        let inSlot: Bool
                         if child.isMultiSession {
-                            return child.timeSlots.contains(slot)
+                            inSlot = child.timeSlots.contains(slot)
+                        } else {
+                            inSlot = (child.timeWindow?.slot ?? .morning) == slot
                         }
-                        return (child.timeWindow?.slot ?? .morning) == slot
+                        // Only count if child is not completed/skipped
+                        return inSlot && !isFullyCompleted(child) && !isSkipped(child)
                     }
-                    if hasChildInSlot {
+                    if hasPendingChildInSlot {
                         slotMap[slot, default: []].append(activity)
                     }
                 }
@@ -545,7 +559,7 @@ struct DashboardView: View {
             return cumulativeTotal(for: activity) >= target
         case .container:
             let applicable = activity.historicalChildren(on: today, from: allActivities).filter { scheduleEngine.shouldShow($0, on: today) }
-            guard !applicable.isEmpty else { return true }
+            guard !applicable.isEmpty else { return false }
             return applicable.allSatisfy { isFullyCompleted($0) }
         }
     }
@@ -554,13 +568,16 @@ struct DashboardView: View {
         if activity.type == .container {
             let applicable = activity.historicalChildren(on: today, from: allActivities).filter { scheduleEngine.shouldShow($0, on: today) }
             guard !applicable.isEmpty else { return false }
-            return applicable.allSatisfy { child in
+            // Container is "skipped" when all non-completed children are skipped
+            let nonCompleted = applicable.filter { !isFullyCompleted($0) }
+            return !nonCompleted.isEmpty && nonCompleted.allSatisfy { child in
                 todayLogs.contains { $0.activity?.id == child.id && $0.status == .skipped }
             }
         }
         if activity.isMultiSession {
-            // Container-like: all sessions must be skipped
-            return activity.timeSlots.allSatisfy { slot in
+            // "Skipped" when all non-completed sessions are skipped
+            let nonCompleted = activity.timeSlots.filter { !isSessionCompleted(activity, slot: $0) }
+            return !nonCompleted.isEmpty && nonCompleted.allSatisfy { slot in
                 isSessionSkipped(activity, slot: slot)
             }
         }
@@ -644,7 +661,6 @@ struct DashboardView: View {
         modelContext.insert(log)
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         
-        NotificationService.shared.cancelReminders(for: activity.id)
         writeToHealthKit(activity: activity, value: 1.0)
         
         if isPhotoDue(for: activity) {
@@ -664,7 +680,6 @@ struct DashboardView: View {
         modelContext.insert(log)
         
         // Integrations
-        NotificationService.shared.cancelReminders(for: activity.id)
         writeToHealthKit(activity: activity, value: value)
 
         // Photo cadence check for value activities
@@ -678,10 +693,6 @@ struct DashboardView: View {
         let log = ActivityLog(activity: activity, date: today, status: .completed, value: value)
         modelContext.insert(log)
         
-        // Integrations
-        if isFullyCompleted(activity) {
-            NotificationService.shared.cancelReminders(for: activity.id)
-        }
         writeToHealthKit(activity: activity, value: value)
         
         showUndo("Added \(Int(value)) to \(activity.name)") { [log] in
@@ -701,7 +712,7 @@ struct DashboardView: View {
     }
 
     private func removeLastCumulativeLog(_ activity: Activity) {
-        guard let lastLog = todayLogs.first(where: { $0.activity?.id == activity.id && $0.status == .completed }) else { return }
+        guard let lastLog = todayLogs.last(where: { $0.activity?.id == activity.id && $0.status == .completed }) else { return }
         let oldValue = lastLog.value
         modelContext.delete(lastLog)
         
@@ -740,10 +751,7 @@ struct DashboardView: View {
         guard !isSkipped(activity) && !isFullyCompleted(activity) else { return }
         let log = ActivityLog(activity: activity, date: today, status: .skipped)
         log.skipReason = reason
-        modelContext.insert(log)
-        
-        NotificationService.shared.cancelReminders(for: activity.id)
-        
+        modelContext.insert(log)        
         showUndo("Skipped \(activity.name)") { [log] in
             modelContext.delete(log)
         }

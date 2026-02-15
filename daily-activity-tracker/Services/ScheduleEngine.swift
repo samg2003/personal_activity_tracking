@@ -15,7 +15,7 @@ final class ScheduleEngine: ScheduleEngineProtocol {
                   date.startOfDay <= stopped else { return false }
         }
         // Don't show activities before they were created
-        if date.startOfDay < activity.createdAt.startOfDay { return false }
+        if date.startOfDay < activity.createdDate.startOfDay { return false }
         // Stopped activities don't appear after their stop date
         if let stopped = activity.stoppedAt, date.startOfDay > stopped { return false }
 

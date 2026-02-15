@@ -131,7 +131,12 @@ struct AddGoalView: View {
                     .foregroundStyle(.secondary)
             } else {
                 let linkedIDs = Set(linkedItems.map { $0.activityID })
-                let unlinked = linkableActivities.filter { !linkedIDs.contains($0.id) }
+                // Filter out children whose parent container is already linked (prevents double-counting)
+                let unlinked = linkableActivities.filter { activity in
+                    guard !linkedIDs.contains(activity.id) else { return false }
+                    if let parent = activity.parent, linkedIDs.contains(parent.id) { return false }
+                    return true
+                }
 
                 if unlinked.isEmpty {
                     Text("All activities are linked.")

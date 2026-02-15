@@ -54,13 +54,81 @@ struct AddActivityView: View {
     // Pre-configuration (e.g. quick-add from container)
     var presetParent: Activity?
 
-    private let iconOptions = [
-        "circle", "star", "heart", "bolt", "flame",
-        "drop.fill", "pills.fill", "figure.run", "dumbbell",
-        "book", "brain", "cross.case.fill", "cup.and.saucer",
-        "bed.double", "leaf", "eye", "hand.raised",
-        "pencil", "music.note", "phone",
+    private let iconCategories: [(name: String, icons: [String])] = [
+        ("Fitness", [
+            "figure.run", "figure.walk", "figure.hiking", "figure.cooldown",
+            "figure.yoga", "dumbbell.fill", "figure.strengthtraining.traditional",
+            "figure.highintensity.intervaltraining", "figure.step.training",
+            "bicycle", "figure.swimming", "figure.rowing",
+            "soccerball", "basketball.fill", "tennisball.fill",
+            "hand.raised.fill", "flame.fill",
+        ]),
+        ("Nutrition", [
+            "drop.fill", "cup.and.saucer.fill", "mug.fill",
+            "fork.knife", "leaf.fill", "carrot.fill",
+            "takeoutbag.and.cup.and.straw.fill",
+        ]),
+        ("Sleep", [
+            "bed.double.fill", "moon.fill", "moon.zzz.fill",
+            "sunrise.fill", "powersleep",
+        ]),
+        ("Mind", [
+            "brain.head.profile.fill", "brain.fill", "wind",
+            "sparkles", "heart.fill", "face.smiling.fill",
+        ]),
+        ("Learning", [
+            "book.fill", "books.vertical.fill", "character.book.closed.fill",
+            "headphones", "newspaper.fill", "graduationcap.fill",
+            "pencil", "pencil.and.outline",
+        ]),
+        ("Work", [
+            "laptopcomputer", "desktopcomputer", "briefcase.fill",
+            "doc.text.fill", "list.bullet.clipboard.fill",
+            "calendar", "clock.fill",
+        ]),
+        ("Hygiene", [
+            "shower.fill", "drop.circle.fill", "mouth.fill",
+            "comb.fill",
+        ]),
+        ("Health", [
+            "pills.fill", "cross.case.fill", "heart.text.square.fill",
+            "stethoscope", "waveform.path.ecg",
+        ]),
+        ("Money", [
+            "dollarsign.circle.fill", "creditcard.fill",
+            "banknote.fill", "chart.line.uptrend.xyaxis",
+        ]),
+        ("Social", [
+            "person.2.fill", "figure.2.and.child.holdinghands",
+            "phone.fill", "bubble.left.fill",
+            "heart.circle.fill", "hand.thumbsup.fill",
+        ]),
+        ("Home", [
+            "house.fill", "bubbles.and.sparkles.fill", "washer.fill",
+            "frying.pan.fill", "cart.fill",
+        ]),
+        ("Outdoors", [
+            "sun.max.fill", "tree.fill", "mountain.2.fill",
+            "camera.fill",
+        ]),
+        ("Other", [
+            "star.fill", "bolt.fill", "circle", "checkmark.circle",
+            "eye", "music.note", "gamecontroller.fill",
+            "iphone.slash", "paintpalette.fill",
+        ]),
     ]
+
+    @State private var iconSearchText = ""
+
+    private var filteredIconCategories: [(name: String, icons: [String])] {
+        guard !iconSearchText.isEmpty else { return iconCategories }
+        let q = iconSearchText.lowercased()
+        return iconCategories.compactMap { cat in
+            let matched = cat.icons.filter { $0.lowercased().contains(q) || cat.name.lowercased().contains(q) }
+            return matched.isEmpty ? nil : (cat.name, matched)
+        }
+    }
+
 
     private let colorOptions = [
         "#FF6B35", "#4ECDC4", "#45B7D1", "#FF6B6B",
@@ -246,6 +314,14 @@ struct AddActivityView: View {
             .pickerStyle(.segmented)
             .onChange(of: selectedType) { _, newType in
                 if newType == .cumulative { selectedSlot = .allDay }
+                // Re-fire appearance auto-suggest on type change
+                if appearanceAutoSet {
+                    let suggestion = ActivityAppearance.suggest(
+                        for: name, type: newType, metricKind: selectedMetricKind
+                    )
+                    selectedIcon = suggestion.icon
+                    selectedColor = suggestion.color
+                }
             }
         }
     }
@@ -275,6 +351,14 @@ struct AddActivityView: View {
                     ForEach(MetricKind.allCases) { kind in
                         Label(kind.displayName, systemImage: kind.systemImage).tag(kind)
                     }
+                }
+                .onChange(of: selectedMetricKind) { _, newKind in
+                    guard appearanceAutoSet else { return }
+                    let suggestion = ActivityAppearance.suggest(
+                        for: name, type: selectedType, metricKind: newKind
+                    )
+                    selectedIcon = suggestion.icon
+                    selectedColor = suggestion.color
                 }
                 if selectedMetricKind == .value {
                     TextField("Unit (e.g., kg, %, seconds)", text: $unit)
@@ -504,25 +588,42 @@ struct AddActivityView: View {
             }
 
             DisclosureGroup("Customize") {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 10) {
-                        ForEach(iconOptions, id: \.self) { icon in
-                            Button {
-                                selectedIcon = icon
-                                appearanceAutoSet = false
-                            } label: {
-                                Image(systemName: icon)
-                                    .font(.system(size: 18))
-                                    .frame(width: 38, height: 38)
-                                    .background(selectedIcon == icon ? Color(hex: selectedColor).opacity(0.3) : Color(.tertiarySystemFill))
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                                    .foregroundStyle(selectedIcon == icon ? Color(hex: selectedColor) : .secondary)
+                // Icon search
+                TextField("Search icons…", text: $iconSearchText)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.caption)
+                    .autocorrectionDisabled()
+
+                // Categorized icon grid
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 12) {
+                        ForEach(filteredIconCategories, id: \.name) { category in
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(category.name.uppercased())
+                                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                                    .foregroundStyle(.tertiary)
+
+                                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 6), spacing: 8) {
+                                    ForEach(category.icons, id: \.self) { icon in
+                                        Button {
+                                            selectedIcon = icon
+                                            appearanceAutoSet = false
+                                        } label: {
+                                            Image(systemName: icon)
+                                                .font(.system(size: 16))
+                                                .frame(width: 36, height: 36)
+                                                .background(selectedIcon == icon ? Color(hex: selectedColor).opacity(0.3) : Color(.tertiarySystemFill))
+                                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                                .foregroundStyle(selectedIcon == icon ? Color(hex: selectedColor) : .secondary)
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
                             }
-                            .buttonStyle(.plain)
                         }
                     }
-                    .padding(.vertical, 4)
                 }
+                .frame(maxHeight: 260)
 
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
@@ -676,7 +777,7 @@ struct AddActivityView: View {
                 .compactMap { $0.effectiveUntil }
                 .max()
                 .map { Calendar.current.date(byAdding: .day, value: 1, to: $0) ?? $0 }
-                ?? activity.createdAt
+                ?? activity.createdDate
 
             let snapshot = ActivityConfigSnapshot(
                 activity: activity,

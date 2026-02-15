@@ -1,7 +1,50 @@
 # Backlog
-- [24] `streakFor` doesn't respect activity schedule. A weekly MWF activity breaks its streak on Tue/Thu because those days have no completion log. Should skip non-scheduled days (like it already skips vacation days) using `scheduleActive(on:)`. [AI found]
+- [42] **GoalDetailView `dayCell` uses live `activity.children` — container mutations retroactively change 7-day grid.** Known limitation: view doesn't have access to `allActivities` needed for `historicalChildren(on:)`. Would require refactoring view interface. Low impact since grid only shows 7 recent days. **File:** `GoalDetailView.swift:387-395`. [AI found]
 
 # Promoted for human review 
+- [45] **App crashes at `getValue(forKey: \.createdAt)` when opening Goals.** `createdAt` was declared non-optional (`Date = Date()`) but SwiftData stores it as nullable in SQLite. Records created before the column was added have NULL, causing a fault crash. [User reported]
+  - AI Reply: Fixed — made `createdAt` optional (`Date?`) in both Activity and Goal models. Added `createdDate` computed property (`createdAt ?? Date.distantPast`) as safe accessor. Updated all ~22 callsites across 8 files. Also added startup migration to clean orphaned GoalActivity links.
+- [39] `streakFor` always reports 0 for container activities. [AI found]
+  - AI Reply: Fixed — added container branch that checks all children's completion per day via new `isContainerCompleted` helper. Schedule-aware, vacation-aware.
+- [40] `mostImproved` always reports 0 for containers. [AI found]
+  - AI Reply: Fixed — container branch aggregates children's logs (by child IDs) for both this-week and last-week counts.
+- [41] AnalyticsView `completionRate` uses live `activity.children` — retroactive mutation issue. [AI found]
+  - AI Reply: Fixed — `completionRate` for containers now does per-day iteration using `isContainerCompleted` helper (checks children's logs per day) instead of aggregating live children's individual rates.
+- [43] Container archive doesn't cascade to children. [AI found]
+  - AI Reply: Fixed — `archiveActivity` now cascades `isArchived = true` to all children when archiving a container.
+- [44] `isFullyCompleted` returns `true` for empty containers. [AI found]
+  - AI Reply: Fixed — empty/childless containers now return `false` instead of `true`, preventing them from appearing in Completed section.
+
+- [24] `streakFor` doesn't respect activity schedule. [AI found]
+  - AI Reply: Fixed — `streakFor` now checks `scheduleActive(on:)` for each day and skips non-scheduled days without breaking streak. Also added `createdAt` bounds check.
+- [25] Appearance auto-suggest doesn't re-fire on type/metricKind change. [AI found]
+  - AI Reply: Fixed — added `.onChange(of: selectedType)` and `.onChange(of: selectedMetricKind)` triggers that re-call `ActivityAppearance.suggest()` when `appearanceAutoSet` is true.
+- [26] Container shows in slot even when all children in that slot are completed. [AI found]
+  - AI Reply: Fixed — `groupedBySlot` now checks both slot membership AND pending status (not completed/skipped) before including container in a slot.
+- [27] `completionFraction` doesn't account for container slot expansion. [AI found]
+  - AI Reply: Fixed — containers now count their applicable children count instead of 1. Multi-session activities count their slot count. Progress bar reflects actual work items.
+- [28] `containerRate` in GoalDetailView ignores individual child schedules. [AI found]
+  - AI Reply: Fixed — `containerRate` now intersects container schedule with each child's `scheduleActive(on:)`, only checking children scheduled on each specific day.
+- [29] GoalDetailView `dayCell` doesn't handle containers. [AI found]
+  - AI Reply: Fixed — `dayCell` now checks if all non-archived children are completed on that date for container-type activities.
+- [30] Notification permission not requested on first toggle. [AI found]
+  - AI Reply: Fixed — `rescheduleAll()` now calls `requestAuthorization()` before scheduling when any reminder is enabled.
+- [31] Can link both container AND its child to same goal (double-counting). [AI found]
+  - AI Reply: Fixed — unlinked activities list now filters out children whose parent container is already linked.
+- [32] AnalyticsView `overallScore` ignores per-day schedules. [AI found]
+  - AI Reply: Fixed — `overallScore` now filters `topLevelActivities` by schedule for each day. Containers check children's completion instead of their own logs.
+- [33] Container `isSkipped` doesn't handle completed+skipped mix. [AI found]
+  - AI Reply: Fixed — `isSkipped` now filters out completed children first, then checks if all remaining are skipped. Prevents containers falling through the cracks.
+- [34] Multi-session child inside container doesn't track per-slot completion. [AI found]
+  - AI Reply: Fixed — `childCompletion` now checks per-slot completion for multi-session children, using `slotFilter` when available.
+- [35] "Mark All Done" only marks checkbox children. [AI found]
+  - AI Reply: Fixed — filter changed from `$0.type == .checkbox` to `$0.type != .container`, including all completable types.
+- [36] `removeLastCumulativeLog` takes first instead of last. [AI found]
+  - AI Reply: Fixed — changed `.first(where:)` to `.last(where:)`.
+- [37] AnalyticsView `completionRate` reports 0% for containers. [AI found]
+  - AI Reply: Fixed — `completionRate` now aggregates children's completion rates for container-type activities.
+- [38] Multi-session `isSkipped` doesn't account for completed sessions. [AI found]
+  - AI Reply: Fixed — `isSkipped` for multi-session now filters out completed sessions first, then checks if remaining are all skipped.
 - [23] Big change, Not sure how to handle this... but right now changing container or any activity changes past records. That should not happen always.. if i change who are container sub-children, it shouldnt change past records.. analytics wont change too much either anyways here. For activity maybe include stop doing it thingy.. but even edit of cadence etc.. shouldnt always change past records.. maybe make these changes like google calendar (ask for future changes only, all changes).. but then if it does change past values.. data needs to be preserved so take smart actions and you might have to restrict what can be changed for past ones exclusively, etc.
   - AI Reply: Implemented via Config Snapshots (ADR-7). New `ActivityConfigSnapshot` model stores time-bounded structural config (schedule, type, time window, target, parent). When editing structural fields of an activity with existing logs, a dialog asks "Future Only" or "All Changes". "Future Only" saves old config as a snapshot, then mutates — analytics uses the snapshot for historical dates. Added `stoppedAt: Date?` on Activity for Stop/Resume tracking. `ScheduleEngine`, `AnalyticsView.completionRate`, and `streakFor` all use version-appropriate config. Stop/Resume buttons in editor + context menus. Stopped badge in activities list. Export/import includes snapshots. Docs updated.
   - Human Feedback: Past view still updating with Future Only. Archive renames item (bad). New sub-activities appear in past. Remove from container needs dialog. Structural/cosmetic detection fragile.

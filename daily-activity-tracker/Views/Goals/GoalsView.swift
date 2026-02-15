@@ -147,7 +147,7 @@ struct GoalsView: View {
         var totalWeight = 0.0
 
         for link in goal.activityLinks {
-            guard let activity = link.activity else { continue }
+            guard let activity = link.activity, activity.modelContext != nil else { continue }
             let w = link.weight
             var completed = 0
             var expected = 0
@@ -155,7 +155,7 @@ struct GoalsView: View {
             for offset in 0..<7 {
                 guard let day = calendar.date(byAdding: .day, value: -offset, to: today) else { continue }
                 if vacationSet.contains(day) { continue }
-                if day < activity.createdAt.startOfDay { continue }
+                if day < activity.createdDate.startOfDay { continue }
                 if let stopped = activity.stoppedAt, day > stopped { continue }
 
                 let schedule = activity.scheduleActive(on: day)
@@ -283,7 +283,7 @@ struct GoalCardView: View {
     private var metricSummaries: some View {
         VStack(alignment: .leading, spacing: 4) {
             ForEach(goal.metricLinks.prefix(3)) { link in
-                if let activity = link.activity {
+                if let activity = link.activity, activity.modelContext != nil {
                     HStack(spacing: 6) {
                         Image(systemName: activity.icon)
                             .font(.system(size: 9))

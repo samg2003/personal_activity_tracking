@@ -191,14 +191,14 @@ enum ReminderPreset: Codable {
 
 ## Services (Protocol-Based)
 
-| Service                 | Responsibility                               | Dependency          |
-| ----------------------- | -------------------------------------------- | ------------------- |
-| **ScheduleEngine**      | `shouldShow(activity, on: date) → Bool`      | Activity, Calendar  |
-| **AnalyticsEngine**     | Streaks, scores, heatmap data, encouragement | ActivityLog         |
-| **HealthKitService**    | Read/write HK, observe changes               | HealthKit framework |
-| **NotificationService** | Schedule/cancel local notifications          | UserNotifications   |
-| **CalendarService**     | Create/read EventKit events                  | EventKit            |
-| **MediaService**        | Save/load photos, cleanup orphans            | FileManager         |
+| Service                 | Responsibility                                 | Dependency          |
+| ----------------------- | ---------------------------------------------- | ------------------- |
+| **ScheduleEngine**      | `shouldShow(activity, on: date) → Bool`        | Activity, Calendar  |
+| **AnalyticsEngine**     | Streaks, scores, heatmap data, insight summary | ActivityLog         |
+| **HealthKitService**    | Read/write HK, observe changes                 | HealthKit framework |
+| **NotificationService** | Schedule/cancel local notifications            | UserNotifications   |
+| **CalendarService**     | Create/read EventKit events                    | EventKit            |
+| **MediaService**        | Save/load photos, cleanup orphans              | FileManager         |
 
 Each service is defined as a **protocol** with a concrete implementation. ViewModels receive services via init injection → easily mockable for tests.
 
@@ -262,7 +262,12 @@ daily-activity-tracker/
 │   │   ├── Activities/
 │   │   │   └── ActivitiesListView.swift
 │   │   ├── Analytics/
-│   │   │   └── GlobalAnalyticsView.swift
+│   │   │   ├── AnalyticsView.swift
+│   │   │   ├── ActivityAnalyticsView.swift
+│   │   │   ├── BarChartView.swift
+│   │   │   ├── InsightSummaryCard.swift
+│   │   │   ├── HeatmapView.swift
+│   │   │   └── ValueChartView.swift
 │   │   ├── Browser/
 │   │   │   └── PastDayBrowserView.swift
 │   │   └── Components/
@@ -335,11 +340,11 @@ daily-activity-tracker/
 
 ## Phased Implementation Strategy
 
-| Phase                | Scope                                                   | Deliverable                                          |
-| -------------------- | ------------------------------------------------------- | ---------------------------------------------------- |
-| **P0: Foundation**   | Models, ScheduleEngine, Dashboard (Checkbox only)       | Working today-view with tap-to-complete              |
-| **P1: Rich Types**   | Value, Cumulative, Container hierarchy, partial scoring | All activity types functional                        |
-| **P2: Photos**       | MediaService, CameraView (ghost), PhotoTimeline         | Photo capture and review                             |
-| **P3: Analytics**    | Heatmap, ValueChart, EncouragementBar, streaks          | Per-activity and global analytics                    |
-| **P4: Integrations** | HealthKit, Notifications, EventKit                      | External system connections                          |
-| **P5: Polish**       | Past-day browser, vacation mode, haptics, undo          | Full UX refinement including editing, deleting, etc. |
+| Phase                | Scope                                                                           | Deliverable                                          |
+| -------------------- | ------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| **P0: Foundation**   | Models, ScheduleEngine, Dashboard (Checkbox only)                               | Working today-view with tap-to-complete              |
+| **P1: Rich Types**   | Value, Cumulative, Container hierarchy, partial scoring                         | All activity types functional                        |
+| **P2: Photos**       | MediaService, CameraView (ghost), PhotoTimeline                                 | Photo capture and review                             |
+| **P3: Analytics**    | InsightSummaryCard, Heatmap, ValueChart, streaks, behind schedule, biggest wins | Activity-focused analytics and habit insights        |
+| **P4: Integrations** | HealthKit, Notifications, EventKit                                              | External system connections                          |
+| **P5: Polish**       | Past-day browser, vacation mode, haptics, undo                                  | Full UX refinement including editing, deleting, etc. |

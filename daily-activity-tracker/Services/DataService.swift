@@ -259,7 +259,7 @@ final class DataService {
                 metricKindRaw: $0.metricKindRaw,
                 sortOrder: $0.sortOrder,
                 isArchived: $0.isArchived,
-                createdAt: $0.createdAt,
+                createdAt: $0.createdDate,
                 categoryID: $0.category?.id,
                 parentID: $0.parent?.id,
                 stoppedAt: $0.stoppedAt,
@@ -306,7 +306,7 @@ final class DataService {
         let goalDTOs = goals.map { g in
             GoalDTO(id: g.id, title: g.title, icon: g.icon, hexColor: g.hexColor,
                     deadline: g.deadline, isArchived: g.isArchived,
-                    createdAt: g.createdAt, sortOrder: g.sortOrder)
+                    createdAt: g.createdDate, sortOrder: g.sortOrder)
         }
         let goalActDTOs = goalLinks.compactMap { link -> GoalActivityDTO? in
             guard let gID = link.goal?.id, let aID = link.activity?.id else { return nil }
