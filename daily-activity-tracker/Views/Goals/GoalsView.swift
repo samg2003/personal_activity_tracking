@@ -171,13 +171,21 @@ struct GoalsView: View {
                 }
 
                 if scheduled {
-                    let sessions = activity.sessionsPerDay(on: day)
-                    expected += sessions
+                    let daySkipped = allLogs.contains {
+                        $0.activity?.id == activity.id &&
+                        $0.status == .skipped &&
+                        $0.date.isSameDay(as: day)
+                    }
                     let dayCompleted = allLogs.filter {
                         $0.activity?.id == activity.id &&
                         $0.status == .completed &&
                         $0.date.isSameDay(as: day)
                     }.count
+
+                    if daySkipped && dayCompleted == 0 { continue }
+
+                    let sessions = activity.sessionsPerDay(on: day)
+                    expected += sessions
                     completed += min(dayCompleted, sessions)
                 }
             }

@@ -6,6 +6,10 @@ struct VacationModeSheet: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \VacationDay.date, order: .reverse) private var vacationDays: [VacationDay]
+    @Query(sort: \Activity.sortOrder) private var allActivities: [Activity]
+    @Query private var allLogs: [ActivityLog]
+
+    private let scheduleEngine = ScheduleEngine()
 
     /// The date the user is currently viewing on the dashboard
     var selectedDate: Date = Date()
@@ -135,6 +139,7 @@ struct VacationModeSheet: View {
             if let existing = vacationDays.first(where: { $0.date.isSameDay(as: date) }) {
                 modelContext.delete(existing)
             }
+            removeVacationSkipLogs(for: date)
         }
     }
 
@@ -146,12 +151,10 @@ struct VacationModeSheet: View {
             if !vacationDays.contains(where: { $0.date.isSameDay(as: current) }) {
                 let vacation = VacationDay(date: current)
                 modelContext.insert(vacation)
+                createVacationSkipLogs(for: current)
             }
             current = Calendar.current.date(byAdding: .day, value: 1, to: current) ?? current.addingTimeInterval(86400)
         }
-        
-        // Reset validation or feedback?
-        // UI updates automatically via Query
     }
     
     private func addVacationDay(_ date: Date) {
@@ -160,7 +163,47 @@ struct VacationModeSheet: View {
 
     private func deleteVacationDays(at offsets: IndexSet) {
         for index in offsets {
-            modelContext.delete(vacationDays[index])
+            let day = vacationDays[index]
+            removeVacationSkipLogs(for: day.date)
+            modelContext.delete(day)
+        }
+    }
+
+    // MARK: - Auto-Skip Helpers
+
+    private func createVacationSkipLogs(for date: Date) {
+        let scheduled = scheduleEngine.activitiesForToday(from: allActivities, on: date, vacationDays: [])
+        let dateLogs = allLogs.filter { $0.date.isSameDay(as: date) }
+
+        for activity in scheduled {
+            if activity.type == .container {
+                for child in activity.children where !child.isArchived {
+                    let alreadyHandled = dateLogs.contains {
+                        $0.activity?.id == child.id && ($0.status == .completed || $0.status == .skipped)
+                    }
+                    guard !alreadyHandled else { continue }
+                    let log = ActivityLog(activity: child, date: date.startOfDay, status: .skipped)
+                    log.skipReason = "Vacation"
+                    modelContext.insert(log)
+                }
+            } else {
+                let alreadyHandled = dateLogs.contains {
+                    $0.activity?.id == activity.id && ($0.status == .completed || $0.status == .skipped)
+                }
+                guard !alreadyHandled else { continue }
+                let log = ActivityLog(activity: activity, date: date.startOfDay, status: .skipped)
+                log.skipReason = "Vacation"
+                modelContext.insert(log)
+            }
+        }
+    }
+
+    private func removeVacationSkipLogs(for date: Date) {
+        let vacationLogs = allLogs.filter {
+            $0.date.isSameDay(as: date) && $0.status == .skipped && $0.skipReason == "Vacation"
+        }
+        for log in vacationLogs {
+            modelContext.delete(log)
         }
     }
 }

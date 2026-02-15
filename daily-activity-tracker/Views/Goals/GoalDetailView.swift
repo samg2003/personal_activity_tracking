@@ -384,6 +384,7 @@ struct GoalDetailView: View {
 
         // Container: check if all children completed on that day
         let completed: Bool
+        let isSkipped: Bool
         if activity.type == .container {
             let children = activity.children.filter { !$0.isArchived }
             completed = !children.isEmpty && children.allSatisfy { child in
@@ -393,10 +394,23 @@ struct GoalDetailView: View {
                     $0.date.isSameDay(as: date)
                 }
             }
+            // All children skipped on this day
+            isSkipped = !children.isEmpty && !completed && children.allSatisfy { child in
+                allLogs.contains {
+                    $0.activity?.id == child.id &&
+                    $0.status == .skipped &&
+                    $0.date.isSameDay(as: date)
+                }
+            }
         } else {
             completed = allLogs.contains {
                 $0.activity?.id == activity.id &&
                 $0.status == .completed &&
+                $0.date.isSameDay(as: date)
+            }
+            isSkipped = allLogs.contains {
+                $0.activity?.id == activity.id &&
+                $0.status == .skipped &&
                 $0.date.isSameDay(as: date)
             }
         }
@@ -408,6 +422,8 @@ struct GoalDetailView: View {
             color = .clear
         } else if completed {
             color = .green
+        } else if isSkipped {
+            color = .orange.opacity(0.4)
         } else {
             let schedule = activity.scheduleActive(on: date)
             let scheduled: Bool
@@ -539,13 +555,22 @@ struct GoalDetailView: View {
             }
 
             if scheduled {
-                let sessions = activity.sessionsPerDay(on: day)
-                expected += sessions
+                // Check if skipped — exclude from denominator
+                let daySkipped = allLogs.contains {
+                    $0.activity?.id == activity.id &&
+                    $0.status == .skipped &&
+                    $0.date.isSameDay(as: day)
+                }
                 let dayCompleted = allLogs.filter {
                     $0.activity?.id == activity.id &&
                     $0.status == .completed &&
                     $0.date.isSameDay(as: day)
                 }.count
+
+                if daySkipped && dayCompleted == 0 { continue }
+
+                let sessions = activity.sessionsPerDay(on: day)
+                expected += sessions
                 completed += min(dayCompleted, sessions)
             }
         }
@@ -571,7 +596,6 @@ struct GoalDetailView: View {
             if vacationSet.contains(day) { continue }
             if day < container.createdDate.startOfDay { continue }
 
-            // Check container's own schedule
             let schedule = container.scheduleActive(on: day)
             let scheduled: Bool
             switch schedule.type {
@@ -582,9 +606,7 @@ struct GoalDetailView: View {
             }
 
             guard scheduled else { continue }
-            expected += 1
 
-            // Only check children that are themselves scheduled on this day
             let scheduledChildren = children.filter { child in
                 if day < child.createdDate.startOfDay { return false }
                 if let stopped = child.stoppedAt, day > stopped { return false }
@@ -597,11 +619,29 @@ struct GoalDetailView: View {
                 }
             }
 
-            // If no children scheduled today, count as done
             guard !scheduledChildren.isEmpty else {
                 fullyCompleted += 1
                 continue
             }
+
+            // If all scheduled children are skipped (none completed), exclude from denominator
+            let allSkipped = scheduledChildren.allSatisfy { child in
+                allLogs.contains {
+                    $0.activity?.id == child.id &&
+                    $0.status == .skipped &&
+                    $0.date.isSameDay(as: day)
+                }
+            }
+            let anyCompleted = scheduledChildren.contains { child in
+                allLogs.contains {
+                    $0.activity?.id == child.id &&
+                    $0.status == .completed &&
+                    $0.date.isSameDay(as: day)
+                }
+            }
+            if allSkipped && !anyCompleted { continue }
+
+            expected += 1
 
             let allDone = scheduledChildren.allSatisfy { child in
                 allLogs.contains {

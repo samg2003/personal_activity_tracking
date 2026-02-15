@@ -33,6 +33,11 @@ struct AnalyticsView: View {
         if activity.type == .container {
             var streak = 0
             var day = Date().startOfDay
+            let containerChildLogs = Set(
+                allLogs.filter { log in
+                    log.status == .skipped && activity.children.contains { $0.id == log.activity?.id }
+                }.map { $0.date.startOfDay }
+            )
             if !isContainerCompleted(activity, on: day) {
                 guard let prev = calendar.date(byAdding: .day, value: -1, to: day) else { return 0 }
                 day = prev
@@ -49,11 +54,13 @@ struct AnalyticsView: View {
                 default: isScheduled = false
                 }
                 if !isScheduled {
-                    // skip non-scheduled days
+                    // not scheduled — pass through
                 } else if isContainerCompleted(activity, on: day) {
                     streak += 1
                 } else if vacationDays.contains(where: { $0.date.isSameDay(as: day) }) {
-                    // vacation — don't break
+                    // vacation — pass through
+                } else if containerChildLogs.contains(day) {
+                    // children skipped — pass through
                 } else {
                     break
                 }
@@ -66,6 +73,9 @@ struct AnalyticsView: View {
         let logs = logsByActivity[activity.id] ?? []
         let completedDates = Set(
             logs.filter { $0.status == .completed }.map { $0.date.startOfDay }
+        )
+        let skippedDates = Set(
+            logs.filter { $0.status == .skipped }.map { $0.date.startOfDay }
         )
 
         var streak = 0
@@ -89,11 +99,13 @@ struct AnalyticsView: View {
             }
 
             if !isScheduled {
-                // skip
+                // not scheduled — pass through
             } else if completedDates.contains(day) {
                 streak += 1
             } else if vacationDays.contains(where: { $0.date.isSameDay(as: day) }) {
-                // vacation
+                // vacation — pass through
+            } else if skippedDates.contains(day) {
+                // explicitly skipped — pass through (don't break streak)
             } else {
                 break
             }
@@ -135,6 +147,7 @@ struct AnalyticsView: View {
         let vacationDateSet = Set(vacationDays.map { $0.date.startOfDay })
 
         if activity.type == .container {
+            let children = activity.children.filter { !$0.isArchived }
             var totalDays = 0
             var completedDays = 0
             for offset in 0..<7 {
@@ -151,6 +164,20 @@ struct AnalyticsView: View {
                 default: scheduled = false
                 }
                 guard scheduled else { continue }
+
+                // Exclude days where all children are skipped
+                let allSkipped = !children.isEmpty && children.allSatisfy { child in
+                    allLogs.contains {
+                        $0.activity?.id == child.id && $0.status == .skipped && $0.date.isSameDay(as: day)
+                    }
+                }
+                let anyCompleted = children.contains { child in
+                    allLogs.contains {
+                        $0.activity?.id == child.id && $0.status == .completed && $0.date.isSameDay(as: day)
+                    }
+                }
+                if allSkipped && !anyCompleted { continue }
+
                 totalDays += 1
                 if isContainerCompleted(activity, on: day) { completedDays += 1 }
             }
@@ -178,11 +205,16 @@ struct AnalyticsView: View {
             }
             guard scheduled else { continue }
 
-            let sessions = activity.sessionsPerDay(on: day)
-            totalExpected += sessions
+            // If the activity was skipped this day, exclude from denominator entirely
+            let daySkipped = logs.contains { $0.status == .skipped && $0.date.startOfDay == day }
             let dayCompleted = logs.filter {
                 $0.status == .completed && $0.date.startOfDay == day
             }.count
+
+            if daySkipped && dayCompleted == 0 { continue }
+
+            let sessions = activity.sessionsPerDay(on: day)
+            totalExpected += sessions
             totalCompleted += min(dayCompleted, sessions)
         }
 

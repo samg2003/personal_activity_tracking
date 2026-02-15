@@ -39,9 +39,7 @@ final class ScheduleEngine: ScheduleEngineProtocol {
     }
 
     func activitiesForToday(from activities: [Activity], on date: Date, vacationDays: [VacationDay]) -> [Activity] {
-        if vacationDays.contains(where: { $0.date.isSameDay(as: date) }) {
-            return []
-        }
+        // Vacation days are now handled by auto-skip logs, not by hiding activities
 
         return activities
             .filter { $0.parent == nil && $0.parentID(on: date) == nil }  // only top-level (current + historical)

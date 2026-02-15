@@ -31,6 +31,7 @@ struct DashboardView: View {
     // Photo prompt state
     @State private var photoPromptActivity: Activity?
     @State private var photoPromptLog: ActivityLog?
+    @State private var completedExpanded = false
 
 
     private let scheduleEngine: ScheduleEngineProtocol = ScheduleEngine()
@@ -166,7 +167,13 @@ struct DashboardView: View {
             ScrollView {
                 // ... [VStack content] ...
                 VStack(spacing: 24) {
-                    DatePickerBar(selectedDate: $selectedDate, vacationDays: vacationDays)
+                    DatePickerBar(
+                        selectedDate: $selectedDate,
+                        vacationDays: vacationDays,
+                        allLogs: allLogs,
+                        allActivities: allActivities,
+                        scheduleEngine: scheduleEngine
+                    )
                     
                     // Vacation banner (informational only, no standalone button)
                     if isSelectedDateVacation {
@@ -198,6 +205,12 @@ struct DashboardView: View {
                 .padding()
             }
             .background(Color(.systemBackground))
+            .onChange(of: allLogs.count) {
+                if allDone { completedExpanded = true }
+            }
+            .onChange(of: selectedDate) {
+                completedExpanded = allDone
+            }
             .navigationTitle(selectedDate.isSameDay(as: Date()) ? "Today" : selectedDate.shortDisplay)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -390,10 +403,14 @@ struct DashboardView: View {
         }
     }
 
+    private var allDone: Bool {
+        pendingTimed.isEmpty && stickyPending.isEmpty && !completed.isEmpty
+    }
+
     @ViewBuilder
     private var completedSection: some View {
         if !completed.isEmpty {
-            DisclosureGroup {
+            DisclosureGroup(isExpanded: $completedExpanded) {
                 ForEach(completed) { activity in
                     activityView(for: activity)
                 }
@@ -407,6 +424,12 @@ struct DashboardView: View {
                     Text("(\(completed.count))")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
+                    if allDone {
+                        Spacer()
+                        Text("All done! 🎉")
+                            .font(.caption)
+                            .foregroundStyle(.green)
+                    }
                 }
             }
             .tint(.secondary)
@@ -727,10 +750,51 @@ struct DashboardView: View {
             guard !vacationDays.contains(where: { $0.date.isSameDay(as: date) }) else { return }
             let vacation = VacationDay(date: date.startOfDay)
             modelContext.insert(vacation)
+            createVacationSkipLogs(for: date)
         } else {
             if let existing = vacationDays.first(where: { $0.date.isSameDay(as: date) }) {
                 modelContext.delete(existing)
             }
+            removeVacationSkipLogs(for: date)
+        }
+    }
+
+    /// Auto-skip all scheduled activities on a vacation day
+    private func createVacationSkipLogs(for date: Date) {
+        let scheduled = scheduleEngine.activitiesForToday(from: allActivities, on: date, vacationDays: [])
+        let dateLogs = allLogs.filter { $0.date.isSameDay(as: date) }
+
+        for activity in scheduled {
+            if activity.type == .container {
+                // Skip each child that isn't already completed/skipped
+                for child in activity.children where !child.isArchived {
+                    let alreadyHandled = dateLogs.contains {
+                        $0.activity?.id == child.id && ($0.status == .completed || $0.status == .skipped)
+                    }
+                    guard !alreadyHandled else { continue }
+                    let log = ActivityLog(activity: child, date: date.startOfDay, status: .skipped)
+                    log.skipReason = "Vacation"
+                    modelContext.insert(log)
+                }
+            } else {
+                let alreadyHandled = dateLogs.contains {
+                    $0.activity?.id == activity.id && ($0.status == .completed || $0.status == .skipped)
+                }
+                guard !alreadyHandled else { continue }
+                let log = ActivityLog(activity: activity, date: date.startOfDay, status: .skipped)
+                log.skipReason = "Vacation"
+                modelContext.insert(log)
+            }
+        }
+    }
+
+    /// Remove all vacation-reason skip logs when vacation is undone
+    private func removeVacationSkipLogs(for date: Date) {
+        let vacationLogs = allLogs.filter {
+            $0.date.isSameDay(as: date) && $0.status == .skipped && $0.skipReason == "Vacation"
+        }
+        for log in vacationLogs {
+            modelContext.delete(log)
         }
     }
 

@@ -44,9 +44,11 @@ struct ActivityAnalyticsView: View {
     }
 
     private var longestStreak: Int {
-        // Walk entire history, track max streak
         guard let earliest = activity.createdAt ?? activityLogs.map(\.date).min() else { return 0 }
         let completedDates: Set<Date>
+        let skippedDates = Set(
+            activityLogs.filter { $0.status == .skipped }.map { $0.date.startOfDay }
+        )
 
         if activity.type == .container {
             var dates = Set<Date>()
@@ -81,10 +83,12 @@ struct ActivityAnalyticsView: View {
             }
 
             if !isScheduled || vacationDays.contains(where: { $0.date.isSameDay(as: day) }) {
-                // skip
+                // not scheduled or vacation — pass through
             } else if completedDates.contains(day) {
                 current += 1
                 maxStreak = max(maxStreak, current)
+            } else if skippedDates.contains(day) {
+                // explicitly skipped — pass through
             } else {
                 current = 0
             }
@@ -103,6 +107,9 @@ struct ActivityAnalyticsView: View {
 
         let completedDates = Set(
             activityLogs.filter { $0.status == .completed }.map { $0.date.startOfDay }
+        )
+        let skippedDates = Set(
+            activityLogs.filter { $0.status == .skipped }.map { $0.date.startOfDay }
         )
 
         var streak = 0
@@ -126,11 +133,13 @@ struct ActivityAnalyticsView: View {
             }
 
             if !isScheduled {
-                // skip
+                // not scheduled — pass through
             } else if completedDates.contains(day) {
                 streak += 1
             } else if vacationDays.contains(where: { $0.date.isSameDay(as: day) }) {
-                // vacation
+                // vacation — pass through
+            } else if skippedDates.contains(day) {
+                // explicitly skipped — pass through
             } else {
                 break
             }
@@ -142,6 +151,9 @@ struct ActivityAnalyticsView: View {
     }
 
     private func computeContainerStreak() -> Int {
+        let skippedDates = Set(
+            effectiveLogs.filter { $0.status == .skipped }.map { $0.date.startOfDay }
+        )
         var streak = 0
         var day = Date().startOfDay
         if !isContainerCompleted(on: day) {
@@ -159,11 +171,13 @@ struct ActivityAnalyticsView: View {
             default: isScheduled = false
             }
             if !isScheduled {
-                // skip
+                // not scheduled — pass through
             } else if isContainerCompleted(on: day) {
                 streak += 1
             } else if vacationDays.contains(where: { $0.date.isSameDay(as: day) }) {
-                // vacation
+                // vacation — pass through
+            } else if skippedDates.contains(day) {
+                // explicitly skipped — pass through
             } else {
                 break
             }
