@@ -1,10 +1,10 @@
-also clear# Data Format Documentation
+# Data Format Documentation
 
 The Daily Activity Tracker uses a JSON-based format for importing and exporting data. This document describes the structure of the JSON file so users can manually construct or modify data for import.
 
 ## Schema Overview
 
-The root of the JSON file is an object containing arrays for `categories`, `activities`, `logs`, and `vacationDays`.
+The root of the JSON file is an object containing arrays for `categories`, `activities`, `logs`, `vacationDays`, `configSnapshots`, `goals`, `goalActivities`, and `goalMeasurements`.
 
 ```json
 {
@@ -14,9 +14,13 @@ The root of the JSON file is an object containing arrays for `categories`, `acti
   "activities": [ ... ],
   "logs": [ ... ],
   "vacationDays": [ ... ],
-  "configSnapshots": [ ... ]
+  "configSnapshots": [ ... ],
+  "goals": [ ... ],
+  "goalActivities": [ ... ],
+  "goalMeasurements": [ ... ]
 }
 ```
+
 
 ---
 
@@ -167,3 +171,63 @@ Preserves historical activity config when "Future Only" edits are made.
 | `effectiveFrom`  | ISO8601 | Start of this config period.                                 |
 | `effectiveUntil` | ISO8601 | End of this config period (day before the edit took effect). |
 | `parentID`       | UUID    | (Optional) Container this activity belonged to at the time.  |
+
+---
+
+## 6. Goals
+
+Defines overarching objectives that link to daily activities.
+
+```json
+{
+  "id": "UUID-STRING",
+  "title": "Reduce Body Fat %",
+  "icon": "flame.fill",
+  "hexColor": "#FF3B30",
+  "deadline": "2026-06-01T00:00:00Z",
+  "isArchived": false,
+  "createdAt": "2026-02-15T00:00:00Z",
+  "sortOrder": 0
+}
+```
+
+| Field        | Type    | Description                        |
+| :----------- | :------ | :--------------------------------- |
+| `title`      | String  | Goal name.                         |
+| `icon`       | String  | SF Symbol name.                    |
+| `hexColor`   | String  | Hex color code.                    |
+| `deadline`   | ISO8601 | (Optional) Target completion date. |
+| `isArchived` | Bool    | Whether goal is archived.          |
+| `sortOrder`  | Int     | Display order.                     |
+
+---
+
+## 7. Goal Activities (Junction)
+
+Links goals to activities with a role (`activity` for habits, `metric` for outcome measurements). Metric-role links carry baseline/target/direction config.
+
+```json
+{
+  "id": "UUID-STRING",
+  "goalID": "UUID-OF-GOAL",
+  "activityID": "UUID-OF-ACTIVITY",
+  "roleRaw": "metric",
+  "weight": 1.0,
+  "metricBaseline": 25.0,
+  "metricTarget": 18.0,
+  "metricDirectionRaw": "decrease"
+}
+```
+
+| Field                | Type   | Description                                    |
+| :------------------- | :----- | :--------------------------------------------- |
+| `goalID`             | UUID   | References a Goal.                             |
+| `activityID`         | UUID   | References an Activity.                        |
+| `roleRaw`            | String | `"activity"` or `"metric"`.                    |
+| `weight`             | Double | Importance weight for scoring (default 1.0).   |
+| `metricBaseline`     | Double | (Optional) Starting value for metric tracking. |
+| `metricTarget`       | Double | (Optional) Target value for metric tracking.   |
+| `metricDirectionRaw` | String | (Optional) `"increase"` or `"decrease"`.       |
+
+> [!NOTE]
+> GoalMeasurement was removed in the metrics-as-activities redesign. Outcome metrics are now tracked via standard ActivityLog entries on metric-role activities.

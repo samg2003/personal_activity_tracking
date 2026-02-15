@@ -14,6 +14,11 @@ struct ContentView: View {
                     Label("Activities", systemImage: "list.bullet")
                 }
 
+            GoalsView()
+                .tabItem {
+                    Label("Goals", systemImage: "target")
+                }
+
             AnalyticsView()
                 .tabItem {
                     Label("Analytics", systemImage: "chart.bar")
@@ -24,6 +29,6 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
-        .modelContainer(for: [Category.self, Activity.self, ActivityLog.self, VacationDay.self], inMemory: true)
+        .modelContainer(for: [Category.self, Activity.self, ActivityLog.self, VacationDay.self, Goal.self, GoalActivity.self], inMemory: true)
         .preferredColorScheme(.dark)
 }

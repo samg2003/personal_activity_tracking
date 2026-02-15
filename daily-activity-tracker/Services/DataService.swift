@@ -15,6 +15,8 @@ final class DataService {
         let logs: [LogDTO]
         let vacationDays: [VacationDTO]
         var configSnapshots: [ConfigSnapshotDTO]?
+        var goals: [GoalDTO]?
+        var goalActivities: [GoalActivityDTO]?
     }
     
     struct CategoryDTO: Codable {
@@ -174,6 +176,68 @@ final class DataService {
             parentID = try c.decodeIfPresent(UUID.self, forKey: .parentID)
         }
     }
+
+    struct GoalDTO: Codable {
+        let id: UUID
+        let title: String
+        let icon: String
+        let hexColor: String
+        let deadline: Date?
+        let isArchived: Bool
+        let createdAt: Date
+        let sortOrder: Int
+
+        init(id: UUID, title: String, icon: String, hexColor: String,
+             deadline: Date?, isArchived: Bool, createdAt: Date, sortOrder: Int) {
+            self.id = id; self.title = title; self.icon = icon; self.hexColor = hexColor
+            self.deadline = deadline; self.isArchived = isArchived
+            self.createdAt = createdAt; self.sortOrder = sortOrder
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            id = try c.decode(UUID.self, forKey: .id)
+            title = try c.decode(String.self, forKey: .title)
+            icon = try c.decodeIfPresent(String.self, forKey: .icon) ?? "target"
+            hexColor = try c.decodeIfPresent(String.self, forKey: .hexColor) ?? "#FF3B30"
+            deadline = try c.decodeIfPresent(Date.self, forKey: .deadline)
+            isArchived = try c.decodeIfPresent(Bool.self, forKey: .isArchived) ?? false
+            createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+            sortOrder = try c.decodeIfPresent(Int.self, forKey: .sortOrder) ?? 0
+        }
+    }
+
+    struct GoalActivityDTO: Codable {
+        let id: UUID
+        let goalID: UUID
+        let activityID: UUID
+        let roleRaw: String
+        let weight: Double
+        let metricBaseline: Double?
+        let metricTarget: Double?
+        let metricDirectionRaw: String?
+
+        init(id: UUID, goalID: UUID, activityID: UUID, roleRaw: String,
+             weight: Double, metricBaseline: Double?, metricTarget: Double?,
+             metricDirectionRaw: String?) {
+            self.id = id; self.goalID = goalID; self.activityID = activityID
+            self.roleRaw = roleRaw; self.weight = weight
+            self.metricBaseline = metricBaseline; self.metricTarget = metricTarget
+            self.metricDirectionRaw = metricDirectionRaw
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            id = try c.decode(UUID.self, forKey: .id)
+            goalID = try c.decode(UUID.self, forKey: .goalID)
+            activityID = try c.decode(UUID.self, forKey: .activityID)
+            roleRaw = try c.decodeIfPresent(String.self, forKey: .roleRaw) ?? "activity"
+            weight = try c.decodeIfPresent(Double.self, forKey: .weight) ?? 1.0
+            metricBaseline = try c.decodeIfPresent(Double.self, forKey: .metricBaseline)
+            metricTarget = try c.decodeIfPresent(Double.self, forKey: .metricTarget)
+            metricDirectionRaw = try c.decodeIfPresent(String.self, forKey: .metricDirectionRaw)
+        }
+    }
     
     // MARK: - Export
     
@@ -244,6 +308,24 @@ final class DataService {
             )
         }
 
+        // Goals
+        let goals = try context.fetch(FetchDescriptor<Goal>())
+        let goalLinks = try context.fetch(FetchDescriptor<GoalActivity>())
+
+        let goalDTOs = goals.map { g in
+            GoalDTO(id: g.id, title: g.title, icon: g.icon, hexColor: g.hexColor,
+                    deadline: g.deadline, isArchived: g.isArchived,
+                    createdAt: g.createdAt, sortOrder: g.sortOrder)
+        }
+        let goalActDTOs = goalLinks.compactMap { link -> GoalActivityDTO? in
+            guard let gID = link.goal?.id, let aID = link.activity?.id else { return nil }
+            return GoalActivityDTO(id: link.id, goalID: gID, activityID: aID,
+                                   roleRaw: link.roleRaw, weight: link.weight,
+                                   metricBaseline: link.metricBaseline,
+                                   metricTarget: link.metricTarget,
+                                   metricDirectionRaw: link.metricDirectionRaw)
+        }
+
         // Create Package
         let package = ExportPackage(
             version: "1.0",
@@ -252,7 +334,9 @@ final class DataService {
             activities: actDTOs,
             logs: logDTOs,
             vacationDays: vacDTOs,
-            configSnapshots: snapDTOs
+            configSnapshots: snapDTOs,
+            goals: goalDTOs,
+            goalActivities: goalActDTOs
         )
         
         // Encode
@@ -380,6 +464,42 @@ final class DataService {
                 snap.unit = dto.unit
                 snap.parentID = dto.parentID
                 context.insert(snap)
+            }
+        }
+
+        // Clear existing goals
+        let existingGoals = try context.fetch(FetchDescriptor<Goal>())
+        for g in existingGoals { context.delete(g) }
+        let existingLinks = try context.fetch(FetchDescriptor<GoalActivity>())
+        for l in existingLinks { context.delete(l) }
+
+        // Insert Goals
+        var goalMap: [UUID: Goal] = [:]
+        if let goalDTOs = package.goals {
+            for dto in goalDTOs {
+                let g = Goal(title: dto.title, icon: dto.icon, hexColor: dto.hexColor,
+                             sortOrder: dto.sortOrder)
+                g.id = dto.id
+                g.deadline = dto.deadline
+                g.isArchived = dto.isArchived
+                g.createdAt = dto.createdAt
+                context.insert(g)
+                goalMap[dto.id] = g
+            }
+        }
+
+        // Insert Goal-Activity Links
+        if let linkDTOs = package.goalActivities {
+            for dto in linkDTOs {
+                guard let goal = goalMap[dto.goalID],
+                      let act = activityMap[dto.activityID] else { continue }
+                let role = GoalActivityRole(rawValue: dto.roleRaw) ?? .activity
+                let link = GoalActivity(goal: goal, activity: act, role: role, weight: dto.weight)
+                link.id = dto.id
+                link.metricBaseline = dto.metricBaseline
+                link.metricTarget = dto.metricTarget
+                link.metricDirectionRaw = dto.metricDirectionRaw
+                context.insert(link)
             }
         }
 

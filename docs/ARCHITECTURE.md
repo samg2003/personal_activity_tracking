@@ -59,6 +59,8 @@ erDiagram
     Activity ||--o{ ActivityLog : "has logs"
     Activity }o--o{ Activity : "sortAfter"
     Activity ||--o{ ActivityConfigSnapshot : "has snapshots"
+    Goal ||--o{ GoalActivity : "linked via"
+    GoalActivity }o--|| Activity : "links to"
 
     Category {
         UUID id PK
@@ -118,6 +120,26 @@ erDiagram
         Double targetValue "snapshot"
         String unit "snapshot"
         UUID parentID "container at that time"
+    }
+
+    Goal {
+        UUID id PK
+        String title
+        String icon
+        String hexColor
+        Date deadline "optional"
+        Bool isArchived
+        Date createdAt
+        Int sortOrder
+    }
+
+    GoalActivity {
+        UUID id PK
+        Enum role "activity|metric"
+        Double weight "default 1.0"
+        Double metricBaseline "optional"
+        Double metricTarget "optional"
+        Enum metricDirection "increase|decrease (optional)"
     }
 ```
 
@@ -287,6 +309,10 @@ daily-activity-tracker/
 ### ADR-7: Config Snapshots for Non-Retroactive Edits
 **Decision**: When a user edits structural fields (schedule, type, time window, target, parent) and chooses "Future Only", the current config is saved as an `ActivityConfigSnapshot` with date range. Analytics uses the snapshot for historical dates.
 **Rationale**: Avoids cloning activities (which breaks relationships and creates identity problems). Snapshots are lightweight, backward-compatible (no snapshots = current behavior), and compose well with the existing model. `stoppedAt` on Activity handles the "stop doing it" case.
+
+### ADR-8: Metrics as Activities
+**Decision**: Goals are linked to Activities via `GoalActivity` junction table with a `role` field (`.activity` for contributing habits, `.metric` for outcome measurements). Metric config (baseline, target, direction) lives on the GoalActivity link, not on the Goal. GoalMeasurement was removed — measurements are just ActivityLog entries on metric-role activities. A goal can have up to 5 metrics.
+**Rationale**: Measuring something (body fat, deadhang time) IS an activity you schedule and track. The existing `ActivityLog` already captures values (numeric), photos (visual progress), and completion status (boolean milestones). Duplicating this with a separate GoalMeasurement model was unnecessary complexity. This design also means metric activities get consistency tracking for free ("did you actually measure this week?").
 
 ---
 
