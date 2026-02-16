@@ -82,6 +82,7 @@ erDiagram
         Double targetValue "optional"
         String unit "optional"
         Enum metricKindRaw "photo|value|checkbox|notes (optional, metric only)"
+        Enum aggregationModeRaw "sum|average (optional, cumulative only, default: sum)"
         String healthKitTypeID "optional"
         Enum healthKitMode "read|write|both (optional)"
         Bool isArchived
@@ -149,7 +150,7 @@ erDiagram
 enum ActivityType: String, Codable {
     case checkbox    // tap to complete
     case value       // log number + unit
-    case cumulative  // multiple logs/day summing to target
+    case cumulative  // multiple logs/day, aggregated via sum or average
     case container   // derived from children
 }
 ```

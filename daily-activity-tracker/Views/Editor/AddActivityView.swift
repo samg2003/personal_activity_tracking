@@ -24,6 +24,7 @@ struct AddActivityView: View {
     // Value / Cumulative config
     @State private var targetValueText = ""
     @State private var unit = ""
+    @State private var selectedAggregation: AggregationMode = .sum
 
     // Schedule config
     @State private var selectedMonthDays: Set<Int> = []
@@ -266,6 +267,7 @@ struct AddActivityView: View {
         // Restore Config
         if let u = activity.unit { unit = u }
         if let t = activity.targetValue { targetValueText = String(format: "%.0f", t) }
+        selectedAggregation = activity.aggregationMode
         
         // Restore Metric Kind
         if let kind = activity.metricKind {
@@ -331,13 +333,18 @@ struct AddActivityView: View {
         switch selectedType {
         case .value:
             Section("Value Configuration") {
-                TextField("Unit (e.g., kg, hrs)", text: $unit)
+                UnitPicker(selection: $unit)
             }
         case .cumulative:
             Section("Target") {
                 TextField("Daily target (e.g., 2000)", text: $targetValueText)
                     .keyboardType(.decimalPad)
-                TextField("Unit (e.g., ml, steps)", text: $unit)
+                UnitPicker(selection: $unit)
+                Picker("Aggregation", selection: $selectedAggregation) {
+                    ForEach(AggregationMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
             }
         case .container:
             Section {
@@ -361,7 +368,7 @@ struct AddActivityView: View {
                     selectedColor = suggestion.color
                 }
                 if selectedMetricKind == .value {
-                    TextField("Unit (e.g., kg, %, seconds)", text: $unit)
+                    UnitPicker(selection: $unit)
                 }
             } header: {
                 Text("Metric Configuration")
@@ -730,6 +737,9 @@ struct AddActivityView: View {
             if selectedType == .cumulative, let target = Double(targetValueText) {
                 activity.targetValue = target
             }
+            if selectedType == .cumulative {
+                activity.aggregationMode = selectedAggregation
+            }
 
             if isSubActivity, let parent = selectedParent {
                 activity.parent = parent
@@ -816,6 +826,9 @@ struct AddActivityView: View {
         }
         if selectedType == .cumulative, let target = Double(targetValueText) {
             activity.targetValue = target
+        }
+        if selectedType == .cumulative {
+            activity.aggregationMode = selectedAggregation
         }
 
         if isSubActivity, let parent = selectedParent {

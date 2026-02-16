@@ -304,7 +304,12 @@ struct ActivityAnalyticsView: View {
                 let nonZero = values.filter { $0 > 0 }
                 aggregate = nonZero.isEmpty ? 0 : nonZero.reduce(0, +) / Double(nonZero.count) // weekly avg
             case .cumulative:
-                aggregate = values.reduce(0, +) // weekly sum
+                if activity.aggregationMode == .average {
+                    let nonZero = values.filter { $0 > 0 }
+                    aggregate = nonZero.isEmpty ? 0 : nonZero.reduce(0, +) / Double(nonZero.count)
+                } else {
+                    aggregate = values.reduce(0, +)
+                }
             case .container:
                 let nonZero = values.filter { $0 > 0 }
                 aggregate = nonZero.isEmpty ? 0 : nonZero.reduce(0, +) / Double(nonZero.count) // avg %
@@ -333,10 +338,13 @@ struct ActivityAnalyticsView: View {
                 .last ?? 0
 
         case .cumulative:
-            return activityLogs
+            let values = activityLogs
                 .filter { $0.status == .completed && $0.date.isSameDay(as: day) }
                 .compactMap(\.value)
-                .reduce(0, +)
+            if activity.aggregationMode == .average {
+                return values.isEmpty ? 0 : values.reduce(0, +) / Double(values.count)
+            }
+            return values.reduce(0, +)
 
         case .container:
             let children = activity.children.filter { !$0.isArchived }

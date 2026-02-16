@@ -61,6 +61,7 @@ Defines the trackers themselves.
   "typeRaw": "cumulative",
   "targetValue": 2500,
   "unit": "ml",
+  "aggregationModeRaw": "sum",
   "metricKindRaw": null,
   "sortOrder": 0,
   "isArchived": false,
@@ -85,6 +86,7 @@ Defines the trackers themselves.
 
 - **`typeRaw`**: One of `"checkbox"`, `"value"`, `"cumulative"`, `"container"`, `"metric"`.
 - **`metricKindRaw`**: Only for `metric` type — one of `"photo"`, `"value"`, `"checkbox"`, `"notes"`.
+- **`aggregationModeRaw`**: Only for `cumulative` type — `"sum"` (default) or `"average"`. Controls how multiple daily entries are aggregated.
 - **`scheduleData`** / **`timeWindowData`**: These are `Data` blobs in Swift, serialized as Base64 strings in the JSON.
     - *Note for manual editing*: It is difficult to manually construct these Base64 strings. It is recommended to create a dummy activity in the app, export it, and copy the strings if needed.
 

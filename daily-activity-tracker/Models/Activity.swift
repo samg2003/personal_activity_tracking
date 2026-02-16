@@ -7,6 +7,19 @@ enum HealthKitMode: String, Sendable {
     case both
 }
 
+enum AggregationMode: String, Codable, CaseIterable, Identifiable {
+    case sum
+    case average
+
+    var id: String { rawValue }
+    var displayName: String {
+        switch self {
+        case .sum: "Total (Sum)"
+        case .average: "Average"
+        }
+    }
+}
+
 @Model
 final class Activity {
     var id: UUID = UUID()
@@ -23,6 +36,7 @@ final class Activity {
     var targetValue: Double?
     var unit: String?
     var metricKindRaw: String?  // Only when type == .metric
+    var aggregationModeRaw: String?  // Only cumulative: "sum" (default) or "average"
     var sortOrder: Int = 0
     var isArchived: Bool = false
     var createdAt: Date?
@@ -79,6 +93,11 @@ final class Activity {
     var metricKind: MetricKind? {
         get { metricKindRaw.flatMap { MetricKind(rawValue: $0) } }
         set { metricKindRaw = newValue?.rawValue }
+    }
+
+    var aggregationMode: AggregationMode {
+        get { aggregationModeRaw.flatMap { AggregationMode(rawValue: $0) } ?? .sum }
+        set { aggregationModeRaw = newValue.rawValue }
     }
 
     var healthKitMode: HealthKitMode? {

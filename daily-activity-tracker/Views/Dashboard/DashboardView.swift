@@ -325,7 +325,7 @@ struct DashboardView: View {
 
     private func formatQuickAddCurrent() -> String {
         guard let activity = quickAddActivity else { return "0" }
-        let total = cumulativeTotal(for: activity)
+        let total = cumulativeValue(for: activity)
         return total.truncatingRemainder(dividingBy: 1) == 0 ? String(format: "%.0f", total) : String(format: "%.1f", total)
     }
 
@@ -349,7 +349,7 @@ struct DashboardView: View {
     private var allDaySection: some View {
         AllDaySection(
             activities: allDayActivities,
-            cumulativeValues: { cumulativeTotal(for: $0) },
+            cumulativeValues: { cumulativeValue(for: $0) },
             onAdd: { activity, value in addCumulativeLog(activity, value: value) },
             onShowLogs: { activity in logSheetActivity = activity }
         )
@@ -544,7 +544,7 @@ struct DashboardView: View {
             case .cumulative:
                 ValueInputRow(
                     activity: activity,
-                    currentValue: cumulativeTotal(for: activity),
+                    currentValue: cumulativeValue(for: activity),
                     onLog: { value in addCumulativeLog(activity, value: value) },
                     onShowLogs: { logSheetActivity = activity }
                 )
@@ -597,7 +597,7 @@ struct DashboardView: View {
             return todayLogs.contains { $0.activity?.id == activity.id && $0.status == .completed }
         case .cumulative:
             guard let target = activity.targetValue, target > 0 else { return false }
-            return cumulativeTotal(for: activity) >= target
+            return cumulativeValue(for: activity) >= target
         case .container:
             let applicable = activity.historicalChildren(on: today, from: allActivities).filter { scheduleEngine.shouldShow($0, on: today) }
             guard !applicable.isEmpty else { return false }
@@ -890,10 +890,17 @@ struct DashboardView: View {
         todayLogs.first(where: { $0.activity?.id == activity.id && $0.status == .completed })?.value
     }
 
-    private func cumulativeTotal(for activity: Activity) -> Double {
-        todayLogs
+    private func cumulativeValue(for activity: Activity) -> Double {
+        let values = todayLogs
             .filter { $0.activity?.id == activity.id && $0.status == .completed }
-            .reduce(0) { $0 + ($1.value ?? 0) }
+            .compactMap(\.value)
+        guard !values.isEmpty else { return 0 }
+        switch activity.aggregationMode {
+        case .sum:
+            return values.reduce(0, +)
+        case .average:
+            return values.reduce(0, +) / Double(values.count)
+        }
     }
 
     private func shouldAutoCollapse(_ slot: TimeSlot) -> Bool {
@@ -926,7 +933,7 @@ struct DashboardView: View {
                 let value = try? await HealthKitService.shared.readTotalToday(for: hkType, unit: unit)
                 if let val = value, val > 0 {
                     // Update log if value differs significantly or missing
-                    let current = latestValue(for: activity) ?? cumulativeTotal(for: activity)
+                    let current = latestValue(for: activity) ?? cumulativeValue(for: activity)
                     if abs(current - val) > 0.1 {
                         // Auto-log from HealthKit
                         await MainActor.run {

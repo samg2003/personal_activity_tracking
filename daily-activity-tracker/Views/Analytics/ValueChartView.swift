@@ -58,7 +58,12 @@ struct ValueChartView: View {
         return grouped.map { (date, dayLogs) in
             let value: Double
             if activity.type == .cumulative {
-                value = dayLogs.reduce(0) { $0 + ($1.value ?? 0) }
+                let values = dayLogs.compactMap(\.value)
+                if activity.aggregationMode == .average {
+                    value = values.isEmpty ? 0 : values.reduce(0, +) / Double(values.count)
+                } else {
+                    value = values.reduce(0, +)
+                }
             } else {
                 value = dayLogs.last?.value ?? 0
             }
@@ -76,7 +81,18 @@ struct ValueChartView: View {
         return grouped.map { (weekStart, weekLogs) in
             let value: Double
             if activity.type == .cumulative {
-                value = weekLogs.reduce(0) { $0 + ($1.value ?? 0) }
+                if activity.aggregationMode == .average {
+                    // Average mode: compute per-day averages, then average those
+                    let byDay = Dictionary(grouping: weekLogs) { $0.date.startOfDay }
+                    let dailyAvgs = byDay.values.compactMap { dayLogs -> Double? in
+                        let vals = dayLogs.compactMap(\.value)
+                        guard !vals.isEmpty else { return nil }
+                        return vals.reduce(0, +) / Double(vals.count)
+                    }
+                    value = dailyAvgs.isEmpty ? 0 : dailyAvgs.reduce(0, +) / Double(dailyAvgs.count)
+                } else {
+                    value = weekLogs.compactMap(\.value).reduce(0, +)
+                }
             } else {
                 let values = weekLogs.compactMap(\.value)
                 value = values.isEmpty ? 0 : values.reduce(0, +) / Double(values.count)
