@@ -6,6 +6,7 @@ protocol ScheduleEngineProtocol {
     func activitiesForToday(from activities: [Activity], on date: Date, vacationDays: [VacationDay]) -> [Activity]
     func activitiesForToday(from activities: [Activity], on date: Date, vacationDays: [VacationDay], logs: [ActivityLog]) -> [Activity]
     func carriedForwardDate(for activity: Activity, on date: Date, logs: [ActivityLog]) -> Date?
+    func completionStatus(on date: Date, activities: [Activity], logs: [ActivityLog], vacationDays: [VacationDay]) -> DayCompletionStatus
 }
 
 final class ScheduleEngine: ScheduleEngineProtocol {
@@ -125,5 +126,81 @@ final class ScheduleEngine: ScheduleEngineProtocol {
         result.append(contentsOf: carryForward)
 
         return result.sorted { $0.sortOrder < $1.sortOrder }
+    }
+}
+
+// MARK: - Centralized Day Completion
+
+/// Single source of truth for a day's completion status — used by DatePickerBar, HeatmapView, etc.
+struct DayCompletionStatus {
+    /// Completion rate 0…1. Negative means no scheduled activities.
+    let rate: Double
+    /// True when every scheduled activity is skipped (and at least one exists)
+    let allSkipped: Bool
+
+    static let noData = DayCompletionStatus(rate: -1, allSkipped: false)
+    static let skipped = DayCompletionStatus(rate: 0, allSkipped: true)
+}
+
+extension ScheduleEngine {
+
+    /// Compute completion status for a single day. Handles containers, cumulatives, multi-session, etc.
+    func completionStatus(
+        on date: Date,
+        activities: [Activity],
+        logs: [ActivityLog],
+        vacationDays: [VacationDay]
+    ) -> DayCompletionStatus {
+        if date.startOfDay > Date().startOfDay { return .noData }
+        let scheduled = activitiesForToday(from: activities, on: date, vacationDays: vacationDays)
+        guard !scheduled.isEmpty else { return .noData }
+
+        let dayLogs = logs.filter { $0.date.isSameDay(as: date) }
+        var total = 0.0
+        var done = 0.0
+        var skippedCount = 0
+
+        for activity in scheduled {
+            let actSkipped = dayLogs.contains {
+                $0.activity?.id == activity.id && $0.status == .skipped
+            }
+
+            if activity.type == .container {
+                let children = activity.historicalChildren(on: date, from: activities)
+                    .filter { shouldShow($0, on: date) }
+                for child in children {
+                    let childSkipped = dayLogs.contains {
+                        $0.activity?.id == child.id && $0.status == .skipped
+                    }
+                    if childSkipped { skippedCount += 1; continue }
+                    total += 1
+                    if dayLogs.contains(where: { $0.activity?.id == child.id && $0.status == .completed }) {
+                        done += 1
+                    }
+                }
+            } else if activity.type == .cumulative && (activity.targetValue == nil || activity.targetValue == 0) {
+                if actSkipped { skippedCount += 1 }
+            } else if actSkipped {
+                skippedCount += 1
+            } else if activity.type == .cumulative, let target = activity.targetValue, target > 0 {
+                total += 1.0
+                let values = dayLogs
+                    .filter { $0.activity?.id == activity.id && $0.status == .completed }
+                    .compactMap(\.value)
+                let cumVal = activity.aggregateDayValue(from: values)
+                done += min(cumVal / target, 1.0)
+            } else {
+                let sessions = Double(activity.sessionsPerDay(on: date))
+                total += sessions
+                let completedCount = Double(dayLogs.filter {
+                    $0.activity?.id == activity.id && $0.status == .completed
+                }.count)
+                done += min(completedCount, sessions)
+            }
+        }
+
+        if total <= 0 && skippedCount > 0 { return .skipped }
+        guard total > 0 else { return .noData }
+        return DayCompletionStatus(rate: done / total, allSkipped: false)
     }
 }
