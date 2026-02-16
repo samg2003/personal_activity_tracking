@@ -13,3 +13,12 @@ extension Color {
         self.init(red: r, green: g, blue: b)
     }
 }
+
+extension Double {
+    /// Display-friendly string: "3" for whole numbers, "3.5" for decimals
+    var cleanDisplay: String {
+        truncatingRemainder(dividingBy: 1) == 0
+            ? String(format: "%.0f", self)
+            : String(format: "%.1f", self)
+    }
+}

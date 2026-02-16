@@ -8,6 +8,8 @@ struct GoalsView: View {
     @Query(sort: \Activity.sortOrder) private var allActivities: [Activity]
     @Query private var vacationDays: [VacationDay]
 
+    private let scheduleEngine = ScheduleEngine()
+
     @State private var showAddGoal = false
     @State private var editingGoal: Goal?
 
@@ -138,61 +140,18 @@ struct GoalsView: View {
 
     // MARK: - Scoring
 
-    /// 7-day weighted completion score for contributing activities
+    /// 14-day weighted completion score for contributing activities
     func consistencyScore(for goal: Goal) -> Double {
-        let calendar = Calendar.current
-        let today = Date().startOfDay
-        let vacationSet = Set(vacationDays.map { $0.date.startOfDay })
-
         var totalWeighted = 0.0
         var totalWeight = 0.0
 
         for link in goal.activityLinks {
             guard let activity = link.activity, activity.modelContext != nil else { continue }
             let w = link.weight
-            var completed = 0
-            var expected = 0
+            let rate = scheduleEngine.completionRate(for: activity, days: 14, logs: allLogs, vacationDays: vacationDays, allActivities: allActivities)
 
-            for offset in 1..<15 {
-                guard let day = calendar.date(byAdding: .day, value: -offset, to: today) else { continue }
-                if vacationSet.contains(day) { continue }
-                if day < activity.createdDate.startOfDay { continue }
-                if let stopped = activity.stoppedAt, day > stopped { continue }
-
-                let schedule = activity.scheduleActive(on: day)
-                let scheduled: Bool
-                switch schedule.type {
-                case .daily: scheduled = true
-                case .weekly:
-                    scheduled = (schedule.weekdays ?? []).contains(day.weekdayISO)
-                case .monthly:
-                    scheduled = (schedule.monthDays ?? []).contains(day.dayOfMonth)
-                case .sticky, .adhoc:
-                    scheduled = false
-                }
-
-                if scheduled {
-                    let daySkipped = allLogs.contains {
-                        $0.activity?.id == activity.id &&
-                        $0.status == .skipped &&
-                        $0.date.isSameDay(as: day)
-                    }
-                    let dayCompleted = allLogs.filter {
-                        $0.activity?.id == activity.id &&
-                        $0.status == .completed &&
-                        $0.date.isSameDay(as: day)
-                    }.count
-
-                    if daySkipped && dayCompleted == 0 { continue }
-
-                    let sessions = activity.sessionsPerDay(on: day)
-                    expected += sessions
-                    completed += min(dayCompleted, sessions)
-                }
-            }
-
-            if expected > 0 {
-                totalWeighted += (Double(completed) / Double(expected)) * w
+            if rate > 0 {
+                totalWeighted += rate * w
                 totalWeight += w
             }
         }
@@ -330,7 +289,7 @@ struct GoalCardView: View {
                 .foregroundStyle(scoreColor(progress))
         } else if let latest = goal.latestValue(for: link) {
             // Numeric without target
-            Text(formatMetric(latest))
+            Text(latest.cleanDisplay)
                 .font(.caption2.bold())
                 .foregroundStyle(Color(hex: goal.hexColor))
         } else {
@@ -340,13 +299,4 @@ struct GoalCardView: View {
         }
     }
 
-    private func scoreColor(_ score: Double) -> Color {
-        if score >= 0.8 { return .green }
-        if score >= 0.5 { return .orange }
-        return .red
-    }
-
-    private func formatMetric(_ value: Double) -> String {
-        value.truncatingRemainder(dividingBy: 1) == 0 ? "\(Int(value))" : String(format: "%.1f", value)
-    }
 }

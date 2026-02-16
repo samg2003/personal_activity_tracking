@@ -192,14 +192,14 @@ enum ReminderPreset: Codable {
 
 ## Services (Protocol-Based)
 
-| Service                 | Responsibility                                                      | Dependency                      |
-| ----------------------- | ------------------------------------------------------------------- | ------------------------------- |
-| **ScheduleEngine**      | `shouldShow`, `activitiesForToday`, carry-forward missed activities | Activity, ActivityLog, Calendar |
-| **AnalyticsEngine**     | Streaks, scores, heatmap data, insight summary                      | ActivityLog                     |
-| **HealthKitService**    | Read/write HK, observe changes                                      | HealthKit framework             |
-| **NotificationService** | Schedule/cancel local notifications                                 | UserNotifications               |
-| **CalendarService**     | Create/read EventKit events                                         | EventKit                        |
-| **MediaService**        | Save/load photos, cleanup orphans                                   | FileManager                     |
+| Service                 | Responsibility                                                                                                                | Dependency                      |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| **ScheduleEngine**      | `shouldShow`, `activitiesForToday`, carry-forward, `completionRate`, `currentStreak`, `longestStreak`, `isContainerCompleted` | Activity, ActivityLog, Calendar |
+| **AnalyticsEngine**     | Streaks, scores, heatmap data, insight summary                                                                                | ActivityLog                     |
+| **HealthKitService**    | Read/write HK, observe changes                                                                                                | HealthKit framework             |
+| **NotificationService** | Schedule/cancel local notifications                                                                                           | UserNotifications               |
+| **CalendarService**     | Create/read EventKit events                                                                                                   | EventKit                        |
+| **MediaService**        | Save/load photos, cleanup orphans                                                                                             | FileManager                     |
 
 Each service is defined as a **protocol** with a concrete implementation. ViewModels receive services via init injection → easily mockable for tests.
 
@@ -278,7 +278,8 @@ daily-activity-tracker/
 │   │       └── ActivityRow.swift
 │   └── Utils/
 │       ├── Date+Extensions.swift
-│       └── Color+Hex.swift
+│       ├── Color+Hex.swift        ← also has Double.cleanDisplay
+│       └── SharedConstants.swift   ← SkipReasons.defaults, scoreColor()
 ```
 
 ---
@@ -336,6 +337,10 @@ daily-activity-tracker/
 ### ADR-13: Container Goal-Linking
 **Decision**: Containers can be linked to goals in the `.activity` (habit) role only. Container consistency = fraction of scheduled days where ALL non-archived children have completion logs. Containers cannot be metrics.
 **Rationale**: A container like "Workout Routine" represents a unit of work — if all exercises are done, the routine is complete. Individual children can also be linked separately as metrics if needed.
+
+### ADR-14: Centralized Schedule Logic in ScheduleEngine
+**Decision**: All completion rate, streak (current/longest), and container completion logic is centralized in `ScheduleEngine`. Views call `scheduleEngine.completionRate(for:days:logs:vacationDays:allActivities:)` and `scheduleEngine.currentStreak(for:...)` instead of implementing inline logic. `Schedule.isScheduled(on:)` replaces all inline `switch schedule.type` patterns.
+**Rationale**: Before refactoring, identical 40-90 line schedule-checking, streak-computing, and completion-calculating logic was duplicated across 6+ view files (~540 lines total). This made bugs hard to fix consistently and new schedule types impossible to add without touching every file. Centralizing creates a single source of truth.
 
 ---
 

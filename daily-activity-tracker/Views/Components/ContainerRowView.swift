@@ -17,7 +17,7 @@ struct ContainerRowView: View {
     @State private var isExpanded = false
     @State private var showSkipSheet = false
 
-    private static let skipReasons = ["Injury", "Weather", "Sick", "Not Feeling Well", "Other"]
+
 
     /// Children that should appear today, including carry-forward from missed days
     private var todayChildren: [Activity] {
@@ -187,7 +187,7 @@ struct ContainerRowView: View {
                 }
             }
             .confirmationDialog("Reason for skipping", isPresented: $showSkipSheet) {
-                ForEach(Self.skipReasons, id: \.self) { reason in
+                ForEach(SkipReasons.defaults, id: \.self) { reason in
                     Button(reason) {
                         pendingChildren.forEach { onSkipChild($0, reason) }
                     }

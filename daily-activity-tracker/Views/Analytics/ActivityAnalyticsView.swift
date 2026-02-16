@@ -21,6 +21,7 @@ struct ActivityAnalyticsView: View {
     @State private var offset: Int = 0 // 0 = current period, -1 = previous, etc.
 
     private let calendar = Calendar.current
+    private let scheduleEngine = ScheduleEngine()
 
     // MARK: - Filtered logs for this activity
 
@@ -43,162 +44,12 @@ struct ActivityAnalyticsView: View {
 
     // MARK: - Streak Computation
 
-    private var currentStreak: Int {
-        computeStreak()
+    private var currentStreakValue: Int {
+        scheduleEngine.currentStreak(for: activity, logs: allLogs, allActivities: allActivities, vacationDays: vacationDays)
     }
 
-    private var longestStreak: Int {
-        guard let earliest = activity.createdAt ?? activityLogs.map(\.date).min() else { return 0 }
-        let completedDates: Set<Date>
-        let skippedDates = Set(
-            activityLogs.filter { $0.status == .skipped }.map { $0.date.startOfDay }
-        )
-
-        if activity.type == .container {
-            var dates = Set<Date>()
-            var day = Date().startOfDay
-            while day >= earliest.startOfDay {
-                if isContainerCompleted(on: day) { dates.insert(day) }
-                guard let prev = calendar.date(byAdding: .day, value: -1, to: day) else { break }
-                day = prev
-            }
-            completedDates = dates
-        } else {
-            completedDates = Set(
-                activityLogs.filter { $0.status == .completed }.map { $0.date.startOfDay }
-            )
-        }
-
-        var maxStreak = 0
-        var current = 0
-        var day = Date().startOfDay
-
-        while day >= earliest.startOfDay {
-            if day < activity.createdDate.startOfDay { break }
-            if let stopped = activity.stoppedAt, day > stopped { break }
-
-            let schedule = activity.scheduleActive(on: day)
-            let isScheduled: Bool
-            switch schedule.type {
-            case .daily: isScheduled = true
-            case .weekly: isScheduled = (schedule.weekdays ?? []).contains(day.weekdayISO)
-            case .monthly: isScheduled = (schedule.monthDays ?? []).contains(day.dayOfMonth)
-            default: isScheduled = false
-            }
-
-            if !isScheduled || vacationDays.contains(where: { $0.date.isSameDay(as: day) }) {
-                // not scheduled or vacation — pass through
-            } else if completedDates.contains(day) {
-                current += 1
-                maxStreak = max(maxStreak, current)
-            } else if skippedDates.contains(day) {
-                // explicitly skipped — pass through
-            } else {
-                current = 0
-            }
-
-            guard let prev = calendar.date(byAdding: .day, value: -1, to: day) else { break }
-            day = prev
-        }
-
-        return maxStreak
-    }
-
-    private func computeStreak() -> Int {
-        if activity.type == .container {
-            return computeContainerStreak()
-        }
-
-        let completedDates = Set(
-            activityLogs.filter { $0.status == .completed }.map { $0.date.startOfDay }
-        )
-        let skippedDates = Set(
-            activityLogs.filter { $0.status == .skipped }.map { $0.date.startOfDay }
-        )
-
-        var streak = 0
-        var day = Date().startOfDay
-        if !completedDates.contains(day) {
-            guard let prev = calendar.date(byAdding: .day, value: -1, to: day) else { return 0 }
-            day = prev
-        }
-
-        for _ in 0..<3650 {
-            if day < activity.createdDate.startOfDay { break }
-            if let stopped = activity.stoppedAt, day > stopped { break }
-
-            let schedule = activity.scheduleActive(on: day)
-            let isScheduled: Bool
-            switch schedule.type {
-            case .daily: isScheduled = true
-            case .weekly: isScheduled = (schedule.weekdays ?? []).contains(day.weekdayISO)
-            case .monthly: isScheduled = (schedule.monthDays ?? []).contains(day.dayOfMonth)
-            default: isScheduled = false
-            }
-
-            if !isScheduled {
-                // not scheduled — pass through
-            } else if completedDates.contains(day) {
-                streak += 1
-            } else if vacationDays.contains(where: { $0.date.isSameDay(as: day) }) {
-                // vacation — pass through
-            } else if skippedDates.contains(day) {
-                // explicitly skipped — pass through
-            } else {
-                break
-            }
-
-            guard let prev = calendar.date(byAdding: .day, value: -1, to: day) else { break }
-            day = prev
-        }
-        return streak
-    }
-
-    private func computeContainerStreak() -> Int {
-        let skippedDates = Set(
-            effectiveLogs.filter { $0.status == .skipped }.map { $0.date.startOfDay }
-        )
-        var streak = 0
-        var day = Date().startOfDay
-        if !isContainerCompleted(on: day) {
-            guard let prev = calendar.date(byAdding: .day, value: -1, to: day) else { return 0 }
-            day = prev
-        }
-        for _ in 0..<3650 {
-            if day < activity.createdDate.startOfDay { break }
-            let schedule = activity.scheduleActive(on: day)
-            let isScheduled: Bool
-            switch schedule.type {
-            case .daily: isScheduled = true
-            case .weekly: isScheduled = (schedule.weekdays ?? []).contains(day.weekdayISO)
-            case .monthly: isScheduled = (schedule.monthDays ?? []).contains(day.dayOfMonth)
-            default: isScheduled = false
-            }
-            if !isScheduled {
-                // not scheduled — pass through
-            } else if isContainerCompleted(on: day) {
-                streak += 1
-            } else if vacationDays.contains(where: { $0.date.isSameDay(as: day) }) {
-                // vacation — pass through
-            } else if skippedDates.contains(day) {
-                // explicitly skipped — pass through
-            } else {
-                break
-            }
-            guard let prev = calendar.date(byAdding: .day, value: -1, to: day) else { break }
-            day = prev
-        }
-        return streak
-    }
-
-    private func isContainerCompleted(on day: Date) -> Bool {
-        let children = activity.historicalChildren(on: day, from: allActivities)
-        guard !children.isEmpty else { return false }
-        return children.allSatisfy { child in
-            allLogs.contains {
-                $0.activity?.id == child.id && $0.status == .completed && $0.date.isSameDay(as: day)
-            }
-        }
+    private var longestStreakValue: Int {
+        scheduleEngine.longestStreak(for: activity, logs: allLogs, allActivities: allActivities, vacationDays: vacationDays)
     }
 
     // MARK: - Chart Data
@@ -461,9 +312,9 @@ struct ActivityAnalyticsView: View {
 
     private var streakCard: some View {
         HStack(spacing: 0) {
-            streakStat(label: "Current Streak", value: currentStreak, icon: "flame.fill", color: .orange)
+            streakStat(label: "Current Streak", value: currentStreakValue, icon: "flame.fill", color: .orange)
             Divider().frame(height: 36)
-            streakStat(label: "Longest Streak", value: longestStreak, icon: "trophy.fill", color: .yellow)
+            streakStat(label: "Longest Streak", value: longestStreakValue, icon: "trophy.fill", color: .yellow)
         }
         .padding(14)
         .background(Color(.secondarySystemBackground))

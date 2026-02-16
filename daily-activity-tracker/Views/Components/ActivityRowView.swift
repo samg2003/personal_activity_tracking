@@ -9,7 +9,7 @@ struct ActivityRowView: View {
 
     @State private var showSkipSheet = false
 
-    private static let skipReasons = ["Injury", "Weather", "Sick", "Gym Closed", "Other"]
+
 
     var body: some View {
         HStack(spacing: 14) {
@@ -94,7 +94,7 @@ struct ActivityRowView: View {
             .tint(.orange)
         }
         .confirmationDialog("Reason for skipping", isPresented: $showSkipSheet) {
-            ForEach(Self.skipReasons, id: \.self) { reason in
+            ForEach(SkipReasons.defaults, id: \.self) { reason in
                 Button(reason) { onSkip(reason) }
             }
             Button("Cancel", role: .cancel) { }

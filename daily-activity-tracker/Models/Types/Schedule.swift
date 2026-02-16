@@ -31,4 +31,19 @@ struct Schedule: Codable, Equatable, Sendable {
     static func monthly(_ days: [Int]) -> Schedule { Schedule(type: .monthly, monthDays: days) }
     static var sticky: Schedule { Schedule(type: .sticky) }
     static func adhoc(_ date: Date) -> Schedule { Schedule(type: .adhoc, specificDate: date) }
+
+    /// Whether this schedule requires an activity to be shown on the given date.
+    /// `.sticky` and `.adhoc` (without match) return false — handled by shouldShow/carry-forward.
+    func isScheduled(on date: Date) -> Bool {
+        switch type {
+        case .daily:
+            return true
+        case .weekly:
+            return (weekdays ?? []).contains(date.weekdayISO)
+        case .monthly:
+            return (monthDays ?? []).contains(date.dayOfMonth)
+        case .sticky, .adhoc:
+            return false
+        }
+    }
 }

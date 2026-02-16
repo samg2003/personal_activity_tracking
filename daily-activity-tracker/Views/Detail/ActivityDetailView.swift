@@ -6,6 +6,10 @@ struct ActivityDetailView: View {
     let activity: Activity
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \ActivityLog.date, order: .reverse) private var allLogs: [ActivityLog]
+    @Query private var vacationDays: [VacationDay]
+    @Query(sort: \Activity.sortOrder) private var allActivities: [Activity]
+
+    private let scheduleEngine = ScheduleEngine()
 
     @State private var showCamera = false
 
@@ -177,18 +181,6 @@ struct ActivityDetailView: View {
     }
 
     private var currentStreak: Int {
-        let completedDates = Set(
-            activityLogs
-                .filter { $0.status == .completed }
-                .map { $0.date.startOfDay }
-        )
-        var streak = 0
-        var day = Date().startOfDay
-        while completedDates.contains(day) {
-            streak += 1
-            guard let prev = Calendar.current.date(byAdding: .day, value: -1, to: day) else { break }
-            day = prev
-        }
-        return streak
+        scheduleEngine.currentStreak(for: activity, logs: allLogs, allActivities: allActivities, vacationDays: vacationDays)
     }
 }

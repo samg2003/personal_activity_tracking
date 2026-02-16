@@ -14,7 +14,7 @@ struct ValueInputRow: View {
     @State private var inputText = ""
     @State private var showSkipSheet = false
 
-    private static let skipReasons = ["Injury", "Weather", "Sick", "Gym Closed", "Other"]
+
 
     private var unitLabel: String { activity.unit ?? "" }
     private var isLogged: Bool { currentValue != nil }
@@ -39,7 +39,7 @@ struct ValueInputRow: View {
 
             // Logged value display or prompt
             if let val = currentValue {
-                Text("\(formatValue(val)) \(unitLabel)")
+                Text("\(val.cleanDisplay) \(unitLabel)")
                     .font(.system(.callout, design: .rounded, weight: .semibold))
                     .foregroundStyle(Color(hex: activity.hexColor))
                     .padding(.horizontal, 10)
@@ -69,7 +69,7 @@ struct ValueInputRow: View {
         .background(Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .onTapGesture {
-            if let val = currentValue { inputText = formatValue(val) }
+            if let val = currentValue { inputText = val.cleanDisplay }
             showInput = true
         }
         .alert("Log \(activity.name)", isPresented: $showInput) {
@@ -85,7 +85,7 @@ struct ValueInputRow: View {
         }
         .contextMenu {
             Button {
-                if let val = currentValue { inputText = formatValue(val) }
+                if let val = currentValue { inputText = val.cleanDisplay }
                 showInput = true
             } label: {
                 Label("Edit Value", systemImage: "pencil")
@@ -132,16 +132,10 @@ struct ValueInputRow: View {
             }
         }
         .confirmationDialog("Reason for skipping", isPresented: $showSkipSheet) {
-            ForEach(Self.skipReasons, id: \.self) { reason in
+            ForEach(SkipReasons.defaults, id: \.self) { reason in
                 Button(reason) { onSkip?(reason) }
             }
             Button("Cancel", role: .cancel) { }
         }
-    }
-
-    private func formatValue(_ val: Double) -> String {
-        val.truncatingRemainder(dividingBy: 1) == 0
-            ? String(format: "%.0f", val)
-            : String(format: "%.1f", val)
     }
 }

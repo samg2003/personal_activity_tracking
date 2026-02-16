@@ -9,7 +9,7 @@ struct CumulativeRingView: View {
     var onSkip: ((String) -> Void)?
     var onShowLogs: (() -> Void)?
 
-    private static let skipReasons = ["Injury", "Weather", "Sick", "Gym Closed", "Other"]
+
 
     @State private var showInput = false
     @State private var inputText = ""
@@ -37,7 +37,7 @@ struct CumulativeRingView: View {
                     
                     Spacer()
                     
-                    Text("\(formatValue(currentValue))/\(formatValue(target)) \(unitLabel)")
+                    Text("\(currentValue.cleanDisplay)/\(target.cleanDisplay) \(unitLabel)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -105,7 +105,7 @@ struct CumulativeRingView: View {
             }
         }
         .confirmationDialog("Reason for skipping", isPresented: $showSkipSheet) {
-            ForEach(Self.skipReasons, id: \.self) { reason in
+            ForEach(SkipReasons.defaults, id: \.self) { reason in
                 Button(reason) { onSkip?(reason) }
             }
             Button("Cancel", role: .cancel) { }
@@ -121,13 +121,7 @@ struct CumulativeRingView: View {
             }
             Button("Cancel", role: .cancel) { inputText = "" }
         } message: {
-            Text("Current: \(formatValue(currentValue)) / \(formatValue(target)) \(unitLabel)")
+            Text("Current: \(currentValue.cleanDisplay) / \(target.cleanDisplay) \(unitLabel)")
         }
-    }
-
-    private func formatValue(_ val: Double) -> String {
-        val.truncatingRemainder(dividingBy: 1) == 0
-            ? String(format: "%.0f", val)
-            : String(format: "%.1f", val)
     }
 }
