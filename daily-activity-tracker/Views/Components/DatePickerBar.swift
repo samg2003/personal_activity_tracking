@@ -26,7 +26,7 @@ struct DatePickerBar: View {
     /// Completion status for a date: (fraction 0…1, allSkipped flag). Returns (-1, false) if no scheduled activities.
     private func completionStatus(_ date: Date) -> (rate: Double, allSkipped: Bool) {
         if date.startOfDay > Date().startOfDay { return (-1, false) }
-        let scheduled = scheduleEngine.activitiesForToday(from: allActivities, on: date, vacationDays: vacationDays, logs: allLogs)
+        let scheduled = scheduleEngine.activitiesForToday(from: allActivities, on: date, vacationDays: vacationDays)
         guard !scheduled.isEmpty else { return (-1, false) }
 
         let dayLogs = allLogs.filter { $0.date.isSameDay(as: date) }
@@ -40,24 +40,25 @@ struct DatePickerBar: View {
             }
 
             if activity.type == .container {
+                // Filter children by schedule — matching DashboardView/ContainerRowView
                 let children = activity.historicalChildren(on: date, from: allActivities)
+                    .filter { scheduleEngine.shouldShow($0, on: date) }
                 for child in children {
+                    let childCompleted = dayLogs.contains {
+                        $0.activity?.id == child.id && $0.status == .completed
+                    }
                     let childSkipped = dayLogs.contains {
                         $0.activity?.id == child.id && $0.status == .skipped
                     }
                     if childSkipped { skippedCount += 1; continue }
                     total += 1
-                    if dayLogs.contains(where: { $0.activity?.id == child.id && $0.status == .completed }) {
-                        done += 1
-                    }
+                    if childCompleted { done += 1 }
                 }
             } else if activity.type == .cumulative && (activity.targetValue == nil || activity.targetValue == 0) {
-                // No-target cumulative: still track as skipped if applicable
                 if actSkipped { skippedCount += 1 }
             } else if actSkipped {
                 skippedCount += 1
             } else if activity.type == .cumulative, let target = activity.targetValue, target > 0 {
-                // Partial credit for cumulative
                 total += 1.0
                 let values = dayLogs
                     .filter { $0.activity?.id == activity.id && $0.status == .completed }
@@ -74,6 +75,7 @@ struct DatePickerBar: View {
             }
         }
 
+        // All-skipped: every scheduled activity/child is either skipped or excluded, and at least one was skipped
         if total <= 0 && skippedCount > 0 { return (0, true) }
         guard total > 0 else { return (-1, false) }
         return (done / total, false)

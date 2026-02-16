@@ -6,6 +6,7 @@ struct HeatmapView: View {
     let activities: [Activity]
     let logs: [ActivityLog]
     let vacationDays: [VacationDay]
+    let scheduleEngine: ScheduleEngine
 
     @State private var selectedDay: DayCell?
 
@@ -23,11 +24,13 @@ struct HeatmapView: View {
     private var dayCells: [DayCell] {
         let calendar = Calendar.current
         let today = Date().startOfDay
+        let topLevel = activities.filter { $0.parent == nil && !$0.isArchived }
         return (0..<totalDays).compactMap { offset in
             guard let date = calendar.date(byAdding: .day, value: -offset, to: today) else { return nil }
             let isVacation = vacationDays.contains { $0.date.isSameDay(as: date) }
             let dayLogs = logs.filter { $0.date.isSameDay(as: date) }
-            let applicable = activities.filter { $0.parent == nil && !$0.isArchived }
+            // Only count activities actually scheduled on this day
+            let applicable = topLevel.filter { scheduleEngine.shouldShow($0, on: date) }
 
             let completedCount = applicable.filter { activity in
                 dayLogs.contains { $0.activity?.id == activity.id && $0.status == .completed }
@@ -36,8 +39,7 @@ struct HeatmapView: View {
                 dayLogs.contains { $0.activity?.id == activity.id && $0.status == .skipped }
             }.count
 
-            // Skipped day: has skip logs but zero completions
-            let allSkipped = skippedCount > 0 && completedCount == 0
+            let allSkipped = !applicable.isEmpty && skippedCount == applicable.count && completedCount == 0
             let completion = applicable.isEmpty ? 0 : Double(completedCount) / Double(applicable.count)
             return DayCell(date: date, completion: completion, isVacation: isVacation, isSkippedDay: allSkipped)
         }.reversed()

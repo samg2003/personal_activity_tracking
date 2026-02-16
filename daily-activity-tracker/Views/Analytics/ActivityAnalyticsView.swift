@@ -429,7 +429,8 @@ struct ActivityAnalyticsView: View {
                     HeatmapView(
                         activities: heatmapActivities,
                         logs: allLogs,
-                        vacationDays: vacationDays
+                        vacationDays: vacationDays,
+                        scheduleEngine: ScheduleEngine()
                     )
                 }
 

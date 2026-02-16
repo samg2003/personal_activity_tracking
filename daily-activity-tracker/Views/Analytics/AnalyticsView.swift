@@ -303,7 +303,8 @@ struct AnalyticsView: View {
                         HeatmapView(
                             activities: topLevelActivities,
                             logs: allLogs,
-                            vacationDays: vacationDays
+                            vacationDays: vacationDays,
+                            scheduleEngine: ScheduleEngine()
                         )
                     }
 
