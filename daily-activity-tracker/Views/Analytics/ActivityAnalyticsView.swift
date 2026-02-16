@@ -341,10 +341,7 @@ struct ActivityAnalyticsView: View {
             let values = activityLogs
                 .filter { $0.status == .completed && $0.date.isSameDay(as: day) }
                 .compactMap(\.value)
-            if activity.aggregationMode == .average {
-                return values.isEmpty ? 0 : values.reduce(0, +) / Double(values.count)
-            }
-            return values.reduce(0, +)
+            return activity.aggregateDayValue(from: values)
 
         case .container:
             let children = activity.children.filter { !$0.isArchived }

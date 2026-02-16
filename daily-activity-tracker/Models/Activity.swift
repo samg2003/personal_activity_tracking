@@ -194,4 +194,32 @@ final class Activity {
         self.scheduleData = try? JSONEncoder().encode(schedule)
         self.timeWindowData = timeWindow.flatMap { try? JSONEncoder().encode($0) }
     }
+    // MARK: - Aggregation Helpers
+
+    /// Aggregate log values for a single day — sum or average based on aggregation mode.
+    /// Use this whenever combining multiple log entries into one daily value.
+    func aggregateDayValue(from values: [Double]) -> Double {
+        guard !values.isEmpty else { return 0 }
+        switch aggregationMode {
+        case .sum:     return values.reduce(0, +)
+        case .average: return values.reduce(0, +) / Double(values.count)
+        }
+    }
+
+    /// Aggregate across multiple days (for weekly/monthly/annual charts).
+    /// First computes per-day values via `aggregateDayValue`, then averages those daily values
+    /// for `.average` mode, or sums them for `.sum` mode.
+    func aggregateMultiDayValue(from logs: [ActivityLog]) -> Double {
+        let byDay = Dictionary(grouping: logs.filter { $0.status == .completed }) { $0.date.startOfDay }
+        let dailyValues = byDay.values.compactMap { dayLogs -> Double? in
+            let vals = dayLogs.compactMap(\.value)
+            guard !vals.isEmpty else { return nil }
+            return aggregateDayValue(from: vals)
+        }
+        guard !dailyValues.isEmpty else { return 0 }
+        switch aggregationMode {
+        case .sum:     return dailyValues.reduce(0, +)
+        case .average: return dailyValues.reduce(0, +) / Double(dailyValues.count)
+        }
+    }
 }

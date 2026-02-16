@@ -1,6 +1,46 @@
 # Backlog
-- [42] **GoalDetailView `dayCell` uses live `activity.children` — container mutations retroactively change 7-day grid.** Known limitation: view doesn't have access to `allActivities` needed for `historicalChildren(on:)`. Would require refactoring view interface. Low impact since grid only shows 7 recent days. **File:** `GoalDetailView.swift:387-395`. [AI found]
 
+## 🔴 Critical — Data Loss / Integrity
+
+- [46] **Export/Import loses `aggregationModeRaw` — cumulative AVG activities revert to SUM after restore.** `ActivityDTO` doesn't include `aggregationModeRaw`. On export, this field is silently dropped. On import, it defaults to `.sum`. Users who configured average-mode cumulative activities (heart rate, walking speed) lose that setting on any backup/restore cycle. **Files:** `DataService.swift:30-92` (DTO definition), `:250-268` (export), `:384-404` (import). [AI found]
+
+- [47] **HealthKit sync overwrites ALL manual cumulative logs with a single HealthKit value.** `syncHealthKit()` deletes every existing log for the activity today (`existing.forEach { modelContext.delete($0) }`) and replaces with one "Synced from HealthKit" log. If user added manual entries to a cumulative activity AND it has HealthKit read enabled, all their manual inputs are destroyed on each sync. Should merge or only write HealthKit-specific entries, not nuke everything. **File:** `DashboardView.swift:942-947`. [AI found]
+
+- [48] **HealthKit unit mapping is hardcoded to only `ml` and `count` — wrong for most health types.** Both `syncHealthKit()` and `writeToHealthKit()` use `activity.unit == "ml" ? .literUnit(with: .milli) : .count()`. Steps, heart rate (bpm), walking speed (m/s), body mass (kg), etc. all get `.count()` which reads/writes garbage values. **Files:** `DashboardView.swift:923,963`. [AI found]
+
+## 🟠 Big — Logic / Analytics Bugs
+
+- [49] **Container analytics use live `activity.children` instead of historical children — retroactive mutation.** `isContainerCompleted(on:)` in both `AnalyticsView.swift:120-128` and `ActivityAnalyticsView.swift:193-200` uses `activity.children.filter { !$0.isArchived }`. If a child is added/removed/archived today, the completion status of ALL past days changes instantly. Same issue in `GoalDetailView.dayCell` at `:423` and `GoalDetailView.containerRate` at `:621`. This was flagged as [42] previously but appears across 4 views. **Files:** `AnalyticsView.swift:121`, `ActivityAnalyticsView.swift:194`, `GoalDetailView.swift:423,621`. [AI found]
+
+- [50] **`streakFor` in AnalyticsView uses live children for container streak — same retroactive mutation.** `streakFor` at AnalyticsView:36-38 builds `containerChildLogs` from `activity.children`, not from any historical snapshot. Adding/removing children retroactively changes streak counts. **File:** `AnalyticsView.swift:36-38`. [AI found]
+
+- [51] **`completionRate` doesn't define "completed" for cumulative activities — always shows 0% or behind schedule.** `completionRate` in `AnalyticsView.swift:188-222` counts `completed` by number of completion *log entries*, but cumulative activities may have multiple logs per day (each "Add" is a log). It doesn't check whether the cumulative target was met for the day, so a cumulative activity with target 2000ml that has 5 entries of 400ml would count as "5 completions" against 1 expected session, which is wrong. Should check cumulative total ≥ target. **File:** `AnalyticsView.swift:210-218`. [AI found]
+
+- [52] **`biggestWins` doesn't respect `aggregateDayValue` for cumulative activities.** The weekly comparison averages all raw log values without grouping by day first. For cumulative-sum activities, this gives a per-entry average rather than per-day totals. For cumulative-average activities, it doesn't compute daily averages before weekly averages. **File:** `AnalyticsView.swift:244-272`. [AI found]
+
+- [53] **Vacation skip creates skip logs using live `activity.children` instead of `historicalChildren`.** `createVacationSkipLogs` at `DashboardView.swift:788` iterates `activity.children where !$0.isArchived` instead of using `historicalChildren(on:)`. If container children changed since the vacation day, the wrong children get skipped. **File:** `DashboardView.swift:786-796`. [AI found]
+
+- [54] **`ActivityAnalyticsView.effectiveLogs` uses live children for containers.** The computed property `effectiveLogs` filters by `activity.children.filter { !$0.isArchived }` — same retroactive mutation risk as [49]. Affects the entire per-activity analytics page: streaks, charts, log history. **File:** `ActivityAnalyticsView.swift:33-41`. [AI found]
+
+- [55] **`ActivityAnalyticsView.valueForDay` uses live children for container completion percentage.** At line 347, `activity.children.filter { !$0.isArchived }` is used to calculate the daily completion percentage for containers. Archived or added children retroactively change all past daily percentages. **File:** `ActivityAnalyticsView.swift:347-354`. [AI found]
+
+## 🟡 Medium — UI/UX / Feature Bugs
+
+- [56] **`completionFraction` on Dashboard doesn't count all-day cumulative activities.** Progress bar iterates `todayActivities` which includes all-day cumulatives, but for non-container/non-multi-session activities it just counts `isFullyCompleted`. Cumulative activities without a target return `false` from `isFullyCompleted`, so they're counted as 1 expected + 0 done — permanently dragging progress down. These should either be excluded from the fraction (like "informational" trackers) or only counted when they have a target. **File:** `DashboardView.swift:90-118`. [AI found]
+
+- [57] **`allDone` doesn't account for all-day cumulative activities.** `allDone` checks `pendingTimed.isEmpty && stickyPending.isEmpty && !completed.isEmpty` but all-day cumulatives are excluded from `pendingTimed`. So even if cumulatives haven't met their target, the "All done! 🎉" message and auto-expand of completed section can trigger. **File:** `DashboardView.swift:406-408`. [AI found]
+
+- [58] **Carry-forward uses current schedule, not historical schedule, for lookback.** `carriedForwardDate` in ScheduleEngine calls `activity.scheduleActive(on: date)` once (for the current date) and then uses that same schedule to check all past days. If the schedule changed (via config snapshot), the lookback days are evaluated with today's schedule instead of each day's own schedule. **File:** `ScheduleEngine.swift:60-97`. [AI found]
+
+- [59] **`GoalDetailView.containerRate` counts days with 0 scheduled children as "fully completed".** When `scheduledChildren.isEmpty` (no children scheduled that day), it increments `fullyCompleted += 1` without incrementing `expected`. This inflates the container's consistency score. Should skip that day instead. **File:** `GoalDetailView.swift:656-659`. [AI found]
+
+## 🟢 Small — Code Quality / Minor
+
+- [60] **`pendingTimedIncludingPartial` is identical to `pendingTimed` — dead code.** Both computed properties at DashboardView lines 57-74 have exactly the same filter logic. `pendingTimedIncludingPartial` is never referenced anywhere else. Should be removed. **File:** `DashboardView.swift:67-74`. [AI found]
+
+- [61] **`GoalDetailView.activityRate` range is `1..<15` (excludes today), but header says "7 days".** The `overallScore` is labeled "Activity Consistency (7 days)" but `activityRate` actually looks at 14 past days (offset 1 through 14, skipping today). Inconsistent label vs actual time window. **Files:** `GoalDetailView.swift:87-89` (label), `:576` (range). [AI found]
+
+- [62] **Photo metric thumbnails in GoalDetailView show placeholder rectangles, not actual photos.** `photoMetricDisplay` creates `RoundedRectangle` placeholders with a photo icon overlay, even though `log.photoFilename` is available and could be loaded via `MediaService`. Photos exist on disk but are never displayed. **File:** `GoalDetailView.swift:268-284`. [AI found]
 # Promoted for human review 
 - [45] **App crashes at `getValue(forKey: \.createdAt)` when opening Goals.** `createdAt` was declared non-optional (`Date = Date()`) but SwiftData stores it as nullable in SQLite. Records created before the column was added have NULL, causing a fault crash. [User reported]
   - AI Reply: Fixed — made `createdAt` optional (`Date?`) in both Activity and Goal models. Added `createdDate` computed property (`createdAt ?? Date.distantPast`) as safe accessor. Updated all ~22 callsites across 8 files. Also added startup migration to clean orphaned GoalActivity links.

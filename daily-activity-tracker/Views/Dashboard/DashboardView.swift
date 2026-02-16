@@ -894,13 +894,7 @@ struct DashboardView: View {
         let values = todayLogs
             .filter { $0.activity?.id == activity.id && $0.status == .completed }
             .compactMap(\.value)
-        guard !values.isEmpty else { return 0 }
-        switch activity.aggregationMode {
-        case .sum:
-            return values.reduce(0, +)
-        case .average:
-            return values.reduce(0, +) / Double(values.count)
-        }
+        return activity.aggregateDayValue(from: values)
     }
 
     private func shouldAutoCollapse(_ slot: TimeSlot) -> Bool {
