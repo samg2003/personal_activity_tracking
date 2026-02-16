@@ -63,16 +63,6 @@ struct DashboardView: View {
         }
     }
 
-    /// Activities that have at least one pending session (for multi-session grouping)
-    private var pendingTimedIncludingPartial: [Activity] {
-        todayActivities.filter { activity in
-            activity.schedule.type != .sticky
-            && !(activity.type == .cumulative && activity.timeWindow?.slot == .allDay)
-            && !isFullyCompleted(activity)
-            && !isSkipped(activity)
-        }
-    }
-
     private var stickyPending: [Activity] {
         todayActivities.filter { activity in
             activity.schedule.type == .sticky && !isFullyCompleted(activity) && !isSkipped(activity)
@@ -88,34 +78,42 @@ struct DashboardView: View {
     }
 
     private var completionFraction: Double {
-        // Multi-session activities count as N items (one per slot)
-        // Containers count as number of children
-        var total = 0
-        var done = 0
+        var total = 0.0
+        var done = 0.0
+        var skippedCount = 0
         for activity in todayActivities {
-            if isSkipped(activity) { continue }
+            if isSkipped(activity) { skippedCount += 1; continue }
+            // No-target cumulatives have no completion concept — exclude from progress
+            if activity.type == .cumulative && (activity.targetValue == nil || activity.targetValue == 0) { continue }
             if activity.type == .container {
                 let children = activity.historicalChildren(on: today, from: allActivities)
                     .filter { scheduleEngine.shouldShow($0, on: today) }
-                total += max(children.count, 1)
-                done += children.filter { isFullyCompleted($0) }.count
+                let count = Double(max(children.count, 1))
+                total += count
+                done += Double(children.filter { isFullyCompleted($0) }.count)
+            } else if activity.type == .cumulative, let target = activity.targetValue, target > 0 {
+                // Partial credit for cumulative: value/target capped at 1
+                total += 1.0
+                done += min(cumulativeValue(for: activity) / target, 1.0)
             } else if activity.isMultiSession {
-                let sessions = activity.timeSlots.count
+                let sessions = Double(activity.timeSlots.count)
                 total += sessions
                 if isFullyCompleted(activity) {
                     done += sessions
                 } else {
                     for slot in activity.timeSlots {
-                        if isSessionCompleted(activity, slot: slot) { done += 1 }
+                        if isSessionCompleted(activity, slot: slot) { done += 1.0 }
                     }
                 }
             } else {
-                total += 1
-                if isFullyCompleted(activity) { done += 1 }
+                total += 1.0
+                if isFullyCompleted(activity) { done += 1.0 }
             }
         }
+        // All activities skipped or excluded → 0% (not 100%)
+        if total <= 0 && skippedCount > 0 { return 0.0 }
         guard total > 0 else { return 1.0 }
-        return Double(done) / Double(total)
+        return done / total
     }
 
     private var groupedBySlot: [(slot: TimeSlot, activities: [Activity])] {
@@ -351,6 +349,8 @@ struct DashboardView: View {
             activities: allDayActivities,
             cumulativeValues: { cumulativeValue(for: $0) },
             onAdd: { activity, value in addCumulativeLog(activity, value: value) },
+            isSkipped: { isSkipped($0) },
+            onSkip: { activity, reason in skipActivity(activity, reason: reason) },
             onShowLogs: { activity in logSheetActivity = activity }
         )
     }
@@ -538,6 +538,7 @@ struct DashboardView: View {
                     activity: activity,
                     currentValue: latestValue(for: activity),
                     onLog: { value in logValue(activity, value: value) },
+                    onSkip: { reason in skipActivity(activity, reason: reason) },
                     onRemove: { removeValueLog(activity) },
                     onTakePhoto: nil
                 )
@@ -546,6 +547,7 @@ struct DashboardView: View {
                     activity: activity,
                     currentValue: cumulativeValue(for: activity),
                     onLog: { value in addCumulativeLog(activity, value: value) },
+                    onSkip: { reason in skipActivity(activity, reason: reason) },
                     onShowLogs: { logSheetActivity = activity }
                 )
             case .container:
@@ -785,7 +787,7 @@ struct DashboardView: View {
         for activity in scheduled {
             if activity.type == .container {
                 // Skip each child that isn't already completed/skipped
-                for child in activity.children where !child.isArchived {
+                for child in activity.historicalChildren(on: date, from: allActivities) {
                     let alreadyHandled = dateLogs.contains {
                         $0.activity?.id == child.id && ($0.status == .completed || $0.status == .skipped)
                     }
@@ -920,31 +922,33 @@ struct DashboardView: View {
                 else { continue }
                 
                 // Determine unit
-                let unit: HKUnit = activity.unit == "ml" ? .literUnit(with: .milli) : .count() 
-                // TODO: Robust unit mapping based on typeID. For now, basic fallback.
-                // Refinement: Add a helper in HealthKitService to get default unit for type.
+                let unit: HKUnit = HealthKitService.unitFor(type: hkType)
                 
                 let value = try? await HealthKitService.shared.readTotalToday(for: hkType, unit: unit)
                 if let val = value, val > 0 {
-                    // Update log if value differs significantly or missing
-                    let current = latestValue(for: activity) ?? cumulativeValue(for: activity)
-                    if abs(current - val) > 0.1 {
-                        // Auto-log from HealthKit
+                    // Compare against existing HK-tagged log (not full cumulative, which includes manual entries)
+                    let existingHKValue = await MainActor.run {
+                        todayLogs.first {
+                            $0.activity?.id == activity.id &&
+                            $0.status == .completed &&
+                            $0.note == "Synced from HealthKit"
+                        }?.value ?? 0
+                    }
+                    if abs(existingHKValue - val) > 0.1 {
                         await MainActor.run {
-                            // If cumulative, we might need to be careful not to double add?
-                            // Actually, readTotalToday returns the SUM.
-                            // If we have local logs provided by user, do we overwrite?
-                            // Strategy: For HK synced activities, the "Truth" is HK.
-                            // We replace today's logs with a single "HealthKit Sync" log?
-                            // Or we strictly use HK value.
-                            
-                            // Simple approach: Delete existing logs for today, insert one "HealthKit Import".
-                            let existing = todayLogs.filter { $0.activity?.id == activity.id }
-                            existing.forEach { modelContext.delete($0) }
-                            
-                            let log = ActivityLog(activity: activity, date: today, status: .completed, value: val)
-                            log.note = "Synced from HealthKit"
-                            modelContext.insert(log)
+                            // Upsert: find existing HK-tagged log and update, otherwise insert
+                            let hkTaggedLog = todayLogs.first {
+                                $0.activity?.id == activity.id &&
+                                $0.status == .completed &&
+                                $0.note == "Synced from HealthKit"
+                            }
+                            if let existing = hkTaggedLog {
+                                existing.value = val
+                            } else {
+                                let log = ActivityLog(activity: activity, date: today, status: .completed, value: val)
+                                log.note = "Synced from HealthKit"
+                                modelContext.insert(log)
+                            }
                         }
                     }
                 }
@@ -960,7 +964,7 @@ struct DashboardView: View {
         
         Task {
             // Simple unit mapping
-            let unit: HKUnit = activity.unit == "ml" ? .literUnit(with: .milli) : .count()
+            let unit: HKUnit = HealthKitService.unitFor(type: hkType)
             try? await HealthKitService.shared.writeSample(type: hkType, value: value, unit: unit, date: Date())
         }
     }

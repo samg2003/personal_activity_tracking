@@ -5,6 +5,8 @@ struct AllDaySection: View {
     let activities: [Activity]
     let cumulativeValues: (Activity) -> Double
     let onAdd: (Activity, Double) -> Void
+    var isSkipped: ((Activity) -> Bool)?
+    var onSkip: ((Activity, String) -> Void)?
     var onShowLogs: ((Activity) -> Void)?
 
     var body: some View {
@@ -25,6 +27,8 @@ struct AllDaySection: View {
                         activity: activity,
                         currentValue: cumulativeValues(activity),
                         onAdd: { value in onAdd(activity, value) },
+                        isSkipped: isSkipped?(activity) ?? false,
+                        onSkip: onSkip.map { closure in { reason in closure(activity, reason) } },
                         onShowLogs: onShowLogs.map { closure in { closure(activity) } }
                     )
                 }
@@ -32,3 +36,4 @@ struct AllDaySection: View {
         }
     }
 }
+

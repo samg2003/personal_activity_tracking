@@ -111,6 +111,11 @@ final class HealthKitService: HealthKitServiceProtocol {
         HKQuantityTypeIdentifier(rawValue: raw)
     }
 
+    /// Returns the correct HKUnit for a given type identifier by looking up commonTypes.
+    static func unitFor(type: HKQuantityTypeIdentifier) -> HKUnit {
+        commonTypes.first { $0.id == type }?.unit ?? .count()
+    }
+
     /// Common types for the picker
     static let commonTypes: [(name: String, id: HKQuantityTypeIdentifier, unit: HKUnit)] = [
         ("Steps", .stepCount, .count()),

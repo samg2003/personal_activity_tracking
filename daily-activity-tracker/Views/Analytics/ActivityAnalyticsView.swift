@@ -31,7 +31,8 @@ struct ActivityAnalyticsView: View {
     /// Logs including children (for containers)
     private var effectiveLogs: [ActivityLog] {
         if activity.type == .container {
-            let childIDs = Set(activity.children.filter { !$0.isArchived }.map(\.id))
+            // Use all children (include archived for historical accuracy)
+            let childIDs = Set(activity.children.map(\.id))
             return allLogs.filter { log in
                 guard let aid = log.activity?.id else { return false }
                 return childIDs.contains(aid)
@@ -191,7 +192,7 @@ struct ActivityAnalyticsView: View {
     }
 
     private func isContainerCompleted(on day: Date) -> Bool {
-        let children = activity.children.filter { !$0.isArchived }
+        let children = activity.historicalChildren(on: day, from: allActivities)
         guard !children.isEmpty else { return false }
         return children.allSatisfy { child in
             allLogs.contains {
@@ -344,7 +345,7 @@ struct ActivityAnalyticsView: View {
             return activity.aggregateDayValue(from: values)
 
         case .container:
-            let children = activity.children.filter { !$0.isArchived }
+            let children = activity.historicalChildren(on: day, from: allActivities)
             guard !children.isEmpty else { return 0 }
             let completed = children.filter { child in
                 allLogs.contains {

@@ -5,10 +5,15 @@ struct CumulativeRingView: View {
     let activity: Activity
     let currentValue: Double
     let onAdd: (Double) -> Void
+    var isSkipped: Bool = false
+    var onSkip: ((String) -> Void)?
     var onShowLogs: (() -> Void)?
+
+    private static let skipReasons = ["Injury", "Weather", "Sick", "Gym Closed", "Other"]
 
     @State private var showInput = false
     @State private var inputText = ""
+    @State private var showSkipSheet = false
 
     private var target: Double { activity.targetValue ?? 1 }
     private var progress: Double { min(currentValue / target, 1.0) }
@@ -65,7 +70,7 @@ struct CumulativeRingView: View {
         }
         .padding(.vertical, 10)
         .padding(.horizontal, 14)
-        .background(Color(.secondarySystemBackground))
+        .background(isSkipped ? Color.orange.opacity(0.15) : Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .onTapGesture { showInput = true }
         .contextMenu {
@@ -82,6 +87,28 @@ struct CumulativeRingView: View {
                     Label("View Entries", systemImage: "list.bullet")
                 }
             }
+
+            if let onSkip {
+                Button {
+                    showSkipSheet = true
+                } label: {
+                    Label("Skip", systemImage: "forward")
+                }
+            }
+        }
+        .swipeActions(edge: .leading) {
+            if onSkip != nil {
+                Button { showSkipSheet = true } label: {
+                    Label("Skip", systemImage: "forward.fill")
+                }
+                .tint(.orange)
+            }
+        }
+        .confirmationDialog("Reason for skipping", isPresented: $showSkipSheet) {
+            ForEach(Self.skipReasons, id: \.self) { reason in
+                Button(reason) { onSkip?(reason) }
+            }
+            Button("Cancel", role: .cancel) { }
         }
         .alert("Add \(activity.name)", isPresented: $showInput) {
             TextField("Amount", text: $inputText)

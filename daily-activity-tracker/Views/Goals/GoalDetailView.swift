@@ -6,6 +6,7 @@ struct GoalDetailView: View {
     @Bindable var goal: Goal
     let allLogs: [ActivityLog]
     let vacationDays: [VacationDay]
+    let allActivities: [Activity]
 
     @State private var showEditGoal = false
 
@@ -84,7 +85,7 @@ struct GoalDetailView: View {
                 Text("\(Int(score * 100))%")
                     .font(.system(size: 42, weight: .bold, design: .rounded))
                     .foregroundStyle(scoreColor(score))
-                Text("Activity Consistency (7 days)")
+                Text("Activity Consistency (14 days)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -271,13 +272,23 @@ struct GoalDetailView: View {
                         .fill(Color(hex: goal.hexColor).opacity(0.2))
                         .frame(height: 50)
                         .overlay {
-                            VStack(spacing: 2) {
-                                Image(systemName: "photo.fill")
-                                    .font(.caption2)
-                                Text(log.date, style: .date)
-                                    .font(.system(size: 8))
+                            if let filename = log.photoFilename,
+                               let uiImage = MediaService.shared.loadPhoto(filename: filename) {
+                                Image(uiImage: uiImage)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(height: 50)
+                                    .clipped()
+                                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                            } else {
+                                VStack(spacing: 2) {
+                                    Image(systemName: "photo.fill")
+                                        .font(.caption2)
+                                    Text(log.date, style: .date)
+                                        .font(.system(size: 8))
+                                }
+                                .foregroundStyle(.secondary)
                             }
-                            .foregroundStyle(.secondary)
                         }
                 }
             }
@@ -420,7 +431,7 @@ struct GoalDetailView: View {
         let completed: Bool
         let isSkipped: Bool
         if activity.type == .container {
-            let children = activity.children.filter { !$0.isArchived }
+            let children = activity.historicalChildren(on: date, from: allActivities)
             completed = !children.isEmpty && children.allSatisfy { child in
                 allLogs.contains {
                     $0.activity?.id == child.id &&
@@ -618,9 +629,6 @@ struct GoalDetailView: View {
         let calendar = Calendar.current
         let today = Date().startOfDay
         let vacationSet = Set(vacationDays.map { $0.date.startOfDay })
-        let children = container.children.filter { !$0.isArchived }
-
-        guard !children.isEmpty else { return 0 }
 
         var fullyCompleted = 0
         var expected = 0
@@ -641,6 +649,7 @@ struct GoalDetailView: View {
 
             guard scheduled else { continue }
 
+            let children = container.historicalChildren(on: day, from: allActivities)
             let scheduledChildren = children.filter { child in
                 if day < child.createdDate.startOfDay { return false }
                 if let stopped = child.stoppedAt, day > stopped { return false }
@@ -653,10 +662,8 @@ struct GoalDetailView: View {
                 }
             }
 
-            guard !scheduledChildren.isEmpty else {
-                fullyCompleted += 1
-                continue
-            }
+            // No children scheduled — skip this day entirely
+            guard !scheduledChildren.isEmpty else { continue }
 
             // If all scheduled children are skipped (none completed), exclude from denominator
             let allSkipped = scheduledChildren.allSatisfy { child in

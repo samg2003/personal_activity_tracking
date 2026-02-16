@@ -5,12 +5,16 @@ struct ValueInputRow: View {
     let activity: Activity
     let currentValue: Double?
     let onLog: (Double) -> Void
+    var onSkip: ((String) -> Void)?
     var onRemove: (() -> Void)?
     var onShowLogs: (() -> Void)?
     var onTakePhoto: (() -> Void)?
 
     @State private var showInput = false
     @State private var inputText = ""
+    @State private var showSkipSheet = false
+
+    private static let skipReasons = ["Injury", "Weather", "Sick", "Gym Closed", "Other"]
 
     private var unitLabel: String { activity.unit ?? "" }
     private var isLogged: Bool { currentValue != nil }
@@ -110,6 +114,28 @@ struct ValueInputRow: View {
                     Label("Add Photo", systemImage: "camera")
                 }
             }
+
+            if let onSkip, !isLogged {
+                Button {
+                    showSkipSheet = true
+                } label: {
+                    Label("Skip", systemImage: "forward")
+                }
+            }
+        }
+        .swipeActions(edge: .leading) {
+            if onSkip != nil {
+                Button { showSkipSheet = true } label: {
+                    Label("Skip", systemImage: "forward.fill")
+                }
+                .tint(.orange)
+            }
+        }
+        .confirmationDialog("Reason for skipping", isPresented: $showSkipSheet) {
+            ForEach(Self.skipReasons, id: \.self) { reason in
+                Button(reason) { onSkip?(reason) }
+            }
+            Button("Cancel", role: .cancel) { }
         }
     }
 

@@ -161,6 +161,7 @@ final class Activity {
     /// Includes current children AND any activity whose snapshot places it here historically.
     func historicalChildren(on date: Date, from allActivities: [Activity]) -> [Activity] {
         guard type == .container else { return [] }
+        let day = date.startOfDay
         var result = Set(children.map { $0.id })
         // Also include activities whose snapshot parentID matches this container on that date
         for act in allActivities where act.parent?.id != self.id {
@@ -168,7 +169,13 @@ final class Activity {
                 result.insert(act.id)
             }
         }
-        return allActivities.filter { result.contains($0.id) }
+        // Filter to children that existed on the given date
+        return allActivities.filter { act in
+            guard result.contains(act.id) else { return false }
+            if act.createdDate.startOfDay > day { return false }
+            if let stopped = act.stoppedAt, stopped < day { return false }
+            return true
+        }
     }
 
     // MARK: - Init

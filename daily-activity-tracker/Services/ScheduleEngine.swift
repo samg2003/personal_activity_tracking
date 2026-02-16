@@ -72,12 +72,14 @@ final class ScheduleEngine: ScheduleEngineProtocol {
             if checkDate.startOfDay < activity.createdDate.startOfDay { break }
             if let stopped = activity.stoppedAt, checkDate.startOfDay > stopped { continue }
 
+            // Use the schedule that was active on the historical day
+            let historicalSchedule = activity.scheduleActive(on: checkDate)
             let wasScheduled: Bool
-            switch schedule.type {
+            switch historicalSchedule.type {
             case .weekly:
-                wasScheduled = (schedule.weekdays ?? []).contains(checkDate.weekdayISO)
+                wasScheduled = (historicalSchedule.weekdays ?? []).contains(checkDate.weekdayISO)
             case .monthly:
-                wasScheduled = (schedule.monthDays ?? []).contains(checkDate.dayOfMonth)
+                wasScheduled = (historicalSchedule.monthDays ?? []).contains(checkDate.dayOfMonth)
             default:
                 wasScheduled = false
             }

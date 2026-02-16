@@ -47,6 +47,7 @@ final class DataService {
         var stoppedAt: Date?
         let healthKitTypeID: String?
         let healthKitModeRaw: String?
+        let aggregationModeRaw: String?
 
         init(id: UUID, name: String, icon: String, hexColor: String,
              typeRaw: String, scheduleData: Data?, timeWindowData: Data?,
@@ -55,7 +56,8 @@ final class DataService {
              sortOrder: Int, isArchived: Bool,
              createdAt: Date, categoryID: UUID?, parentID: UUID?,
              stoppedAt: Date? = nil,
-             healthKitTypeID: String? = nil, healthKitModeRaw: String? = nil) {
+             healthKitTypeID: String? = nil, healthKitModeRaw: String? = nil,
+             aggregationModeRaw: String? = nil) {
             self.id = id; self.name = name; self.icon = icon; self.hexColor = hexColor
             self.typeRaw = typeRaw; self.scheduleData = scheduleData
             self.timeWindowData = timeWindowData; self.timeSlotsData = timeSlotsData
@@ -65,6 +67,7 @@ final class DataService {
             self.createdAt = createdAt; self.categoryID = categoryID; self.parentID = parentID
             self.stoppedAt = stoppedAt; self.healthKitTypeID = healthKitTypeID
             self.healthKitModeRaw = healthKitModeRaw
+            self.aggregationModeRaw = aggregationModeRaw
         }
 
         init(from decoder: Decoder) throws {
@@ -88,6 +91,7 @@ final class DataService {
             stoppedAt = try c.decodeIfPresent(Date.self, forKey: .stoppedAt)
             healthKitTypeID = try c.decodeIfPresent(String.self, forKey: .healthKitTypeID)
             healthKitModeRaw = try c.decodeIfPresent(String.self, forKey: .healthKitModeRaw)
+            aggregationModeRaw = try c.decodeIfPresent(String.self, forKey: .aggregationModeRaw)
             // Old fields silently ignored: allowsPhoto, allowsNotes, weight, reminderData
         }
     }
@@ -264,7 +268,8 @@ final class DataService {
                 parentID: $0.parent?.id,
                 stoppedAt: $0.stoppedAt,
                 healthKitTypeID: $0.healthKitTypeID,
-                healthKitModeRaw: $0.healthKitModeRaw
+                healthKitModeRaw: $0.healthKitModeRaw,
+                aggregationModeRaw: $0.aggregationModeRaw
             )
         }
         
@@ -399,6 +404,7 @@ final class DataService {
             act.stoppedAt = dto.stoppedAt
             act.healthKitTypeID = dto.healthKitTypeID
             act.healthKitModeRaw = dto.healthKitModeRaw
+            act.aggregationModeRaw = dto.aggregationModeRaw
             
             context.insert(act)
             activityMap[dto.id] = act

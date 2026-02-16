@@ -35,7 +35,7 @@ struct AnalyticsView: View {
             var day = Date().startOfDay
             let containerChildLogs = Set(
                 allLogs.filter { log in
-                    log.status == .skipped && activity.children.contains { $0.id == log.activity?.id }
+                    log.status == .skipped && activity.historicalChildren(on: log.date.startOfDay, from: allActivities).contains { $0.id == log.activity?.id }
                 }.map { $0.date.startOfDay }
             )
             if !isContainerCompleted(activity, on: day) {
@@ -118,7 +118,7 @@ struct AnalyticsView: View {
     }
 
     private func isContainerCompleted(_ container: Activity, on day: Date) -> Bool {
-        let children = container.children.filter { !$0.isArchived }
+        let children = container.historicalChildren(on: day, from: allActivities)
         guard !children.isEmpty else { return false }
         return children.allSatisfy { child in
             allLogs.contains {
@@ -147,7 +147,6 @@ struct AnalyticsView: View {
         let vacationDateSet = Set(vacationDays.map { $0.date.startOfDay })
 
         if activity.type == .container {
-            let children = activity.children.filter { !$0.isArchived }
             var totalDays = 0
             var completedDays = 0
             for offset in 0..<7 {
@@ -164,6 +163,8 @@ struct AnalyticsView: View {
                 default: scheduled = false
                 }
                 guard scheduled else { continue }
+
+                let children = activity.historicalChildren(on: day, from: allActivities)
 
                 // Exclude days where all children are skipped
                 let allSkipped = !children.isEmpty && children.allSatisfy { child in
@@ -254,8 +255,13 @@ struct AnalyticsView: View {
 
             guard !thisWeekLogs.isEmpty, !lastWeekLogs.isEmpty else { continue }
 
-            let thisAvg = thisWeekLogs.compactMap(\.value).reduce(0, +) / Double(thisWeekLogs.count)
-            let lastAvg = lastWeekLogs.compactMap(\.value).reduce(0, +) / Double(lastWeekLogs.count)
+            // Use centralized aggregation for cumulative activities (groups by day first)
+            let thisAvg = activity.type == .cumulative
+                ? activity.aggregateMultiDayValue(from: thisWeekLogs)
+                : thisWeekLogs.compactMap(\.value).reduce(0, +) / Double(thisWeekLogs.count)
+            let lastAvg = activity.type == .cumulative
+                ? activity.aggregateMultiDayValue(from: lastWeekLogs)
+                : lastWeekLogs.compactMap(\.value).reduce(0, +) / Double(lastWeekLogs.count)
 
             let delta = thisAvg - lastAvg
             guard abs(delta) > 0.01 else { continue }

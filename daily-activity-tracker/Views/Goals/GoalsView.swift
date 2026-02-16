@@ -5,6 +5,7 @@ struct GoalsView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Goal.sortOrder) private var allGoals: [Goal]
     @Query(sort: \ActivityLog.date, order: .reverse) private var allLogs: [ActivityLog]
+    @Query(sort: \Activity.sortOrder) private var allActivities: [Activity]
     @Query private var vacationDays: [VacationDay]
 
     @State private var showAddGoal = false
@@ -63,7 +64,7 @@ struct GoalsView: View {
             }
             .navigationDestination(for: UUID.self) { goalID in
                 if let goal = allGoals.first(where: { $0.id == goalID }) {
-                    GoalDetailView(goal: goal, allLogs: allLogs, vacationDays: vacationDays)
+                    GoalDetailView(goal: goal, allLogs: allLogs, vacationDays: vacationDays, allActivities: allActivities)
                 }
             }
         }

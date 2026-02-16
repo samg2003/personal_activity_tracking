@@ -23,55 +23,71 @@ struct DatePickerBar: View {
     }
 
     /// Compute completion fraction for a given date (0…1, or -1 if no activities)
-    private func completionForDate(_ date: Date) -> Double {
-        if date.startOfDay > Date().startOfDay { return -1 }
+    /// Completion status for a date: (fraction 0…1, allSkipped flag). Returns (-1, false) if no scheduled activities.
+    private func completionStatus(_ date: Date) -> (rate: Double, allSkipped: Bool) {
+        if date.startOfDay > Date().startOfDay { return (-1, false) }
         let scheduled = scheduleEngine.activitiesForToday(from: allActivities, on: date, vacationDays: vacationDays, logs: allLogs)
-        guard !scheduled.isEmpty else { return -1 }
+        guard !scheduled.isEmpty else { return (-1, false) }
 
         let dayLogs = allLogs.filter { $0.date.isSameDay(as: date) }
-        var total = 0
-        var done = 0
+        var total = 0.0
+        var done = 0.0
+        var skippedCount = 0
 
         for activity in scheduled {
-            let isSkipped = dayLogs.contains {
+            let actSkipped = dayLogs.contains {
                 $0.activity?.id == activity.id && $0.status == .skipped
             }
-            if isSkipped { continue }
 
             if activity.type == .container {
-                let children = activity.children.filter { !$0.isArchived }
+                let children = activity.historicalChildren(on: date, from: allActivities)
                 for child in children {
                     let childSkipped = dayLogs.contains {
                         $0.activity?.id == child.id && $0.status == .skipped
                     }
-                    if childSkipped { continue }
+                    if childSkipped { skippedCount += 1; continue }
                     total += 1
                     if dayLogs.contains(where: { $0.activity?.id == child.id && $0.status == .completed }) {
                         done += 1
                     }
                 }
+            } else if activity.type == .cumulative && (activity.targetValue == nil || activity.targetValue == 0) {
+                // No-target cumulative: still track as skipped if applicable
+                if actSkipped { skippedCount += 1 }
+            } else if actSkipped {
+                skippedCount += 1
+            } else if activity.type == .cumulative, let target = activity.targetValue, target > 0 {
+                // Partial credit for cumulative
+                total += 1.0
+                let values = dayLogs
+                    .filter { $0.activity?.id == activity.id && $0.status == .completed }
+                    .compactMap(\.value)
+                let cumVal = activity.aggregateDayValue(from: values)
+                done += min(cumVal / target, 1.0)
             } else {
-                let sessions = activity.sessionsPerDay(on: date)
+                let sessions = Double(activity.sessionsPerDay(on: date))
                 total += sessions
-                let completedCount = dayLogs.filter {
+                let completedCount = Double(dayLogs.filter {
                     $0.activity?.id == activity.id && $0.status == .completed
-                }.count
+                }.count)
                 done += min(completedCount, sessions)
             }
         }
 
-        guard total > 0 else { return -1 }
-        return Double(done) / Double(total)
+        if total <= 0 && skippedCount > 0 { return (0, true) }
+        guard total > 0 else { return (-1, false) }
+        return (done / total, false)
     }
 
-    /// Color indicator for completion rate
-    private func completionIndicatorColor(_ date: Date) -> Color? {
-        if isVacation(date) { return .blue }
-        let rate = completionForDate(date)
-        if rate < 0 { return nil }
-        if rate >= 1.0 { return .green }
-        if rate > 0 { return .orange }
-        return Color(.systemGray4)
+    /// Background tint color based on completion status
+    private func completionBackgroundColor(_ date: Date) -> Color {
+        if isVacation(date) { return .blue.opacity(0.2) }
+        let status = completionStatus(date)
+        if status.rate < 0 { return Color(.secondarySystemBackground) }
+        if status.allSkipped { return .orange.opacity(0.2) }
+        if status.rate >= 1.0 { return .green.opacity(0.3) }
+        if status.rate > 0 { return .green.opacity(0.12 + status.rate * 0.15) }
+        return Color(.systemGray5)
     }
 
     var body: some View {
@@ -101,7 +117,7 @@ struct DatePickerBar: View {
         let isToday = date.isSameDay(as: Date())
         let vacation = isVacation(date)
         let calendar = Calendar.current
-        let indicator = completionIndicatorColor(date)
+        let bgColor = completionBackgroundColor(date)
 
         return Button {
             withAnimation(.easeInOut(duration: 0.2)) {
@@ -121,22 +137,11 @@ struct DatePickerBar: View {
                 Text("\(calendar.component(.day, from: date))")
                     .font(.system(size: 16, weight: isSelected ? .bold : .medium, design: .rounded))
                     .foregroundStyle(isSelected ? Color.white : (isToday ? Color.accentColor : Color(.label)))
-
-                // Completion indicator dot
-                if !isSelected, let color = indicator {
-                    Circle()
-                        .fill(color)
-                        .frame(width: 5, height: 5)
-                } else {
-                    Circle()
-                        .fill(Color.clear)
-                        .frame(width: 5, height: 5)
-                }
             }
-            .frame(width: 42, height: 58)
+            .frame(width: 42, height: 52)
             .background(
                 RoundedRectangle(cornerRadius: 12)
-                    .fill(vacation && isSelected ? Color.blue : (isSelected ? Color.accentColor : Color(.secondarySystemBackground)))
+                    .fill(vacation && isSelected ? Color.blue : (isSelected ? Color.accentColor : bgColor))
             )
             .overlay {
                 if isToday && !isSelected {
