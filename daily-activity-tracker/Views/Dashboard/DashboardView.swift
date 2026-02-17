@@ -833,13 +833,28 @@ struct DashboardView: View {
                     modelContext.insert(log)
                 }
             } else {
-                let alreadyHandled = dateLogs.contains {
-                    $0.activity?.id == activity.id && ($0.status == .completed || $0.status == .skipped)
+                if activity.isMultiSession {
+                    for slot in activity.timeSlots {
+                        let alreadyHandled = dateLogs.contains {
+                            $0.activity?.id == activity.id &&
+                            ($0.status == .completed || $0.status == .skipped) &&
+                            $0.timeSlot == slot
+                        }
+                        guard !alreadyHandled else { continue }
+                        let log = ActivityLog(activity: activity, date: date.startOfDay, status: .skipped)
+                        log.skipReason = "Vacation"
+                        log.timeSlotRaw = slot.rawValue
+                        modelContext.insert(log)
+                    }
+                } else {
+                    let alreadyHandled = dateLogs.contains {
+                        $0.activity?.id == activity.id && ($0.status == .completed || $0.status == .skipped)
+                    }
+                    guard !alreadyHandled else { continue }
+                    let log = ActivityLog(activity: activity, date: date.startOfDay, status: .skipped)
+                    log.skipReason = "Vacation"
+                    modelContext.insert(log)
                 }
-                guard !alreadyHandled else { continue }
-                let log = ActivityLog(activity: activity, date: date.startOfDay, status: .skipped)
-                log.skipReason = "Vacation"
-                modelContext.insert(log)
             }
         }
     }

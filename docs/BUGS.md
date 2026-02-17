@@ -244,7 +244,18 @@
   - AI Reply: Implemented multi-session support. New `timeSlotsData` on Activity stores `[TimeSlot]` array. New `timeSlotRaw` on ActivityLog disambiguates which session was completed/skipped. Dashboard expands multi-session activities into one row per time slot, each independently completable. `AddActivityView` has "Repeat across time periods" toggle with Morning/Afternoon/Evening checkboxes. `completionFraction` and analytics `completionRate` count per-session. Export/import DTOs updated. Fully backward compatible — existing activities work unchanged.
 - [20] let's revamp activities page. Goal here is to make it really easy to edit, add and organize activites. Have easy way to create dummy containers, and activities. Organizing sub-actions in containers ... flow for that needs to be improved: easy way to remove edit sub-action  (by swipe maybe), Note: containers can be removed by holding them rather than swipe. right now containers are first class as actions in view kinda.. I want them to become more like header bars and each sub-action should take nice view.. 
   - AI Reply: Redesigned `ActivitiesListView`: containers now render as **section headers** (colored accent bar, icon, name, child count badge, expand/collapse chevron) with context menu (Edit Container, Apply Style, Archive, Delete). Sub-activities are full rows with **swipe actions** (Edit, Delete) and context menu (Edit, Remove from Container, Archive, Delete). Added **quick-add `+` button** on container headers → opens `AddActivityView` pre-configured with that container as parent via new `presetParent` parameter. Enriched `infoTags`: time slot, multi-session (N× Daily), photo cadence, notes enabled. Also addresses [9] feedback.
-
+- [89] ContainerRowView `childCompletion` for `.value` type ignores multi-session — only checks any completed log, not per-slot. [AI found]
+  - AI Reply: Fixed — `.value` case now checks per-slot completion for multi-session children, using `slotFilter` when available and fractional scoring (done/total) otherwise.
+- [90] ContainerRowView `isChildSkipped` ignores multi-session — reports skipped if ANY skip log exists. [AI found]
+  - AI Reply: Fixed — multi-session children now check all non-completed sessions are skipped before marking child as skipped.
+- [91] ActivityAnalyticsView `valueForDay` for `.value`/`.metric` uses `.last` instead of averaging multi-session values. [AI found]
+  - AI Reply: Fixed — `.value` and `.metric` cases now average all completed values for the day instead of using `.last`.
+- [92] ActivityAnalyticsView `valueForDay` for `.container` uses boolean `.contains` per child, not session-aware. [AI found]
+  - AI Reply: Fixed — container completion now uses fractional scoring per child (`done/sessionsPerDay`) instead of boolean complete/not-complete.
+- [93] ValueChartView `dailyPoints` uses `.last?.value` for non-cumulative activities. [AI found]
+  - AI Reply: Fixed — now averages all values for the day via `compactMap(\.value)` + `reduce(0, +) / count`.
+- [94] DashboardView `createVacationSkipLogs` creates one skip log for multi-session activities instead of per-slot. [AI found]
+  - AI Reply: Fixed — multi-session activities now get per-slot skip logs with `timeSlotRaw` set, matching `isSkipped` per-slot checking.
 
 
 # Human Approved Bugs:

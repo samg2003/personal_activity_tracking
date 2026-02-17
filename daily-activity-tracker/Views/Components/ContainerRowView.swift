@@ -84,6 +84,17 @@ struct ContainerRowView: View {
             }
             return childLogs.contains(where: { $0.status == .completed }) ? 1.0 : 0.0
         case .value:
+            if child.isMultiSession {
+                if let slot = slotFilter {
+                    return childLogs.contains(where: { $0.status == .completed && $0.timeSlot == slot }) ? 1.0 : 0.0
+                }
+                let total = child.timeSlots.count
+                guard total > 0 else { return 0 }
+                let done = child.timeSlots.filter { slot in
+                    childLogs.contains(where: { $0.status == .completed && $0.timeSlot == slot })
+                }.count
+                return Double(done) / Double(total)
+            }
             return childLogs.contains(where: { $0.status == .completed }) ? 1.0 : 0.0
         case .cumulative:
             let total = childLogs.filter { $0.status == .completed }.reduce(0.0) { $0 + ($1.value ?? 0) }
@@ -99,7 +110,16 @@ struct ContainerRowView: View {
     }
 
     private func isChildSkipped(_ child: Activity) -> Bool {
-        todayLogs.contains { $0.activity?.id == child.id && $0.status == .skipped }
+        let childLogs = todayLogs.filter { $0.activity?.id == child.id }
+        if child.isMultiSession {
+            let nonCompleted = child.timeSlots.filter { slot in
+                !childLogs.contains(where: { $0.status == .completed && $0.timeSlot == slot })
+            }
+            return !nonCompleted.isEmpty && nonCompleted.allSatisfy { slot in
+                childLogs.contains(where: { $0.status == .skipped && $0.timeSlot == slot })
+            }
+        }
+        return childLogs.contains { $0.status == .skipped }
     }
 
     private var doneCount: Int {

@@ -60,7 +60,8 @@ struct ValueChartView: View {
             if activity.type == .cumulative {
                 value = activity.aggregateDayValue(from: dayLogs.compactMap(\.value))
             } else {
-                value = dayLogs.last?.value ?? 0
+                let values = dayLogs.compactMap(\.value)
+                value = values.isEmpty ? 0 : values.reduce(0, +) / Double(values.count)
             }
             return (date, value)
         }

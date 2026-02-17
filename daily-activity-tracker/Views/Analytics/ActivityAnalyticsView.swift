@@ -184,10 +184,11 @@ struct ActivityAnalyticsView: View {
             return Double(count)
 
         case .value:
-            return activityLogs
+            let dayValues = activityLogs
                 .filter { $0.status == .completed && $0.date.isSameDay(as: day) }
                 .compactMap(\.value)
-                .last ?? 0
+            guard !dayValues.isEmpty else { return 0 }
+            return dayValues.reduce(0, +) / Double(dayValues.count)
 
         case .cumulative:
             let values = activityLogs
@@ -198,18 +199,22 @@ struct ActivityAnalyticsView: View {
         case .container:
             let children = activity.historicalChildren(on: day, from: allActivities)
             guard !children.isEmpty else { return 0 }
-            let completed = children.filter { child in
-                allLogs.contains {
+            let completedSum = children.reduce(0.0) { sum, child in
+                let childLogs = allLogs.filter {
                     $0.activity?.id == child.id && $0.status == .completed && $0.date.isSameDay(as: day)
                 }
-            }.count
-            return Double(completed) / Double(children.count) * 100
+                let sessions = child.sessionsPerDay(on: day)
+                let done = min(childLogs.count, sessions)
+                return sum + Double(done) / Double(max(sessions, 1))
+            }
+            return completedSum / Double(children.count) * 100
 
         case .metric:
-            return activityLogs
+            let dayMetrics = activityLogs
                 .filter { $0.status == .completed && $0.date.isSameDay(as: day) }
                 .compactMap(\.value)
-                .last ?? 0
+            guard !dayMetrics.isEmpty else { return 0 }
+            return dayMetrics.reduce(0, +) / Double(dayMetrics.count)
         }
     }
 
