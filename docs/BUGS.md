@@ -256,14 +256,20 @@
   - AI Reply: Fixed — now averages all values for the day via `compactMap(\.value)` + `reduce(0, +) / count`.
 - [94] DashboardView `createVacationSkipLogs` creates one skip log for multi-session activities instead of per-slot. [AI found]
   - AI Reply: Fixed — multi-session activities now get per-slot skip logs with `timeSlotRaw` set, matching `isSkipped` per-slot checking.
-- [95] `completionStatus` treats partially-skipped multi-session as fully skipped — `actSkipped` uses `.contains` for ANY skip, ignoring completed sessions. [AI found]
-  - AI Reply: Fixed — multi-session activities now use per-slot counting. Skipped sessions deducted from denominator; only fully-skipped activities (all slots skipped, 0 completed) count as skipped.
-- [96] `completionStatus` container children: multi-session child partial skips not deducted from denominator. [AI found]
-  - AI Reply: Fixed — container children now use per-slot counting for multi-session, deducting skipped sessions from total.
-- [97] `completionRate` same partial-skip bug as [95] for multi-day analytics rate. [AI found]
-  - AI Reply: Fixed — `completionRate` now uses per-slot counting for multi-session activities, deducting skipped sessions from `totalExpected`.
-- [98] Completed/Skipped sections show multi-session activities as single items without per-session granularity. [User reported]
-  - AI Reply: Fixed — completed section expands multi-session into per-slot rows (each showing slot label, individually toggleable). Skipped section shows per-slot rows with individual unskip buttons via new `unskipSession` helper. Counts reflect individual sessions.
+- [95] `completionStatus` treats partially-skipped multi-session as fully skipped. [AI found]
+  - AI Reply: Fixed — refactored into shared `processActivitySlots` helper using `timeSlotsActive(on:)` for snapshot-aware per-slot counting. Skipped sessions deducted from denominator.
+- [96] `completionStatus` container children: can't resolve children when called with `activities: [container]` for per-activity heatmap. [AI found]
+  - AI Reply: Fixed — added `allActivities` param to `completionStatus`. Container branch uses `historicalChildren(from: allActivities)`.
+- [97] `completionRate` uses `activity.timeSlots` (current) not snapshot-aware slots. [AI found]
+  - AI Reply: Fixed — now uses `timeSlotsActive(on: day)` for historical accuracy.
+- [98] Completed/Skipped sections only show multi-session activities when ALL sessions are done/skipped. [User reported]
+  - AI Reply: Fixed — `completed` now includes activities with ANY completed session. `skippedActivities` includes activities with ANY skipped session. Per-slot rendering shows individual sessions in each section.
+- [99] Per-activity heatmap returns .noData for child activities — `activitiesForToday` filters `parent == nil`. [AI found]
+  - AI Reply: Fixed — single-activity mode in `completionStatus` bypasses `activitiesForToday` and checks `shouldShow` directly.
+- [100] `activity.timeSlots` vs `sessionsPerDay(on:)` snapshot mismatch in per-slot iteration. [AI found]
+  - AI Reply: Fixed — added `Activity.timeSlotsActive(on:)` and `isMultiSession(on:)` for snapshot-aware slot iteration. Used throughout ScheduleEngine.
+- [101] `completionFraction` in DashboardView treated entire multi-session as skipped/not-skipped instead of per-slot. [AI found]
+  - AI Reply: Fixed — per-slot counting with skipped sessions deducted from denominator, matching ScheduleEngine logic.
 
 
 # Human Approved Bugs:

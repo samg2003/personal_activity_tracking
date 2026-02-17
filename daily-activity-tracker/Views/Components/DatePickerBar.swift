@@ -25,7 +25,7 @@ struct DatePickerBar: View {
     /// Compute completion fraction for a given date (0…1, or -1 if no activities)
     /// Completion status for a date — delegates to centralized ScheduleEngine logic.
     private func completionStatus(_ date: Date) -> (rate: Double, allSkipped: Bool) {
-        let status = scheduleEngine.completionStatus(on: date, activities: allActivities, logs: allLogs, vacationDays: vacationDays)
+        let status = scheduleEngine.completionStatus(on: date, activities: allActivities, allActivities: allActivities, logs: allLogs, vacationDays: vacationDays)
         return (status.rate, status.allSkipped)
     }
 

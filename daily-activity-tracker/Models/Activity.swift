@@ -152,6 +152,16 @@ final class Activity {
         configSnapshot(for: date)?.sessionsPerDay ?? max(timeSlots.count, 1)
     }
 
+    /// Time slots that were active on a given date (snapshot or current)
+    func timeSlotsActive(on date: Date) -> [TimeSlot] {
+        configSnapshot(for: date)?.timeSlots ?? timeSlots
+    }
+
+    /// Whether this activity was multi-session on a given date
+    func isMultiSession(on date: Date) -> Bool {
+        timeSlotsActive(on: date).count > 1
+    }
+
     /// Parent container ID on a given date (snapshot or current)
     func parentID(on date: Date) -> UUID? {
         configSnapshot(for: date)?.parentID ?? parent?.id

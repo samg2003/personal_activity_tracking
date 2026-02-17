@@ -70,11 +70,25 @@ struct DashboardView: View {
     }
 
     private var completed: [Activity] {
-        todayActivities.filter { isFullyCompleted($0) }
+        todayActivities.filter { activity in
+            if activity.isMultiSession {
+                // Include if ANY session is completed (not requiring all)
+                return activity.timeSlots.contains { isSessionCompleted(activity, slot: $0) }
+            }
+            return isFullyCompleted(activity)
+        }
     }
 
     private var skippedActivities: [Activity] {
-        todayActivities.filter { isSkipped($0) && !isFullyCompleted($0) }
+        todayActivities.filter { activity in
+            if activity.isMultiSession {
+                // Include if ANY session is skipped (and not completed for that slot)
+                return activity.timeSlots.contains { slot in
+                    isSessionSkipped(activity, slot: slot) && !isSessionCompleted(activity, slot: slot)
+                }
+            }
+            return isSkipped(activity) && !isFullyCompleted(activity)
+        }
     }
 
     private var completionFraction: Double {
@@ -82,7 +96,6 @@ struct DashboardView: View {
         var done = 0.0
         var skippedCount = 0
         for activity in todayActivities {
-            if isSkipped(activity) { skippedCount += 1; continue }
             // No-target cumulatives have no completion concept — exclude from progress
             if activity.type == .cumulative && (activity.targetValue == nil || activity.targetValue == 0) { continue }
             if activity.type == .container {
@@ -91,23 +104,30 @@ struct DashboardView: View {
                 let count = Double(max(children.count, 1))
                 total += count
                 done += Double(children.filter { isFullyCompleted($0) }.count)
-            } else if activity.type == .cumulative, let target = activity.targetValue, target > 0 {
-                // Partial credit for cumulative: value/target capped at 1
-                total += 1.0
-                done += min(cumulativeValue(for: activity) / target, 1.0)
             } else if activity.isMultiSession {
-                let sessions = Double(activity.timeSlots.count)
-                total += sessions
-                if isFullyCompleted(activity) {
-                    done += sessions
-                } else {
-                    for slot in activity.timeSlots {
-                        if isSessionCompleted(activity, slot: slot) { done += 1.0 }
+                // Per-slot: deduct skipped sessions from denominator
+                var slotsDone = 0.0
+                var slotsSkipped = 0.0
+                for slot in activity.timeSlots {
+                    if isSessionCompleted(activity, slot: slot) {
+                        slotsDone += 1.0
+                    } else if isSessionSkipped(activity, slot: slot) {
+                        slotsSkipped += 1.0
                     }
                 }
+                let sessions = Double(activity.timeSlots.count)
+                if slotsSkipped == sessions && slotsDone == 0 { skippedCount += 1; continue }
+                total += sessions - slotsSkipped
+                done += min(slotsDone, sessions - slotsSkipped)
             } else {
-                total += 1.0
-                if isFullyCompleted(activity) { done += 1.0 }
+                if isSkipped(activity) { skippedCount += 1; continue }
+                if activity.type == .cumulative, let target = activity.targetValue, target > 0 {
+                    total += 1.0
+                    done += min(cumulativeValue(for: activity) / target, 1.0)
+                } else {
+                    total += 1.0
+                    if isFullyCompleted(activity) { done += 1.0 }
+                }
             }
         }
         // All activities skipped or excluded → 0% (not 100%)

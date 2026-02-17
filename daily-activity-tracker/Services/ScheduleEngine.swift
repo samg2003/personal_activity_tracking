@@ -6,7 +6,7 @@ protocol ScheduleEngineProtocol {
     func activitiesForToday(from activities: [Activity], on date: Date, vacationDays: [VacationDay]) -> [Activity]
     func activitiesForToday(from activities: [Activity], on date: Date, vacationDays: [VacationDay], logs: [ActivityLog]) -> [Activity]
     func carriedForwardDate(for activity: Activity, on date: Date, logs: [ActivityLog]) -> Date?
-    func completionStatus(on date: Date, activities: [Activity], logs: [ActivityLog], vacationDays: [VacationDay]) -> DayCompletionStatus
+    func completionStatus(on date: Date, activities: [Activity], allActivities: [Activity], logs: [ActivityLog], vacationDays: [VacationDay]) -> DayCompletionStatus
     func isContainerCompleted(_ container: Activity, on day: Date, allActivities: [Activity], logs: [ActivityLog]) -> Bool
     func completionRate(for activity: Activity, days: Int, logs: [ActivityLog], vacationDays: [VacationDay], allActivities: [Activity]) -> Double
     func currentStreak(for activity: Activity, logs: [ActivityLog], allActivities: [Activity], vacationDays: [VacationDay]) -> Int
@@ -136,16 +136,29 @@ struct DayCompletionStatus {
 
 extension ScheduleEngine {
 
-    /// Compute completion status for a single day. Handles containers, cumulatives, multi-session, etc.
+    /// Compute completion status for a single day.
+    /// `activities` — the activities to evaluate (may be a single activity for per-activity heatmaps).
+    /// `allActivities` — full activity list for resolving container children and scheduling.
     func completionStatus(
         on date: Date,
         activities: [Activity],
+        allActivities: [Activity],
         logs: [ActivityLog],
         vacationDays: [VacationDay]
     ) -> DayCompletionStatus {
         if date.startOfDay > Date().startOfDay { return .noData }
-        let scheduled = activitiesForToday(from: activities, on: date, vacationDays: vacationDays)
-        guard !scheduled.isEmpty else { return .noData }
+
+        // Determine what's scheduled. For single-activity heatmaps, bypass
+        // activitiesForToday (which filters parent==nil) and check schedule directly.
+        let scheduled: [Activity]
+        if activities.count == 1, let activity = activities.first {
+            // Single-activity mode: check if this activity should show on this date
+            guard shouldShow(activity, on: date) else { return .noData }
+            scheduled = [activity]
+        } else {
+            scheduled = activitiesForToday(from: activities, on: date, vacationDays: vacationDays)
+            guard !scheduled.isEmpty else { return .noData }
+        }
 
         let dayLogs = logs.filter { $0.date.isSameDay(as: date) }
         var total = 0.0
@@ -156,74 +169,69 @@ extension ScheduleEngine {
             let actLogs = dayLogs.filter { $0.activity?.id == activity.id }
 
             if activity.type == .container {
-                let children = activity.historicalChildren(on: date, from: activities)
+                // Use allActivities so container children resolve properly
+                let children = activity.historicalChildren(on: date, from: allActivities)
                     .filter { shouldShow($0, on: date) }
                 for child in children {
-                    let childLogs = dayLogs.filter { $0.activity?.id == child.id }
-                    let sessions = child.sessionsPerDay(on: date)
-
-                    if child.isMultiSession {
-                        var slotsDone = 0
-                        var slotsSkipped = 0
-                        for slot in child.timeSlots {
-                            if childLogs.contains(where: { $0.status == .completed && $0.timeSlot == slot }) {
-                                slotsDone += 1
-                            } else if childLogs.contains(where: { $0.status == .skipped && $0.timeSlot == slot }) {
-                                slotsSkipped += 1
-                            }
-                        }
-                        if slotsSkipped == sessions && slotsDone == 0 { skippedCount += 1; continue }
-                        total += Double(sessions - slotsSkipped)
-                        done += Double(min(slotsDone, sessions - slotsSkipped))
-                    } else {
-                        let childCompleted = childLogs.filter { $0.status == .completed }.count
-                        let childHasSkip = childLogs.contains { $0.status == .skipped }
-                        if childHasSkip && childCompleted == 0 { skippedCount += 1; continue }
-                        total += Double(sessions)
-                        done += min(Double(childCompleted), Double(sessions))
-                    }
+                    processActivitySlots(child, on: date, logs: dayLogs, total: &total, done: &done, skippedCount: &skippedCount)
                 }
             } else if activity.type == .cumulative && (activity.targetValue == nil || activity.targetValue == 0) {
                 let actSkipped = actLogs.contains { $0.status == .skipped }
                 if actSkipped { skippedCount += 1 }
-            } else if activity.isMultiSession {
-                // Per-slot skip handling: deduct skipped sessions from denominator
-                let sessions = activity.sessionsPerDay(on: date)
-                var slotsDone = 0
-                var slotsSkipped = 0
-                for slot in activity.timeSlots {
-                    if actLogs.contains(where: { $0.status == .completed && $0.timeSlot == slot }) {
-                        slotsDone += 1
-                    } else if actLogs.contains(where: { $0.status == .skipped && $0.timeSlot == slot }) {
-                        slotsSkipped += 1
-                    }
-                }
-                if slotsSkipped == sessions && slotsDone == 0 { skippedCount += 1; continue }
-                total += Double(sessions - slotsSkipped)
-                done += Double(min(slotsDone, sessions - slotsSkipped))
             } else {
-                let actSkipped = actLogs.contains { $0.status == .skipped }
-                if actSkipped {
-                    skippedCount += 1
-                } else if activity.type == .cumulative, let target = activity.targetValue, target > 0 {
-                    total += 1.0
-                    let values = actLogs
-                        .filter { $0.status == .completed }
-                        .compactMap(\.value)
-                    let cumVal = activity.aggregateDayValue(from: values)
-                    done += min(cumVal / target, 1.0)
-                } else {
-                    let sessions = Double(activity.sessionsPerDay(on: date))
-                    total += sessions
-                    let completedCount = Double(actLogs.filter { $0.status == .completed }.count)
-                    done += min(completedCount, sessions)
-                }
+                processActivitySlots(activity, on: date, logs: dayLogs, total: &total, done: &done, skippedCount: &skippedCount)
             }
         }
 
         if total <= 0 && skippedCount > 0 { return .skipped }
         guard total > 0 else { return .noData }
         return DayCompletionStatus(rate: done / total, allSkipped: false)
+    }
+
+    /// Shared logic for processing an activity's completion/skip slots.
+    /// Handles both multi-session (per-slot) and single-session activities.
+    private func processActivitySlots(
+        _ activity: Activity,
+        on date: Date,
+        logs dayLogs: [ActivityLog],
+        total: inout Double,
+        done: inout Double,
+        skippedCount: inout Int
+    ) {
+        let actLogs = dayLogs.filter { $0.activity?.id == activity.id }
+        let slots = activity.timeSlotsActive(on: date)
+        let sessions = activity.sessionsPerDay(on: date)
+
+        if slots.count > 1 {
+            // Multi-session: per-slot counting
+            var slotsDone = 0
+            var slotsSkipped = 0
+            for slot in slots {
+                if actLogs.contains(where: { $0.status == .completed && $0.timeSlot == slot }) {
+                    slotsDone += 1
+                } else if actLogs.contains(where: { $0.status == .skipped && $0.timeSlot == slot }) {
+                    slotsSkipped += 1
+                }
+            }
+            if slotsSkipped == sessions && slotsDone == 0 { skippedCount += 1; return }
+            total += Double(sessions - slotsSkipped)
+            done += Double(min(slotsDone, sessions - slotsSkipped))
+        } else {
+            // Single-session
+            let actSkipped = actLogs.contains { $0.status == .skipped }
+            if actSkipped && !actLogs.contains(where: { $0.status == .completed }) {
+                skippedCount += 1
+            } else if activity.type == .cumulative, let target = activity.targetValue, target > 0 {
+                total += 1.0
+                let values = actLogs.filter { $0.status == .completed }.compactMap(\.value)
+                let cumVal = activity.aggregateDayValue(from: values)
+                done += min(cumVal / target, 1.0)
+            } else {
+                total += Double(sessions)
+                let completedCount = Double(actLogs.filter { $0.status == .completed }.count)
+                done += min(completedCount, Double(sessions))
+            }
+        }
     }
 }
 
@@ -279,13 +287,13 @@ extension ScheduleEngine {
             guard schedule.isScheduled(on: day) else { continue }
 
             let dayActivityLogs = activityLogs.filter { $0.date.startOfDay == day }
-            let dayCompleted = dayActivityLogs.filter { $0.status == .completed }.count
+            let slots = activity.timeSlotsActive(on: day)
+            let sessions = activity.sessionsPerDay(on: day)
 
-            if activity.isMultiSession {
-                let sessions = activity.sessionsPerDay(on: day)
+            if slots.count > 1 {
                 var slotsDone = 0
                 var slotsSkipped = 0
-                for slot in activity.timeSlots {
+                for slot in slots {
                     if dayActivityLogs.contains(where: { $0.status == .completed && $0.timeSlot == slot }) {
                         slotsDone += 1
                     } else if dayActivityLogs.contains(where: { $0.status == .skipped && $0.timeSlot == slot }) {
@@ -296,9 +304,9 @@ extension ScheduleEngine {
                 totalExpected += sessions - slotsSkipped
                 totalCompleted += min(slotsDone, sessions - slotsSkipped)
             } else {
+                let dayCompleted = dayActivityLogs.filter { $0.status == .completed }.count
                 let daySkipped = dayActivityLogs.contains { $0.status == .skipped }
                 if daySkipped && dayCompleted == 0 { continue }
-                let sessions = activity.sessionsPerDay(on: day)
                 totalExpected += sessions
                 totalCompleted += min(dayCompleted, sessions)
             }

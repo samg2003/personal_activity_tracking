@@ -114,6 +114,7 @@ struct AnalyticsView: View {
                         sectionHeader("Consistency Map", icon: "square.grid.3x3.fill")
                         HeatmapView(
                             activities: topLevelActivities,
+                            allActivities: allActivities,
                             logs: allLogs,
                             vacationDays: vacationDays,
                             scheduleEngine: ScheduleEngine()

@@ -4,6 +4,7 @@ import SwiftData
 /// Completion heatmap — shows a grid of recent days colored by completion percentage
 struct HeatmapView: View {
     let activities: [Activity]
+    let allActivities: [Activity]
     let logs: [ActivityLog]
     let vacationDays: [VacationDay]
     let scheduleEngine: ScheduleEngine
@@ -27,7 +28,7 @@ struct HeatmapView: View {
         return (0..<totalDays).compactMap { offset in
             guard let date = calendar.date(byAdding: .day, value: -offset, to: today) else { return nil }
             let isVacation = vacationDays.contains { $0.date.isSameDay(as: date) }
-            let status = scheduleEngine.completionStatus(on: date, activities: activities, logs: logs, vacationDays: vacationDays)
+            let status = scheduleEngine.completionStatus(on: date, activities: activities, allActivities: allActivities, logs: logs, vacationDays: vacationDays)
             return DayCell(date: date, completion: max(status.rate, 0), isVacation: isVacation, isSkippedDay: status.allSkipped)
         }.reversed()
     }

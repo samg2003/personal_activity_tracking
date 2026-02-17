@@ -284,6 +284,7 @@ struct ActivityAnalyticsView: View {
                     sectionHeader("Consistency", icon: "square.grid.3x3.fill")
                     HeatmapView(
                         activities: heatmapActivities,
+                        allActivities: allActivities,
                         logs: allLogs,
                         vacationDays: vacationDays,
                         scheduleEngine: ScheduleEngine()
