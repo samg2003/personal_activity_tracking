@@ -13,6 +13,7 @@ struct PhotoBankView: View {
     @State private var photoFormat: PhotoFormat = PhotoFormat.current
     @State private var photoResolution: PhotoSaveResolution = PhotoSaveResolution.current
     @State private var photoQuality: PhotoQuality = PhotoQuality.current
+    @State private var showComparison = false
 
     var body: some View {
         List {
@@ -127,6 +128,17 @@ struct PhotoBankView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
+
+                Button {
+                    showComparison = true
+                } label: {
+                    HStack {
+                        Image(systemName: "eyes")
+                        Text("Help me choose")
+                    }
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.blue)
+                }
             } header: {
                 Text("Photo & Video Quality")
             } footer: {
@@ -196,6 +208,9 @@ struct PhotoBankView: View {
         }
         .navigationTitle("Photo Bank")
         .onAppear { refreshData() }
+        .sheet(isPresented: $showComparison) {
+            QualityComparisonView()
+        }
     }
 
     // MARK: - Activity Row

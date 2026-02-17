@@ -49,7 +49,7 @@ enum PhotoSaveResolution: String, CaseIterable, Identifiable {
     static var current: PhotoSaveResolution {
         get {
             guard let raw = UserDefaults.standard.string(forKey: userDefaultsKey),
-                  let res = PhotoSaveResolution(rawValue: raw) else { return .k4 }
+                  let res = PhotoSaveResolution(rawValue: raw) else { return .original }
             return res
         }
         set { UserDefaults.standard.set(newValue.rawValue, forKey: userDefaultsKey) }
@@ -75,12 +75,14 @@ enum PhotoQuality: String, CaseIterable, Identifiable {
         }
     }
 
-    /// HEIC compression quality (flatter curve — lower values still look great)
+    /// HEIC compression quality — values are lower than JPEG because HEIC's
+    /// codec is more efficient, so a lower number produces equivalent visual quality.
+    /// Each tier should produce files smaller than the same JPEG tier.
     var heicQuality: CGFloat {
         switch self {
-        case .low: return 0.3
-        case .medium: return 0.5
-        case .high: return 0.65
+        case .low: return 0.4
+        case .medium: return 0.55
+        case .high: return 0.7
         case .max: return 0.8
         }
     }
@@ -125,7 +127,7 @@ enum PhotoQuality: String, CaseIterable, Identifiable {
     static var current: PhotoQuality {
         get {
             guard let raw = UserDefaults.standard.string(forKey: userDefaultsKey),
-                  let q = PhotoQuality(rawValue: raw) else { return .high }
+                  let q = PhotoQuality(rawValue: raw) else { return .medium }
             return q
         }
         set { UserDefaults.standard.set(newValue.rawValue, forKey: userDefaultsKey) }
@@ -390,8 +392,12 @@ final class MediaService {
     /// metadata. Drawing through UIGraphicsImageRenderer converts to standard sRGB and
     /// applies orientation, producing a clean image for both JPEG and HEIC encoding.
     private func prepareForSaving(_ image: UIImage) -> UIImage {
+        prepareForSaving(image, resolution: PhotoSaveResolution.current)
+    }
+
+    func prepareForSaving(_ image: UIImage, resolution: PhotoSaveResolution) -> UIImage {
         let targetSize: CGSize
-        if let maxDim = PhotoSaveResolution.current.maxDimension {
+        if let maxDim = resolution.maxDimension {
             let longestEdge = max(image.size.width, image.size.height)
             if longestEdge > maxDim {
                 let scale = maxDim / longestEdge
@@ -417,7 +423,10 @@ final class MediaService {
     /// Encode a prepared image in the selected format.
     /// Image must already be normalized via prepareForSaving().
     private func encodeImage(_ preparedImage: UIImage, format: PhotoFormat) -> Data? {
-        let quality = PhotoQuality.current
+        encodeImage(preparedImage, format: format, quality: PhotoQuality.current)
+    }
+
+    func encodeImage(_ preparedImage: UIImage, format: PhotoFormat, quality: PhotoQuality) -> Data? {
         switch format {
         case .heic:
             guard let cgImage = preparedImage.cgImage else {

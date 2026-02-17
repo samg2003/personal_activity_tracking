@@ -7,6 +7,7 @@ enum VideoResolution: String, CaseIterable, Identifiable {
     case p1080 = "1080p"
     case k2 = "2K"
     case k4 = "4K"
+    case original = "Original"
 
     var id: String { rawValue }
 
@@ -16,10 +17,11 @@ enum VideoResolution: String, CaseIterable, Identifiable {
         case .p1080: return 1080
         case .k2: return 2560
         case .k4: return 3840
+        case .original: return .greatestFiniteMagnitude
         }
     }
 
-    static let defaultResolution: VideoResolution = .k2
+    static let defaultResolution: VideoResolution = .original
     static let userDefaultsKey = "lapseVideoResolution"
 
     static var current: VideoResolution {
