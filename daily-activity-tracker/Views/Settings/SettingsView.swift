@@ -57,6 +57,14 @@ struct SettingsView: View {
 
                 categoriesSection
 
+                Section("Photos") {
+                    NavigationLink {
+                        PhotoBankView()
+                    } label: {
+                        Label("Photo Bank", systemImage: "photo.on.rectangle.angled")
+                    }
+                }
+
                 Section("Data Management") {
                     Button {
                         exportData()

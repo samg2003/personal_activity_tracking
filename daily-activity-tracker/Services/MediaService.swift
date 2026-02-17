@@ -60,4 +60,62 @@ final class MediaService {
         guard let latest = allPhotos(for: activityID).last else { return nil }
         return loadPhoto(filename: latest)
     }
+
+    /// Returns all activity UUIDs that have at least one photo
+    func allActivityIDsWithPhotos() -> [UUID] {
+        guard let contents = try? fileManager.contentsOfDirectory(
+            at: photosDirectory, includingPropertiesForKeys: nil
+        ) else { return [] }
+
+        return contents.compactMap { url -> UUID? in
+            guard url.hasDirectoryPath else { return nil }
+            let id = UUID(uuidString: url.lastPathComponent)
+            // Only include if directory contains at least one jpg
+            if let id, let files = try? fileManager.contentsOfDirectory(atPath: url.path),
+               files.contains(where: { $0.hasSuffix(".jpg") }) {
+                return id
+            }
+            return nil
+        }
+    }
+
+    /// Delete specific photos by relative filename
+    func deletePhotos(_ filenames: Set<String>) {
+        for filename in filenames {
+            let url = photosDirectory.appendingPathComponent(filename)
+            try? fileManager.removeItem(at: url)
+        }
+    }
+
+    /// Delete all photos for a given activity
+    func deleteAllPhotos(for activityID: UUID) {
+        let dir = photosDirectory.appendingPathComponent(activityID.uuidString)
+        try? fileManager.removeItem(at: dir)
+    }
+
+    /// Total number of photos across all activities
+    func totalPhotoCount() -> Int {
+        allActivityIDsWithPhotos().reduce(0) { $0 + allPhotos(for: $1).count }
+    }
+
+    /// Total disk size of all photos (bytes)
+    func totalPhotoSize() -> Int64 {
+        guard let contents = try? fileManager.contentsOfDirectory(
+            at: photosDirectory, includingPropertiesForKeys: [.fileSizeKey],
+            options: [.skipsHiddenFiles]
+        ) else { return 0 }
+
+        var total: Int64 = 0
+        for dir in contents where dir.hasDirectoryPath {
+            guard let files = try? fileManager.contentsOfDirectory(
+                at: dir, includingPropertiesForKeys: [.fileSizeKey]
+            ) else { continue }
+            for file in files {
+                if let size = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize {
+                    total += Int64(size)
+                }
+            }
+        }
+        return total
+    }
 }

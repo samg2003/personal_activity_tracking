@@ -13,6 +13,7 @@ struct CameraView: View {
     @State private var ghostImage: UIImage?
     @State private var showGhost = true
     @State private var ghostOpacity: Double = 0.5
+    @State private var showOpacitySlider = false
     @State private var capturedImage: UIImage?
 
     var body: some View {
@@ -90,24 +91,40 @@ struct CameraView: View {
                 }
                 .background(.ultraThinMaterial.opacity(0.3))
 
-                // Ghost opacity slider (between top bar and capture button)
+                // Ghost opacity control (collapsed by default, expands on tap)
                 if showGhost, ghostImage != nil, camera.state == .running {
-                    HStack(spacing: 10) {
-                        Image(systemName: "circle.lefthalf.filled")
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.6))
-                        Slider(value: $ghostOpacity, in: 0.1...0.8)
-                            .tint(.yellow)
-                        Text("\(Int(ghostOpacity * 100))%")
-                            .font(.caption2.monospacedDigit())
-                            .foregroundStyle(.white.opacity(0.6))
-                            .frame(width: 32)
+                    HStack(spacing: 0) {
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                showOpacitySlider.toggle()
+                            }
+                        } label: {
+                            Image(systemName: "circle.lefthalf.filled")
+                                .font(.subheadline)
+                                .foregroundStyle(.white.opacity(0.8))
+                                .frame(width: 36, height: 36)
+                                .background(.ultraThinMaterial.opacity(0.4))
+                                .clipShape(Circle())
+                        }
+
+                        if showOpacitySlider {
+                            HStack(spacing: 8) {
+                                Slider(value: $ghostOpacity, in: 0.1...0.8)
+                                    .tint(.yellow)
+                                    .frame(width: 140)
+                                Text("\(Int(ghostOpacity * 100))%")
+                                    .font(.caption2.monospacedDigit())
+                                    .foregroundStyle(.white.opacity(0.7))
+                                    .frame(width: 30)
+                            }
+                            .padding(.trailing, 10)
+                            .padding(.leading, 6)
+                            .transition(.move(edge: .leading).combined(with: .opacity))
+                        }
                     }
-                    .padding(.horizontal, 32)
-                    .padding(.vertical, 6)
-                    .background(.ultraThinMaterial.opacity(0.3))
-                    .clipShape(Capsule())
-                    .padding(.horizontal, 24)
+                    .padding(.leading, 16)
+                    .padding(.top, 4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
                 Spacer()
@@ -403,24 +420,14 @@ extension CameraModel: AVCapturePhotoCaptureDelegate {
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         guard let data = photo.fileDataRepresentation(),
               let image = UIImage(data: data) else { return }
-
-        // Front camera: flip horizontally so stored photo is true orientation
-        let finalImage: UIImage
-        if isFrontCamera, let cgImage = image.cgImage {
-            finalImage = UIImage(
-                cgImage: cgImage,
-                scale: image.scale,
-                orientation: .leftMirrored
-            )
-        } else {
-            finalImage = image
-        }
-
+        // AVCapturePhotoOutput returns the true orientation (how others see you)
+        // regardless of the mirrored preview — no manual flip needed
         DispatchQueue.main.async { [weak self] in
-            self?.completion?(finalImage)
+            self?.completion?(image)
         }
     }
 }
+
 
 // MARK: - Camera Preview (UIViewRepresentable)
 
