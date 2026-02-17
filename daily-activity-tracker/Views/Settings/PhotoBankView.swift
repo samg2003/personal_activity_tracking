@@ -676,9 +676,12 @@ struct PhotoPreviewView: View {
             Color.black.ignoresSafeArea()
 
             if let image = MediaService.shared.loadPhoto(filename: currentFilename) {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
+                ZoomableView {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                }
+                .ignoresSafeArea()
             }
 
             VStack {
@@ -693,7 +696,6 @@ struct PhotoPreviewView: View {
                 }
                 Spacer()
 
-                // Date editor bar at bottom
                 Button {
                     showDatePicker.toggle()
                 } label: {

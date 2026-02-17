@@ -69,6 +69,7 @@ private struct SlotVideoSection: View {
     @State private var currentTime: Double = 0
     @State private var isPlaying = false
     @State private var timeObserver: Any?
+    @State private var showFullscreen = false
 
     private var totalDuration: Double { Double(photos.count) * frameDuration }
     private var currentIndex: Int {
@@ -115,6 +116,13 @@ private struct SlotVideoSection: View {
             .frame(maxWidth: .infinity)
             .frame(height: 380)
             .clipShape(RoundedRectangle(cornerRadius: 14))
+            .onTapGesture {
+                if !isGenerating && player != nil {
+                    player?.pause()
+                    isPlaying = false
+                    showFullscreen = true
+                }
+            }
 
             // Controls
             if !isGenerating {
@@ -169,6 +177,21 @@ private struct SlotVideoSection: View {
         }
         .onAppear { generateVideo() }
         .onDisappear { cleanup() }
+        .fullScreenCover(isPresented: $showFullscreen) {
+            if let player {
+                FullscreenVideoView(
+                    player: player,
+                    currentTime: $currentTime,
+                    isPlaying: $isPlaying,
+                    totalDuration: totalDuration,
+                    accentColor: accentColor,
+                    photos: photos,
+                    frameDuration: frameDuration,
+                    onSeek: { seekTo($0) },
+                    onTogglePlayback: { togglePlayback() }
+                )
+            }
+        }
     }
 
     private func generateVideo() {
@@ -250,7 +273,7 @@ private struct SlotVideoSection: View {
 
 // MARK: - AVPlayer UIKit wrapper (no default controls)
 
-private struct VideoPlayerView: UIViewRepresentable {
+struct VideoPlayerView: UIViewRepresentable {
     let player: AVPlayer
 
     func makeUIView(context: Context) -> UIView {
@@ -278,7 +301,7 @@ private struct VideoPlayerView: UIViewRepresentable {
 
 // MARK: - Video Scrubber
 
-private struct VideoScrubber: View {
+struct VideoScrubber: View {
     @Binding var currentTime: Double
     let duration: Double
     let accentColor: Color
@@ -324,5 +347,97 @@ private struct VideoScrubber: View {
             .animation(.interactiveSpring(response: 0.15), value: isDragging)
         }
         .frame(height: 24)
+    }
+}
+
+// MARK: - Fullscreen Video View
+
+struct FullscreenVideoView: View {
+    let player: AVPlayer
+    @Binding var currentTime: Double
+    @Binding var isPlaying: Bool
+    let totalDuration: Double
+    let accentColor: Color
+    let photos: [String]
+    let frameDuration: Double
+    let onSeek: (Double) -> Void
+    let onTogglePlayback: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    private var currentIndex: Int {
+        min(Int(currentTime / frameDuration), photos.count - 1)
+    }
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            ZoomableView {
+                VideoPlayerView(player: player)
+            }
+            .ignoresSafeArea()
+
+            // Overlay controls
+            VStack {
+                HStack {
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                            .font(.title2)
+                            .foregroundStyle(.white)
+                            .padding(12)
+                            .background(.black.opacity(0.4))
+                            .clipShape(Circle())
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+
+                Spacer()
+
+                VStack(spacing: 10) {
+                    VideoScrubber(
+                        currentTime: $currentTime,
+                        duration: totalDuration,
+                        accentColor: accentColor,
+                        onSeek: onSeek
+                    )
+
+                    HStack {
+                        if currentIndex >= 0, currentIndex < photos.count,
+                           let date = MediaService.dateFromFilename(photos[currentIndex]) {
+                            Text(date, format: .dateTime.month(.abbreviated).day().year())
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.white.opacity(0.8))
+                        }
+
+                        Spacer()
+
+                        Button {
+                            onTogglePlayback()
+                        } label: {
+                            Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                                .font(.system(size: 32))
+                                .foregroundStyle(accentColor)
+                        }
+                        .buttonStyle(.plain)
+
+                        Spacer()
+
+                        Text("\(currentIndex + 1) / \(photos.count)")
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.white.opacity(0.6))
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 30)
+                .background(
+                    LinearGradient(colors: [.clear, .black.opacity(0.6)],
+                                   startPoint: .top, endPoint: .bottom)
+                    .ignoresSafeArea()
+                )
+            }
+        }
     }
 }
