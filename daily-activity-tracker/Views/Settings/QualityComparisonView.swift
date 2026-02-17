@@ -41,13 +41,7 @@ struct QualityComparisonView: View {
     @State private var sizeB: String = ""
 
     // Reveal slider (0 = all B visible, 1 = all A visible)
-    @State private var revealAmount: CGFloat = 0.5
-
-    // Zoom & pan
-    @State private var zoomScale: CGFloat = 1.0
-    @State private var lastZoomScale: CGFloat = 1.0
-    @State private var panOffset: CGSize = .zero
-    @State private var lastPanOffset: CGSize = .zero
+    // (managed internally by RevealComparisonView)
 
     // Settings panel visibility
     @State private var showSettings = false
@@ -167,122 +161,48 @@ struct QualityComparisonView: View {
 
     private var compareView: some View {
         VStack(spacing: 0) {
-            // Image comparison area
-            GeometryReader { geo in
-                ZStack {
-                    if let imageB {
-                        Image(uiImage: imageB)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: geo.size.width, height: geo.size.height)
+            RevealComparisonView(
+                imageA: imageA,
+                imageB: imageB,
+                accentColor: .blue,
+                labelA: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("A · \(formatA.rawValue)")
+                            .font(.caption2.bold())
+                        Text("\(qualityA.rawValue) · \(resolutionA.rawValue)")
+                            .font(.caption2)
+                        Text(sizeA)
+                            .font(.caption2.monospacedDigit())
                     }
-
-                    if let imageA {
-                        Image(uiImage: imageA)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: geo.size.width, height: geo.size.height)
-                            .clipShape(RevealClipShape(revealAmount: revealAmount))
+                    .padding(6)
+                    .background(.black.opacity(0.6))
+                    .foregroundStyle(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                },
+                labelB: {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text("B · \(formatB.rawValue)")
+                            .font(.caption2.bold())
+                        Text("\(qualityB.rawValue) · \(resolutionB.rawValue)")
+                            .font(.caption2)
+                        Text(sizeB)
+                            .font(.caption2.monospacedDigit())
                     }
-
-                    // Divider line
-                    Rectangle()
-                        .fill(.white)
-                        .frame(width: 2)
-                        .position(x: geo.size.width * revealAmount, y: geo.size.height / 2)
-                        .shadow(color: .black.opacity(0.5), radius: 2)
-
-                    // Labels
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("A · \(formatA.rawValue)")
-                                .font(.caption2.bold())
-                            Text("\(qualityA.rawValue) · \(resolutionA.rawValue)")
-                                .font(.caption2)
-                            Text(sizeA)
-                                .font(.caption2.monospacedDigit())
-                        }
-                        .padding(6)
-                        .background(.black.opacity(0.6))
-                        .foregroundStyle(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                        .padding(.leading, 8)
-
-                        Spacer()
-
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text("B · \(formatB.rawValue)")
-                                .font(.caption2.bold())
-                            Text("\(qualityB.rawValue) · \(resolutionB.rawValue)")
-                                .font(.caption2)
-                            Text(sizeB)
-                                .font(.caption2.monospacedDigit())
-                        }
-                        .padding(6)
-                        .background(.black.opacity(0.6))
-                        .foregroundStyle(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                        .padding(.trailing, 8)
-                    }
-                    .frame(maxHeight: .infinity, alignment: .top)
-                    .padding(.top, 8)
+                    .padding(6)
+                    .background(.black.opacity(0.6))
+                    .foregroundStyle(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
-                .scaleEffect(zoomScale)
-                .offset(panOffset)
-                .gesture(
-                    MagnificationGesture()
-                        .onChanged { value in
-                            zoomScale = max(1.0, lastZoomScale * value)
-                        }
-                        .onEnded { _ in
-                            lastZoomScale = zoomScale
-                            if zoomScale <= 1.0 {
-                                withAnimation(.spring(duration: 0.3)) {
-                                    panOffset = .zero
-                                    lastPanOffset = .zero
-                                }
-                            }
-                        }
-                )
-                .simultaneousGesture(
-                    DragGesture()
-                        .onChanged { value in
-                            guard zoomScale > 1.0 else { return }
-                            panOffset = CGSize(
-                                width: lastPanOffset.width + value.translation.width,
-                                height: lastPanOffset.height + value.translation.height
-                            )
-                        }
-                        .onEnded { _ in
-                            lastPanOffset = panOffset
-                        }
-                )
-                .onTapGesture(count: 2) {
-                    withAnimation(.spring(duration: 0.3)) {
-                        zoomScale = 1.0
-                        lastZoomScale = 1.0
-                        panOffset = .zero
-                        lastPanOffset = .zero
-                    }
-                }
-                .clipped()
-            }
+            )
 
             // Bottom controls
             VStack(spacing: 8) {
-                Slider(value: $revealAmount, in: 0...1)
-                    .padding(.horizontal)
-
                 HStack(spacing: 16) {
                     Button {
                         imageA = nil
                         imageB = nil
                         rawImage = nil
                         processing = false
-                        zoomScale = 1.0
-                        lastZoomScale = 1.0
-                        panOffset = .zero
-                        lastPanOffset = .zero
                         phase = .capture
                         camera.checkPermissions()
                     } label: {
@@ -429,24 +349,5 @@ struct QualityComparisonView: View {
         } else {
             return String(format: "%.1f MB", Double(bytes) / (1024 * 1024))
         }
-    }
-}
-
-// MARK: - Clip Shape
-
-struct RevealClipShape: Shape {
-    var revealAmount: CGFloat
-
-    var animatableData: CGFloat {
-        get { revealAmount }
-        set { revealAmount = newValue }
-    }
-
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.addRect(CGRect(x: 0, y: 0,
-                            width: rect.width * revealAmount,
-                            height: rect.height))
-        return path
     }
 }
