@@ -169,6 +169,12 @@ struct Schedule: Codable {
 > [!NOTE]
 > `Schedule` is stored as a `Codable` JSON blob inside the Activity, not as a separate table. For a personal app with < 200 activities, filtering in-memory is efficient and avoids complex join queries.
 
+> [!IMPORTANT]
+> `sticky` and `adhoc` schedule types are treated as **reminders**, not goals. They are:
+> - Shown in a separate "Reminders" section in the Activities list
+> - Labeled "REMINDERS" on the Dashboard (not counted towards completion)
+> - Excluded from Analytics (streaks, behind schedule, trends)
+
 ### TimeWindow
 ```swift
 struct TimeWindow: Codable {
@@ -320,6 +326,10 @@ daily-activity-tracker/
 ### ADR-8: Metrics as Activities
 **Decision**: Goals are linked to Activities via `GoalActivity` junction table with a `role` field (`.activity` for contributing habits, `.metric` for outcome measurements). Metric config (baseline, target, direction) lives on the GoalActivity link, not on the Goal. GoalMeasurement was removed — measurements are just ActivityLog entries on metric-role activities. A goal can have up to 5 metrics.
 **Rationale**: Measuring something (body fat, deadhang time) IS an activity you schedule and track. The existing `ActivityLog` already captures values (numeric), photos (visual progress), and completion status (boolean milestones). Duplicating this with a separate GoalMeasurement model was unnecessary complexity. This design also means metric activities get consistency tracking for free ("did you actually measure this week?").
+
+### ADR-14: Goal On-Hold Status
+**Decision**: A goal is automatically "On Hold" when it has metric links but ALL metric activities are paused/stopped (`isStopped`). On-hold goals display a grayed-out card with "ON HOLD" badge, consistency score shows "—", and a banner appears in the detail view. Paused individual activities show "(Paused)" badges throughout goals UI. Reminder-type activities (sticky/adhoc) are excluded from goal linking entirely. `consistencyScore` skips stopped activities. When a container linked to a goal is dissolved, its goal links are transferred to each child activity (same role/weight), and the container's link is removed.
+**Rationale**: Goals should reflect the state of their underlying activities. If all metrics are paused, the goal has no active tracking mechanism and should signal this to the user rather than showing stale data. Excluding reminders from goals maintains the separation between "things you want to achieve" (goals) and "things you want to remember" (reminders). Dissolving a container should not silently break goal tracking — transferring links preserves the goal's contributing activities.
 
 ### ADR-9: Activity Model Simplification
 **Decision**: Removed `allowsPhoto`, `photoCadenceRaw`, `allowsNotes`, `reminderData`, and `weight` from `Activity`. Added `.metric` to `ActivityType` with a `MetricKind` enum (photo, value, checkbox, notes). Photo tracking is now a metric activity with `metricKind == .photo`. Per-activity reminders removed in favor of global notifications (Phase 2). Container children use equal weighting.

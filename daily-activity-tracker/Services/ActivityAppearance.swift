@@ -280,4 +280,178 @@ enum ActivityAppearance {
 
         return map
     }()
+
+    // MARK: - Category Suggestion
+
+    /// Maps activity name keywords → default category name for smart autofill.
+    /// Returns a category name string; caller matches against actual Category objects.
+    static func suggestCategory(for name: String) -> String? {
+        let words = name.lowercased()
+            .components(separatedBy: .alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+
+        for word in words {
+            if let category = categoryKeywordMap[word] {
+                return category
+            }
+        }
+        return nil
+    }
+
+    private static let categoryKeywordMap: [String: String] = {
+        var map = [String: String]()
+
+        func add(_ keywords: [String], category: String) {
+            for kw in keywords { map[kw] = category }
+        }
+
+        // Workout
+        add(["run", "running", "walk", "walking", "jog", "jogging",
+             "swim", "swimming", "cycle", "cycling", "bike", "biking",
+             "yoga", "stretch", "stretching", "pilates",
+             "lift", "lifting", "weights", "strength", "deadlift", "squat", "bench",
+             "pushup", "pullup", "chinup", "burpee", "plank", "crunches", "situp",
+             "cardio", "hiit", "aerobic", "jumping", "skipping",
+             "exercise", "workout", "gym", "fitness", "training",
+             "row", "rowing", "deadhang", "hang", "grip",
+             "steps", "basketball", "football", "soccer", "tennis", "golf",
+             "climb", "climbing", "hike", "hiking", "sprint"],
+            category: "Workout")
+
+        // Supplement
+        add(["vitamin", "vitamins", "supplement", "supplements",
+             "creatine", "protein", "collagen", "probiotic", "omega",
+             "magnesium", "zinc", "iron", "calcium", "b12", "d3",
+             "fish", "pill", "pills", "capsule", "tablet",
+             "ashwagandha", "turmeric", "melatonin"],
+            category: "Supplement")
+
+        // Hygiene
+        add(["shower", "bath", "brush", "floss", "teeth", "dental",
+             "skincare", "skin", "moisturize", "sunscreen", "spf", "retinol",
+             "hair", "haircare", "shampoo", "groom", "grooming",
+             "hygiene", "wash", "clean", "mouthwash", "deodorant"],
+            category: "Hygiene")
+
+        // Medical
+        add(["medicine", "medication", "doctor", "appointment",
+             "therapy", "therapist", "checkup", "bloodwork", "lab",
+             "prescription", "medical", "health", "dentist",
+             "blood", "pressure", "glucose", "insulin", "inhaler"],
+            category: "Medical")
+
+        // Skills
+        add(["read", "reading", "study", "studying", "learn", "learning",
+             "course", "class", "practice", "code", "coding", "programming",
+             "write", "writing", "journal", "journaling",
+             "language", "spanish", "french", "mandarin", "japanese",
+             "guitar", "piano", "music", "instrument", "draw", "drawing",
+             "paint", "painting", "skill", "skills", "leetcode",
+             "book", "books", "podcast", "meditate", "meditation"],
+            category: "Skills")
+
+        // Tracking
+        add(["weight", "weigh", "measure", "track", "tracking", "log",
+             "water", "hydration", "sleep", "calories", "calorie",
+             "mood", "energy", "heart", "heartrate", "temperature",
+             "bmi", "body", "waist", "steps", "screen", "screentime",
+             "budget", "expense", "saving", "savings", "spending"],
+            category: "Tracking")
+
+        return map
+    }()
+
+    // MARK: - Unit Suggestion
+
+    /// Suggests a default unit abbreviation based on activity name keywords.
+    static func suggestUnit(for name: String) -> String? {
+        let words = name.lowercased()
+            .components(separatedBy: .alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+
+        for word in words {
+            if let unit = unitKeywordMap[word] {
+                return unit
+            }
+        }
+        return nil
+    }
+
+    private static let unitKeywordMap: [String: String] = {
+        var map = [String: String]()
+
+        func add(_ keywords: [String], unit: String) {
+            for kw in keywords { map[kw] = unit }
+        }
+
+        // Distance (US: miles)
+        add(["run", "running", "jog", "jogging", "walk", "walking",
+             "hike", "hiking", "sprint", "distance",
+             "cycle", "cycling", "bike", "biking", "bicycle"],
+            unit: "mi")
+        add(["swim", "swimming", "laps", "pool"],
+            unit: "laps")
+
+        // Duration / Time
+        add(["sleep", "sleeping", "nap", "bedtime",
+             "meditation", "meditate", "yoga", "stretch", "stretching",
+             "focus", "deep", "pomodoro",
+             "study", "studying", "practice",
+             "coding", "code", "programming",
+             "read", "reading"],
+            unit: "min")
+        add(["deadhang", "hang", "plank"],
+            unit: "sec")
+
+        // Volume (US: fluid oz)
+        add(["water", "hydrate", "hydration", "drink", "drinking", "fluid", "liquids"],
+            unit: "oz")
+
+        // Body weight (US: lbs)
+        add(["weight", "weigh", "scale", "bmi", "body"],
+            unit: "lbs")
+
+        // Lifting weight (US: lbs)
+        add(["lift", "lifting", "deadlift", "squat", "bench", "barbell", "weights"],
+            unit: "lbs")
+
+        // Supplements / Nutrition (grams)
+        add(["protein", "creatine", "collagen", "supplement", "fiber",
+             "carbs", "carbohydrate", "fat"],
+            unit: "gm")
+
+        // Reps / Count
+        add(["pushup", "pullup", "chinup", "burpee", "crunches", "situp",
+             "rep", "reps", "set", "sets"],
+            unit: "reps")
+        add(["steps", "step"],
+            unit: "steps")
+
+        // Pages
+        add(["pages", "book", "books"],
+            unit: "pg")
+
+        // Calories
+        add(["calories", "calorie", "cal", "kcal"],
+            unit: "kcal")
+
+        // Currency (US: $)
+        add(["money", "budget", "saving", "savings", "spend", "spending",
+             "expense", "expenses", "invest", "investing"],
+            unit: "$")
+
+        // Temperature (US: °F)
+        add(["temperature", "temp", "fever"],
+            unit: "°F")
+
+        // Heart rate
+        add(["heartrate", "heart", "pulse", "bpm"],
+            unit: "bpm")
+
+        // Blood metrics
+        add(["glucose", "sugar", "blood", "pressure"],
+            unit: "mg/dL")
+
+        return map
+    }()
 }

@@ -75,6 +75,26 @@ final class Goal {
             .sorted { $0.sortOrder < $1.sortOrder }
     }
 
+    /// Active (not stopped) contributing activities
+    var activeActivities: [Activity] {
+        activities.filter { !$0.isStopped }
+    }
+
+    /// Active (not stopped) metric activities
+    var activeMetrics: [Activity] {
+        metrics.filter { !$0.isStopped }
+    }
+
+    /// Whether at least one metric is actively tracking
+    var hasActiveMetrics: Bool {
+        !activeMetrics.isEmpty
+    }
+
+    /// Goal is "On Hold" when it has metric links but ALL are paused/stopped
+    var isOnHold: Bool {
+        !metricLinks.isEmpty && activeMetrics.isEmpty
+    }
+
     /// Progress for a specific metric link (0.0 to 1.0, nil if not calculable)
     func metricProgress(for link: GoalActivity) -> Double? {
         guard link.role == .metric,
@@ -118,7 +138,8 @@ final class Goal {
         var totalWeight = 0.0
 
         for link in activityLinks {
-            guard let activity = link.activity, activity.modelContext != nil else { continue }
+            guard let activity = link.activity, activity.modelContext != nil,
+                  !activity.isStopped else { continue }
             let w = link.weight
             let rate = scheduleEngine.completionRate(for: activity, days: days, logs: logs, vacationDays: vacationDays, allActivities: allActivities)
             if rate > 0 {

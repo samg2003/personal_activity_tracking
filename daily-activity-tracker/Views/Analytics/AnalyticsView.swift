@@ -11,12 +11,16 @@ struct AnalyticsView: View {
     @State private var showAllStreaks = false
 
     private var topLevelActivities: [Activity] {
-        allActivities.filter { $0.parent == nil && !$0.isStopped }
+        allActivities.filter {
+            $0.parent == nil && !$0.isStopped
+            && $0.schedule.type != .sticky && $0.schedule.type != .adhoc
+        }
     }
 
     private var valueActivities: [Activity] {
         allActivities.filter {
             !$0.isStopped && ($0.type == .value || $0.type == .cumulative)
+            && $0.schedule.type != .sticky && $0.schedule.type != .adhoc
         }
     }
 

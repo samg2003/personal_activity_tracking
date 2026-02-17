@@ -30,8 +30,12 @@ struct AddGoalView: View {
         "star.fill", "trophy.fill", "chart.line.uptrend.xyaxis", "pills.fill",
     ]
 
+    /// Only standalone, containers, and metrics are linkable — excludes sub-activities and reminders
     private var linkableActivities: [Activity] {
-        allActivities.filter { !$0.isStopped }
+        allActivities.filter {
+            $0.parent == nil
+            && $0.schedule.type != .sticky && $0.schedule.type != .adhoc
+        }
     }
 
     private var metricCount: Int {
@@ -162,13 +166,13 @@ struct AddGoalView: View {
 
                                 Spacer()
 
-                                if let parent = activity.parent {
-                                    Text(parent.name)
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
+                                if activity.isStopped {
+                                    Text("Paused")
+                                        .font(.caption2.weight(.medium))
+                                        .foregroundStyle(.orange)
                                         .padding(.horizontal, 6)
                                         .padding(.vertical, 2)
-                                        .background(Color(.systemGray5))
+                                        .background(Color.orange.opacity(0.12))
                                         .clipShape(Capsule())
                                 }
                             }
@@ -203,10 +207,20 @@ struct AddGoalView: View {
                 if let activity {
                     Image(systemName: activity.icon)
                         .font(.caption)
-                        .foregroundStyle(Color(hex: activity.hexColor))
+                        .foregroundStyle(activity.isStopped ? .secondary : Color(hex: activity.hexColor))
                         .frame(width: 20)
                     Text(activity.name)
                         .font(.subheadline)
+                        .foregroundStyle(activity.isStopped ? .secondary : .primary)
+                    if activity.isStopped {
+                        Text("Paused")
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.orange)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Color.orange.opacity(0.12))
+                            .clipShape(Capsule())
+                    }
                 }
                 Spacer()
 

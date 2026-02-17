@@ -14,8 +14,8 @@ enum ScheduleType: String, Codable, CaseIterable, Identifiable, Sendable {
         case .daily: return "Daily"
         case .weekly: return "Weekly"
         case .monthly: return "Monthly"
-        case .sticky: return "Until Done"
-        case .adhoc: return "One-time"
+        case .sticky: return "Reminder"
+        case .adhoc: return "Reminder (Date)"
         }
     }
 }

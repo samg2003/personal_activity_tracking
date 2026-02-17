@@ -160,15 +160,26 @@ struct GoalCardView: View {
             HStack {
                 Image(systemName: goal.icon)
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(Color(hex: goal.hexColor))
+                    .foregroundStyle(goal.isOnHold ? .secondary : Color(hex: goal.hexColor))
                     .frame(width: 32, height: 32)
-                    .background(Color(hex: goal.hexColor).opacity(0.15))
+                    .background((goal.isOnHold ? Color.gray : Color(hex: goal.hexColor)).opacity(0.15))
                     .clipShape(RoundedRectangle(cornerRadius: 8))
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(goal.title)
-                        .font(.headline)
-                        .foregroundStyle(.primary)
+                    HStack(spacing: 6) {
+                        Text(goal.title)
+                            .font(.headline)
+                            .foregroundStyle(goal.isOnHold ? .secondary : .primary)
+                        if goal.isOnHold {
+                            Text("ON HOLD")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(.orange)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.orange.opacity(0.12))
+                                .clipShape(Capsule())
+                        }
+                    }
                     HStack(spacing: 8) {
                         Label("\(goal.activityLinks.count)", systemImage: "figure.run")
                         if !goal.metricLinks.isEmpty {
@@ -186,8 +197,20 @@ struct GoalCardView: View {
                     .foregroundStyle(.tertiary)
             }
 
-            // Consistency bar
-            consistencyBar(score: score)
+            // Consistency bar — skip for on-hold goals
+            if goal.isOnHold {
+                HStack {
+                    Text("7-Day Consistency")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("—")
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                consistencyBar(score: score)
+            }
 
             // Metric summaries (compact)
             if !goal.metricLinks.isEmpty {
@@ -205,6 +228,7 @@ struct GoalCardView: View {
         .padding(16)
         .background(Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 14))
+        .opacity(goal.isOnHold ? 0.7 : 1.0)
     }
 
     private func consistencyBar(score: Double) -> some View {
@@ -240,17 +264,29 @@ struct GoalCardView: View {
                     HStack(spacing: 6) {
                         Image(systemName: activity.icon)
                             .font(.system(size: 9))
-                            .foregroundStyle(Color(hex: activity.hexColor))
+                            .foregroundStyle(activity.isStopped ? .secondary : Color(hex: activity.hexColor))
 
                         Text(activity.name)
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
 
+                        if activity.isStopped {
+                            Text("Paused")
+                                .font(.system(size: 8, weight: .medium))
+                                .foregroundStyle(.orange)
+                        }
+
                         Spacer()
 
                         // Show latest value or status
-                        metricBadge(for: link, activity: activity)
+                        if activity.isStopped {
+                            Text("—")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            metricBadge(for: link, activity: activity)
+                        }
                     }
                 }
             }

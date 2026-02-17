@@ -15,13 +15,55 @@ struct UnitPicker: View {
         ("Other", ["units", "doses", "mg", "mcg", "IU"])
     ]
 
+    /// Full-form aliases for each abbreviation so typing "feet" finds "ft"
+    private static let aliases: [String: [String]] = [
+        "kg": ["kilogram", "kilograms", "kilo", "kilos"],
+        "g": ["gram", "grams"],
+        "lb": ["pound", "pounds", "lbs"],
+        "oz": ["ounce", "ounces"],
+        "ml": ["milliliter", "milliliters", "millilitre"],
+        "L": ["liter", "liters", "litre", "litres"],
+        "fl oz": ["fluid ounce", "fluid ounces"],
+        "cups": ["cup"],
+        "gal": ["gallon", "gallons"],
+        "km": ["kilometer", "kilometers", "kilometre"],
+        "mi": ["mile", "miles"],
+        "m": ["meter", "meters", "metre", "metres"],
+        "ft": ["foot", "feet"],
+        "yd": ["yard", "yards"],
+        "sec": ["second", "seconds"],
+        "min": ["minute", "minutes"],
+        "hrs": ["hour", "hours", "hr"],
+        "cal": ["calorie", "calories"],
+        "kcal": ["kilocalorie", "kilocalories"],
+        "bpm": ["beats per minute", "heartrate", "heart rate"],
+        "rpm": ["revolutions per minute"],
+        "mg": ["milligram", "milligrams"],
+        "mcg": ["microgram", "micrograms"],
+        "IU": ["international units"],
+        "pages": ["page"],
+        "reps": ["rep", "repetition", "repetitions"],
+        "sets": ["set"],
+        "steps": ["step"],
+        "doses": ["dose"],
+    ]
+
     private static var allUnits: [String] {
         units.flatMap(\.items)
     }
 
     private var filteredUnits: [String] {
         guard !selection.isEmpty else { return Self.allUnits }
-        return Self.allUnits.filter { $0.localizedCaseInsensitiveContains(selection) }
+        let query = selection.lowercased()
+        return Self.allUnits.filter { unit in
+            // Match the abbreviation itself
+            if unit.localizedCaseInsensitiveContains(selection) { return true }
+            // Match any full-form alias
+            if let unitAliases = Self.aliases[unit] {
+                return unitAliases.contains { $0.localizedCaseInsensitiveContains(query) }
+            }
+            return false
+        }
     }
 
     var body: some View {

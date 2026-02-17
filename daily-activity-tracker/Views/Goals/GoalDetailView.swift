@@ -52,12 +52,27 @@ struct GoalDetailView: View {
 
     private var headerCard: some View {
         VStack(spacing: 12) {
+            // On Hold banner
+            if goal.isOnHold {
+                HStack(spacing: 6) {
+                    Image(systemName: "pause.circle.fill")
+                        .font(.caption)
+                    Text("All metrics are paused — goal is on hold")
+                        .font(.caption.weight(.medium))
+                }
+                .foregroundStyle(.orange)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(Color.orange.opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+
             HStack {
                 Image(systemName: goal.icon)
                     .font(.system(size: 28, weight: .semibold))
-                    .foregroundStyle(Color(hex: goal.hexColor))
+                    .foregroundStyle(goal.isOnHold ? .secondary : Color(hex: goal.hexColor))
                     .frame(width: 48, height: 48)
-                    .background(Color(hex: goal.hexColor).opacity(0.15))
+                    .background((goal.isOnHold ? Color.gray : Color(hex: goal.hexColor)).opacity(0.15))
                     .clipShape(RoundedRectangle(cornerRadius: 12))
 
                 VStack(alignment: .leading, spacing: 2) {
@@ -82,17 +97,30 @@ struct GoalDetailView: View {
             }
 
             // Overall consistency score
-            let score = overallScore
-            VStack(spacing: 4) {
-                Text("\(Int(score * 100))%")
-                    .font(.system(size: 42, weight: .bold, design: .rounded))
-                    .foregroundStyle(scoreColor(score))
-                Text("Activity Consistency (14 days)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            if goal.isOnHold {
+                VStack(spacing: 4) {
+                    Text("—")
+                        .font(.system(size: 42, weight: .bold, design: .rounded))
+                        .foregroundStyle(.secondary)
+                    Text("Activity Consistency (on hold)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+            } else {
+                let score = overallScore
+                VStack(spacing: 4) {
+                    Text("\(Int(score * 100))%")
+                        .font(.system(size: 42, weight: .bold, design: .rounded))
+                        .foregroundStyle(scoreColor(score))
+                    Text("Activity Consistency (14 days)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
             }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 8)
         }
         .padding(16)
         .background(Color(.secondarySystemBackground))
@@ -123,10 +151,20 @@ struct GoalDetailView: View {
             HStack(spacing: 8) {
                 Image(systemName: activity.icon)
                     .font(.caption)
-                    .foregroundStyle(Color(hex: activity.hexColor))
+                    .foregroundStyle(activity.isStopped ? .secondary : Color(hex: activity.hexColor))
                     .frame(width: 20)
                 Text(activity.name)
                     .font(.subheadline.bold())
+                    .foregroundStyle(activity.isStopped ? .secondary : .primary)
+                if activity.isStopped {
+                    Text("Paused")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Color.orange.opacity(0.12))
+                        .clipShape(Capsule())
+                }
                 Spacer()
 
                 if let dir = link.metricDirection {
@@ -362,6 +400,12 @@ struct GoalDetailView: View {
                             Text(activity.name)
                                 .font(.caption2)
                                 .lineLimit(1)
+                                .foregroundStyle(activity.isStopped ? .secondary : .primary)
+                            if activity.isStopped {
+                                Image(systemName: "pause.fill")
+                                    .font(.system(size: 6))
+                                    .foregroundStyle(.orange)
+                            }
                         }
                         .frame(width: 100, alignment: .leading)
 

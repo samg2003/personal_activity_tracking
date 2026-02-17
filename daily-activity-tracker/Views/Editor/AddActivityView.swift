@@ -42,8 +42,12 @@ struct AddActivityView: View {
     @State private var selectedParent: Activity?
     @State private var isSubActivity = false
     
-    // Tracks whether appearance was auto-set (reset on manual override)
+    // Tracks whether appearance/category/unit was auto-set (reset on manual override)
     @State private var appearanceAutoSet = true
+    @State private var categoryAutoSet = true
+    @State private var unitAutoSet = true
+    @State private var settingCategoryFromSuggestion = false
+    @State private var settingUnitFromSuggestion = false
     @State private var showAdvancedOptions = false
     
     // Edit scope dialog (Future Only vs All Changes)
@@ -259,6 +263,8 @@ struct AddActivityView: View {
         selectedColor = activity.hexColor
         selectedType = activity.type
         appearanceAutoSet = false
+        categoryAutoSet = false
+        unitAutoSet = false
         
         // Restore Schedule
         let schedule = activity.schedule
@@ -316,12 +322,34 @@ struct AddActivityView: View {
             TextField("Activity name", text: $name)
                 .font(.title3)
                 .onChange(of: name) { _, newName in
-                    guard appearanceAutoSet else { return }
-                    let suggestion = ActivityAppearance.suggest(
-                        for: newName, type: selectedType, metricKind: selectedMetricKind
-                    )
-                    selectedIcon = suggestion.icon
-                    selectedColor = suggestion.color
+                    if appearanceAutoSet {
+                        let suggestion = ActivityAppearance.suggest(
+                            for: newName, type: selectedType, metricKind: selectedMetricKind
+                        )
+                        selectedIcon = suggestion.icon
+                        selectedColor = suggestion.color
+                    }
+                    // Smart category autofill from title
+                    if categoryAutoSet && !categoryInherited {
+                        settingCategoryFromSuggestion = true
+                        if let suggestedName = ActivityAppearance.suggestCategory(for: newName),
+                           let match = categories.first(where: { $0.name.localizedCaseInsensitiveCompare(suggestedName) == .orderedSame }) {
+                            selectedCategory = match
+                        } else {
+                            selectedCategory = nil
+                        }
+                        settingCategoryFromSuggestion = false
+                    }
+                    // Smart unit autofill — pre-set for when user picks a numeric type
+                    if unitAutoSet {
+                        settingUnitFromSuggestion = true
+                        if let suggestedUnit = ActivityAppearance.suggestUnit(for: newName) {
+                            unit = suggestedUnit
+                        } else {
+                            unit = ""
+                        }
+                        settingUnitFromSuggestion = false
+                    }
                 }
         }
     }
@@ -344,6 +372,14 @@ struct AddActivityView: View {
                     selectedIcon = suggestion.icon
                     selectedColor = suggestion.color
                 }
+                // Re-fire unit suggestion when switching to a numeric type
+                if unitAutoSet && (newType == .value || newType == .cumulative || newType == .metric) {
+                    settingUnitFromSuggestion = true
+                    if let suggestedUnit = ActivityAppearance.suggestUnit(for: name) {
+                        unit = suggestedUnit
+                    }
+                    settingUnitFromSuggestion = false
+                }
             }
         }
     }
@@ -354,12 +390,18 @@ struct AddActivityView: View {
         case .value:
             Section("Value Configuration") {
                 UnitPicker(selection: $unit)
+                    .onChange(of: unit) { _, _ in
+                        if !settingUnitFromSuggestion { unitAutoSet = false }
+                    }
             }
         case .cumulative:
             Section("Target") {
                 TextField("Daily target (e.g., 2000)", text: $targetValueText)
                     .keyboardType(.decimalPad)
                 UnitPicker(selection: $unit)
+                    .onChange(of: unit) { _, _ in
+                        if !settingUnitFromSuggestion { unitAutoSet = false }
+                    }
                 Picker("Aggregation", selection: $selectedAggregation) {
                     ForEach(AggregationMode.allCases) { mode in
                         Text(mode.displayName).tag(mode)
@@ -389,6 +431,9 @@ struct AddActivityView: View {
                 }
                 if selectedMetricKind == .value {
                     UnitPicker(selection: $unit)
+                        .onChange(of: unit) { _, _ in
+                            if !settingUnitFromSuggestion { unitAutoSet = false }
+                        }
                 }
             } header: {
                 Text("Metric Configuration")
@@ -415,6 +460,10 @@ struct AddActivityView: View {
                 }
             }
             .disabled(categoryInherited)
+            .onChange(of: selectedCategory) { _, _ in
+                guard !settingCategoryFromSuggestion else { return }
+                categoryAutoSet = false
+            }
             
             if categoryInherited {
                 Text("Inherited from parent container")
@@ -430,8 +479,8 @@ struct AddActivityView: View {
                 // High level mode
                 Picker("Mode", selection: $scheduleMode) {
                     Text("Recurring").tag(ScheduleMode.recurring)
-                    Text("One-Time").tag(ScheduleMode.oneTime)
-                    Text("Anytime").tag(ScheduleMode.backlog)
+                    Text("Reminder").tag(ScheduleMode.backlog)
+                    Text("Reminder (Date)").tag(ScheduleMode.oneTime)
                 }
                 .pickerStyle(.segmented)
                 .onChange(of: scheduleMode) { _, newMode in
@@ -461,7 +510,7 @@ struct AddActivityView: View {
                 } else if scheduleMode == .oneTime {
                     DatePicker("Date", selection: $adhocDate, displayedComponents: .date)
                 } else if scheduleMode == .backlog {
-                    Text("Tasks that sit in your backlog until completed.")
+                    Text("Reminders sit in your list until marked done.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

@@ -122,7 +122,8 @@ struct DashboardView: View {
     }
 
     private var completionFraction: Double {
-        activityStatus.completionFraction(for: todayActivities)
+        let goalsOnly = todayActivities.filter { $0.schedule.type != .sticky && $0.schedule.type != .adhoc }
+        return activityStatus.completionFraction(for: goalsOnly)
     }
 
     private var groupedBySlot: [(slot: TimeSlot, activities: [Activity])] {
@@ -411,10 +412,10 @@ struct DashboardView: View {
         if !stickyPending.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Image(systemName: "pin.fill")
+                    Image(systemName: "bell.fill")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(.secondary)
-                    Text("BACKLOG")
+                    Text("REMINDERS")
                         .font(.system(size: 13, weight: .bold, design: .rounded))
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -428,7 +429,7 @@ struct DashboardView: View {
     }
 
     private var allDone: Bool {
-        pendingTimed.isEmpty && stickyPending.isEmpty && !completed.isEmpty
+        pendingTimed.isEmpty && !completed.isEmpty
     }
 
     @ViewBuilder

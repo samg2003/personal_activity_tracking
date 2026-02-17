@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UniformTypeIdentifiers
 
 /// Full activity management view — edit, reorder, delete, archive
 struct ActivitiesListView: View {
@@ -37,13 +38,36 @@ struct ActivitiesListView: View {
     @FocusState private var inlineFocusedSection: UUID?
     @FocusState private var inlineFocusedContainer: UUID?
 
-    // Top-level activities only (not children of containers)
+    // Top-level activities only (not children of containers), excluding one-time tasks
     private var topLevelActivities: [Activity] {
-        allActivities.filter { $0.parent == nil && !$0.isStopped }
+        allActivities.filter {
+            $0.parent == nil && !$0.isStopped
+            && $0.schedule.type != .sticky && $0.schedule.type != .adhoc
+        }
     }
 
+    // Active one-time tasks (sticky/adhoc not yet completed)
+    private var activeOneTimeTasks: [Activity] {
+        allActivities.filter {
+            $0.parent == nil && !$0.isStopped
+            && ($0.schedule.type == .sticky || $0.schedule.type == .adhoc)
+        }
+    }
+
+    // Completed one-time tasks (sticky/adhoc that are stopped)
+    private var completedOneTimeTasks: [Activity] {
+        allActivities.filter {
+            $0.isStopped
+            && ($0.schedule.type == .sticky || $0.schedule.type == .adhoc)
+        }
+    }
+
+    // Paused recurring activities only (not one-time tasks)
     private var pausedActivities: [Activity] {
-        allActivities.filter { $0.isStopped }
+        allActivities.filter {
+            $0.isStopped
+            && $0.schedule.type != .sticky && $0.schedule.type != .adhoc
+        }
     }
 
     private var filteredActivities: [Activity] {
@@ -53,25 +77,28 @@ struct ActivitiesListView: View {
         }
     }
 
-    // Group activities by category
+    // Group activities by category — show ALL categories (empty ones included for quick-add)
     private var groupedByCategory: [(category: Category?, activities: [Activity])] {
         let dict = Dictionary(grouping: filteredActivities) { $0.category?.id }
         
-        var groups: [(category: Category?, activities: [Activity])] = []
+        var populated: [(category: Category?, activities: [Activity])] = []
+        var empty: [(category: Category?, activities: [Activity])] = []
         
-        // Known categories first (sorted)
         for category in categories {
-            if let acts = dict[category.id], !acts.isEmpty {
-                groups.append((category: category, activities: acts.sorted { $0.sortOrder < $1.sortOrder }))
+            let acts = dict[category.id] ?? []
+            if acts.isEmpty {
+                empty.append((category: category, activities: []))
+            } else {
+                populated.append((category: category, activities: acts.sorted { $0.sortOrder < $1.sortOrder }))
             }
         }
         
-        // Uncategorized last
+        // Uncategorized (only if has activities)
         if let acts = dict[nil], !acts.isEmpty {
-            groups.append((category: nil, activities: acts.sorted { $0.sortOrder < $1.sortOrder }))
+            populated.append((category: nil, activities: acts.sorted { $0.sortOrder < $1.sortOrder }))
         }
         
-        return groups
+        return populated + empty
     }
 
     var body: some View {
@@ -104,7 +131,9 @@ struct ActivitiesListView: View {
     private var activitiesList: some View {
         List(selection: $selectedForGroup) {
             mainListContent
+            oneTimeTasksSection
             emptyStateSection
+            completedOneTimeSection
             pausedSection
         }
         .listStyle(.insetGrouped)
@@ -219,8 +248,125 @@ struct ActivitiesListView: View {
     }
 
     @ViewBuilder
+    private var oneTimeTasksSection: some View {
+        if !activeOneTimeTasks.isEmpty {
+            Section {
+                ForEach(activeOneTimeTasks.sorted(by: { $0.sortOrder < $1.sortOrder })) { activity in
+                    HStack(spacing: 10) {
+                        Image(systemName: activity.icon)
+                            .font(.system(size: 14))
+                            .foregroundStyle(Color(hex: activity.hexColor))
+                            .frame(width: 24)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(activity.name)
+                                .font(.subheadline.weight(.medium))
+                            Text(activity.schedule.type == .sticky ? "Reminder" : "Reminder (specific date)")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                    }
+                    .swipeActions(edge: .trailing) {
+                        Button {
+                            activity.stoppedAt = Date()
+                        } label: {
+                            Label("Done", systemImage: "checkmark.circle.fill")
+                        }
+                        .tint(.green)
+                    }
+                    .swipeActions(edge: .leading) {
+                        Button {
+                            editingActivity = activity
+                        } label: {
+                            Label("Edit", systemImage: "pencil")
+                        }
+                        .tint(.blue)
+                    }
+                    .contextMenu {
+                        Button {
+                            editingActivity = activity
+                        } label: {
+                            Label("Edit", systemImage: "pencil")
+                        }
+                        Button {
+                            activity.stoppedAt = Date()
+                        } label: {
+                            Label("Mark Done", systemImage: "checkmark.circle")
+                        }
+                        Button(role: .destructive) {
+                            initiateDelete(activity)
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
+                }
+            } header: {
+                HStack(spacing: 6) {
+                    Image(systemName: "bell")
+                        .font(.caption)
+                    Text("Reminders")
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                }
+            }
+        }
+    }
+
+    @State private var completedOneTimeExpanded = false
+
+    @ViewBuilder
+    private var completedOneTimeSection: some View {
+        if !completedOneTimeTasks.isEmpty {
+            Section {
+                DisclosureGroup(isExpanded: $completedOneTimeExpanded) {
+                    ForEach(completedOneTimeTasks.sorted(by: { ($0.stoppedAt ?? .distantPast) > ($1.stoppedAt ?? .distantPast) })) { activity in
+                        HStack(spacing: 10) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 14))
+                                .foregroundStyle(.green)
+                                .frame(width: 24)
+                            Text(activity.name)
+                                .font(.subheadline)
+                                .strikethrough()
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            if let stopped = activity.stoppedAt {
+                                Text(stopped, style: .date)
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                        .swipeActions(edge: .trailing) {
+                            Button(role: .destructive) {
+                                initiateDelete(activity)
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
+                        .swipeActions(edge: .leading) {
+                            Button {
+                                activity.stoppedAt = nil
+                            } label: {
+                                Label("Restore", systemImage: "arrow.uturn.backward")
+                            }
+                            .tint(.orange)
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark.circle")
+                            .font(.caption)
+                        Text("Completed (\(completedOneTimeTasks.count))")
+                            .font(.caption.weight(.medium))
+                    }
+                    .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
     private var emptyStateSection: some View {
-        if groupedByCategory.isEmpty {
+        if groupedByCategory.isEmpty && activeOneTimeTasks.isEmpty {
             Section {
                 inlineAddRow(category: nil)
             } header: {
@@ -392,8 +538,16 @@ struct ActivitiesListView: View {
                 Label("Delete", systemImage: "trash")
             }
         }
-
-        // Expanded children
+        .dropDestination(for: ActivityTransfer.self) { items, _ in
+            guard let transfer = items.first,
+                  let activity = allActivities.first(where: { $0.id == transfer.activityId }),
+                  activity.type != .container,
+                  activity.id != container.id
+            else { return false }
+            moveActivity(activity, toContainer: container)
+            expandedContainers.insert(container.id)
+            return true
+        }
         if expandedContainers.contains(container.id) {
             let children = container.children.sorted { $0.sortOrder < $1.sortOrder }
             ForEach(children) { child in
@@ -502,9 +656,8 @@ struct ActivitiesListView: View {
                 Label("Delete", systemImage: "trash")
             }
         }
+        .draggable(ActivityTransfer(activityId: child.id))
     }
-
-    // MARK: - Standalone Activity Row
 
     @ViewBuilder
     private func standaloneActivityRow(_ activity: Activity) -> some View {
@@ -545,6 +698,7 @@ struct ActivitiesListView: View {
             }
         }
         .buttonStyle(.plain)
+        .draggable(ActivityTransfer(activityId: activity.id))
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button(role: .destructive) {
                 initiateDelete(activity)
@@ -927,8 +1081,29 @@ struct ActivitiesListView: View {
     }
 
     private func dissolveContainer(_ container: Activity) {
+        let children = container.children
+
+        // Transfer goal links from container to its children
+        for link in container.goalLinks {
+            guard let goal = link.goal else { continue }
+            for child in children {
+                // Skip if child is already linked to this goal
+                let alreadyLinked = goal.linkedActivities.contains {
+                    $0.activity?.id == child.id
+                }
+                guard !alreadyLinked else { continue }
+
+                let newLink = GoalActivity(
+                    goal: goal, activity: child,
+                    role: link.role, weight: link.weight
+                )
+                modelContext.insert(newLink)
+            }
+            modelContext.delete(link)
+        }
+
         // Reparent children to top-level
-        for child in container.children {
+        for child in children {
             child.parent = nil
         }
         // Snapshot and convert back
