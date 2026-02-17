@@ -34,4 +34,10 @@ extension Date {
         formatter.dateFormat = "EEE"
         return formatter.string(from: self)
     }
+
+    var shortMonthDay: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d"
+        return formatter.string(from: self)
+    }
 }

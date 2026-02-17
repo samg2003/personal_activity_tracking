@@ -410,6 +410,20 @@ daily-activity-tracker/
 
 ---
 
+### ADR-20: Carry Forward Logs on Original Date
+
+**Decision**: When a carry-forwarded activity is completed or skipped, the log is recorded on the **original scheduled date**, not the current date.
+
+**Rationale**: Logging on the original date means the ScheduleEngine naturally sees the missed occurrence as resolved and stops carrying it forward — no special cleanup logic needed. This keeps analytics, streaks, and completion rates accurate for the date the activity was actually due.
+
+**Key behaviors**:
+- `effectiveLogDate(for:)` returns the carry-forward original date or today
+- `effectiveLogs(for:)` searches logs on the effective date for undo/uncomplete operations
+- Visual treatment: light red row background + "⏳ Due from (Mon Day)" capsule label
+- Applies to all log types: checkbox, value, cumulative, and skip
+
+---
+
 ## Phased Implementation Strategy
 
 | Phase                | Scope                                                                           | Deliverable                                          |

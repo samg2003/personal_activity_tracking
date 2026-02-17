@@ -48,7 +48,11 @@ struct DatePickerBar: View {
                     // Load-more button at the leading edge
                     loadMoreButton(proxy: proxy)
 
-                    ForEach(dates, id: \.timeIntervalSince1970) { date in
+                    ForEach(Array(dates.enumerated()), id: \.element.timeIntervalSince1970) { index, date in
+                        // Show month label at boundary transitions
+                        if isMonthBoundary(at: index) {
+                            monthLabel(for: date)
+                        }
                         dateChip(date)
                             .id(date.startOfDay)
                     }
@@ -93,6 +97,25 @@ struct DatePickerBar: View {
                 .frame(width: 32, height: 52)
         }
         .buttonStyle(.plain)
+    }
+
+    /// True when the chip at `index` is the first day of a new month (or the very first chip)
+    private func isMonthBoundary(at index: Int) -> Bool {
+        guard index > 0 else { return true }
+        let calendar = Calendar.current
+        return calendar.component(.month, from: dates[index]) != calendar.component(.month, from: dates[index - 1])
+    }
+
+    /// Compact month label pill shown at month boundaries
+    private func monthLabel(for date: Date) -> some View {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM"
+        let label = formatter.string(from: date).uppercased()
+        return Text(label)
+            .font(.system(size: 9, weight: .bold, design: .rounded))
+            .foregroundStyle(.secondary)
+            .rotationEffect(.degrees(-90))
+            .frame(width: 16, height: 52)
     }
 
     private func dateChip(_ date: Date) -> some View {

@@ -773,15 +773,20 @@ struct DashboardView: View {
                 )
             }
         }
+        .background(
+            carriedForwardOriginalDate(activity) != nil && !isFullyCompleted(activity) && !isSkipped(activity)
+                ? Color.red.opacity(0.08)
+                : Color.clear
+        )
         .overlay(alignment: .topTrailing) {
             if let dueDate = carriedForwardOriginalDate(activity),
                !isFullyCompleted(activity), !isSkipped(activity) {
-                Text("⏳ Due \(dueDate.shortWeekday)")
+                Text("⏳ Due from \(dueDate.shortMonthDay)")
                     .font(.system(size: 9, weight: .semibold, design: .rounded))
                     .foregroundStyle(.red)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(Color.red.opacity(0.12))
+                    .background(Color.red.opacity(0.15))
                     .clipShape(Capsule())
                     .offset(y: -2)
             }
@@ -790,6 +795,17 @@ struct DashboardView: View {
 
     private func carriedForwardOriginalDate(_ activity: Activity) -> Date? {
         scheduleEngine.carriedForwardDate(for: activity, on: today, logs: allLogs)
+    }
+
+    /// Date to use when creating a log — original carry-forward date if applicable, otherwise today
+    private func effectiveLogDate(for activity: Activity) -> Date {
+        carriedForwardOriginalDate(activity) ?? today
+    }
+
+    /// Find logs for an activity on its effective date (handles carry-forwarded items)
+    private func effectiveLogs(for activity: Activity) -> [ActivityLog] {
+        let logDate = effectiveLogDate(for: activity)
+        return allLogs.filter { $0.activity?.id == activity.id && $0.date.isSameDay(as: logDate) }
     }
 
     // MARK: - Completion Logic (delegates to ActivityStatusService)
@@ -828,23 +844,24 @@ struct DashboardView: View {
 
     private func completeCheckbox(_ activity: Activity, slot: TimeSlot? = nil) {
         // For multi-session with a slot, toggle that specific session
+        let logDate = effectiveLogDate(for: activity)
         if let slot, activity.isMultiSession {
             if isSessionCompleted(activity, slot: slot) {
                 // Uncomplete this session
-                if let log = todayLogs.first(where: {
-                    $0.activity?.id == activity.id && $0.status == .completed && $0.timeSlot == slot
+                if let log = effectiveLogs(for: activity).first(where: {
+                    $0.status == .completed && $0.timeSlot == slot
                 }) {
                     modelContext.delete(log)
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     showUndo("Uncompleted \(activity.name) (\(slot.displayName))") {
-                        let restored = ActivityLog(activity: activity, date: today, status: .completed)
+                        let restored = ActivityLog(activity: activity, date: logDate, status: .completed)
                         restored.timeSlotRaw = slot.rawValue
                         modelContext.insert(restored)
                     }
                 }
                 return
             }
-            let log = ActivityLog(activity: activity, date: today, status: .completed)
+            let log = ActivityLog(activity: activity, date: logDate, status: .completed)
             log.timeSlotRaw = slot.rawValue
             modelContext.insert(log)
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -860,18 +877,18 @@ struct DashboardView: View {
 
         // Single-session (original logic)
         if isFullyCompleted(activity) {
-            if let log = todayLogs.first(where: { $0.activity?.id == activity.id && $0.status == .completed }) {
+            if let log = effectiveLogs(for: activity).first(where: { $0.status == .completed }) {
                 modelContext.delete(log)
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 showUndo("Uncompleted \(activity.name)") {
-                    let restored = ActivityLog(activity: activity, date: today, status: .completed)
+                    let restored = ActivityLog(activity: activity, date: logDate, status: .completed)
                     modelContext.insert(restored)
                 }
             }
             return
         }
         
-        let log = ActivityLog(activity: activity, date: today, status: .completed)
+        let log = ActivityLog(activity: activity, date: logDate, status: .completed)
         modelContext.insert(log)
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         
@@ -887,14 +904,15 @@ struct DashboardView: View {
     }
 
     private func logValue(_ activity: Activity, value: Double, slot: TimeSlot? = nil) {
+        let logDate = effectiveLogDate(for: activity)
         if let slot, activity.isMultiSession {
             // Multi-session: find existing log for this specific slot
-            if let existing = todayLogs.first(where: {
-                $0.activity?.id == activity.id && $0.status == .completed && $0.timeSlot == slot
+            if let existing = effectiveLogs(for: activity).first(where: {
+                $0.status == .completed && $0.timeSlot == slot
             }) {
                 modelContext.delete(existing)
             }
-            let log = ActivityLog(activity: activity, date: today, status: .completed, value: value)
+            let log = ActivityLog(activity: activity, date: logDate, status: .completed, value: value)
             log.timeSlotRaw = slot.rawValue
             modelContext.insert(log)
             writeToHealthKit(activity: activity, value: value)
@@ -904,10 +922,10 @@ struct DashboardView: View {
             }
             return
         }
-        if let existing = todayLogs.first(where: { $0.activity?.id == activity.id && $0.status == .completed }) {
+        if let existing = effectiveLogs(for: activity).first(where: { $0.status == .completed }) {
             modelContext.delete(existing)
         }
-        let log = ActivityLog(activity: activity, date: today, status: .completed, value: value)
+        let log = ActivityLog(activity: activity, date: logDate, status: .completed, value: value)
         modelContext.insert(log)
         
         // Integrations
@@ -921,7 +939,8 @@ struct DashboardView: View {
     }
 
     private func addCumulativeLog(_ activity: Activity, value: Double) {
-        let log = ActivityLog(activity: activity, date: today, status: .completed, value: value)
+        let logDate = effectiveLogDate(for: activity)
+        let log = ActivityLog(activity: activity, date: logDate, status: .completed, value: value)
         modelContext.insert(log)
         
         writeToHealthKit(activity: activity, value: value)
@@ -932,33 +951,36 @@ struct DashboardView: View {
     }
 
     private func removeValueLog(_ activity: Activity, slot: TimeSlot? = nil) {
+        let logs = effectiveLogs(for: activity)
         let matchLog: ActivityLog?
         if let slot, activity.isMultiSession {
-            matchLog = todayLogs.first(where: {
-                $0.activity?.id == activity.id && $0.status == .completed && $0.timeSlot == slot
+            matchLog = logs.first(where: {
+                $0.status == .completed && $0.timeSlot == slot
             })
         } else {
-            matchLog = todayLogs.first(where: { $0.activity?.id == activity.id && $0.status == .completed })
+            matchLog = logs.first(where: { $0.status == .completed })
         }
         guard let log = matchLog else { return }
         let oldValue = log.value
         let oldSlotRaw = log.timeSlotRaw
+        let logDate = log.date
         modelContext.delete(log)
         
         showUndo("Cleared \(activity.name)") {
-            let restored = ActivityLog(activity: activity, date: today, status: .completed, value: oldValue)
+            let restored = ActivityLog(activity: activity, date: logDate, status: .completed, value: oldValue)
             restored.timeSlotRaw = oldSlotRaw
             modelContext.insert(restored)
         }
     }
 
     private func removeLastCumulativeLog(_ activity: Activity) {
-        guard let lastLog = todayLogs.last(where: { $0.activity?.id == activity.id && $0.status == .completed }) else { return }
+        guard let lastLog = effectiveLogs(for: activity).last(where: { $0.status == .completed }) else { return }
         let oldValue = lastLog.value
+        let logDate = lastLog.date
         modelContext.delete(lastLog)
         
         showUndo("Removed entry from \(activity.name)") {
-            let restored = ActivityLog(activity: activity, date: today, status: .completed, value: oldValue)
+            let restored = ActivityLog(activity: activity, date: logDate, status: .completed, value: oldValue)
             modelContext.insert(restored)
         }
     }
@@ -1035,7 +1057,8 @@ struct DashboardView: View {
         // For multi-session with a slot, skip that specific session
         if let slot, activity.isMultiSession {
             guard !isSessionSkipped(activity, slot: slot) && !isSessionCompleted(activity, slot: slot) else { return }
-            let log = ActivityLog(activity: activity, date: today, status: .skipped)
+            let logDate = effectiveLogDate(for: activity)
+            let log = ActivityLog(activity: activity, date: logDate, status: .skipped)
             log.skipReason = reason
             log.timeSlotRaw = slot.rawValue
             modelContext.insert(log)
@@ -1046,7 +1069,8 @@ struct DashboardView: View {
         }
 
         guard !isSkipped(activity) && !isFullyCompleted(activity) else { return }
-        let log = ActivityLog(activity: activity, date: today, status: .skipped)
+        let logDate = effectiveLogDate(for: activity)
+        let log = ActivityLog(activity: activity, date: logDate, status: .skipped)
         log.skipReason = reason
         modelContext.insert(log)        
         showUndo("Skipped \(activity.name)") { [log] in

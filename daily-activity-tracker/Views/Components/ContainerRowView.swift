@@ -303,12 +303,12 @@ struct ContainerRowView: View {
                                     .overlay(alignment: .topTrailing) {
                                         if let dueDate = scheduleEngine.carriedForwardDate(for: child, on: today, logs: allLogs),
                                            !isChildCompleted(child), !isChildFullySkipped(child) {
-                                            Text("⏳ Due \(dueDate.shortWeekday)")
+                                            Text("⏳ Due from \(dueDate.shortMonthDay)")
                                                 .font(.system(size: 8, weight: .semibold, design: .rounded))
                                                 .foregroundStyle(.red)
                                                 .padding(.horizontal, 5)
                                                 .padding(.vertical, 1)
-                                                .background(Color.red.opacity(0.12))
+                                                .background(Color.red.opacity(0.15))
                                                 .clipShape(Capsule())
                                                 .offset(y: -2)
                                         }

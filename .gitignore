@@ -8,12 +8,26 @@ xcuserdata/
 *.ipa
 *.dSYM.zip
 *.dSYM
+*.xccheckout
+*.moved-aside
+*.xcuserstate
 
 # Swift Package Manager
 .build/
 Packages/
+Package.resolved
 
 # macOS
 .DS_Store
 *.swp
 *~
+.Trashes
+._*
+
+# Gemini / Agent
+.gemini/
+
+# App data (if any local DB gets copied here)
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
