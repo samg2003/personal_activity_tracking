@@ -397,7 +397,7 @@ struct ActivityPhotosGridView: View {
         .navigationTitle(activityName)
         .navigationBarTitleDisplayMode(.inline)
         .fullScreenCover(item: $previewPhoto) { filename in
-            PhotoPreviewView(filename: filename) { newName in
+            PhotoPreviewView(filename: filename, allFilenames: photos) { newName in
                 if let idx = photos.firstIndex(of: filename) {
                     photos[idx] = newName
                 }
@@ -602,7 +602,7 @@ struct SlotPhotosView: View {
             Text("This action cannot be undone.")
         }
         .fullScreenCover(item: $previewPhoto) { filename in
-            PhotoPreviewView(filename: filename) { newName in
+            PhotoPreviewView(filename: filename, allFilenames: photos) { newName in
                 if let idx = photos.firstIndex(of: filename) {
                     photos[idx] = newName
                 }
@@ -704,25 +704,38 @@ extension String: @retroactive Identifiable {
 
 struct PhotoPreviewView: View {
     let filename: String
+    let allFilenames: [String]
     var onRename: ((String) -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
 
     @State private var showDatePicker = false
     @State private var selectedDate: Date = Date()
-    @State private var currentFilename: String = ""
+    @State private var currentIndex: Int = 0
+    @State private var photos: [String] = []
+
+    private var currentFilename: String {
+        guard !photos.isEmpty, photos.indices.contains(currentIndex) else { return filename }
+        return photos[currentIndex]
+    }
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            if let image = MediaService.shared.loadPhoto(filename: currentFilename) {
-                ZoomableView {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFit()
+            TabView(selection: $currentIndex) {
+                ForEach(Array(photos.enumerated()), id: \.offset) { index, photo in
+                    ZoomableView {
+                        if let image = MediaService.shared.loadPhoto(filename: photo) {
+                            Image(uiImage: image)
+                                .resizable()
+                                .scaledToFit()
+                        }
+                    }
+                    .tag(index)
                 }
-                .ignoresSafeArea()
             }
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            .ignoresSafeArea()
 
             VStack {
                 HStack {
@@ -733,6 +746,17 @@ struct PhotoPreviewView: View {
                             .padding()
                     }
                     Spacer()
+
+                    if photos.count > 1 {
+                        Text("\(currentIndex + 1) / \(photos.count)")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.white.opacity(0.7))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(.black.opacity(0.4))
+                            .clipShape(Capsule())
+                            .padding(.trailing, 16)
+                    }
                 }
                 Spacer()
 
@@ -754,6 +778,9 @@ struct PhotoPreviewView: View {
                 .padding(.bottom, 16)
             }
         }
+        .onChange(of: currentIndex) { _, _ in
+            selectedDate = MediaService.dateFromFilename(currentFilename) ?? Date()
+        }
         .sheet(isPresented: $showDatePicker) {
             NavigationStack {
                 DatePicker("Photo Date", selection: $selectedDate, displayedComponents: .date)
@@ -765,7 +792,7 @@ struct PhotoPreviewView: View {
                         ToolbarItem(placement: .confirmationAction) {
                             Button("Save") {
                                 if let newName = MediaService.shared.renamePhotoDate(currentFilename, to: selectedDate) {
-                                    currentFilename = newName
+                                    photos[currentIndex] = newName
                                     onRename?(newName)
                                 }
                                 showDatePicker = false
@@ -779,7 +806,8 @@ struct PhotoPreviewView: View {
             .presentationDetents([.medium])
         }
         .onAppear {
-            currentFilename = filename
+            photos = allFilenames
+            currentIndex = allFilenames.firstIndex(of: filename) ?? 0
             selectedDate = MediaService.dateFromFilename(filename) ?? Date()
         }
     }
