@@ -54,8 +54,10 @@ struct ActivityDetailView: View {
             CameraView(
                 activityID: activity.id,
                 activityName: activity.name,
-                onCapture: { image in savePhoto(image) }
-            )
+                slots: activity.photoSlots
+            ) { slotImages in
+                savePhotos(slotImages)
+            }
         }
     }
 
@@ -169,14 +171,19 @@ struct ActivityDetailView: View {
 
     // MARK: - Helpers
 
-    private func savePhoto(_ image: UIImage) {
-        guard let filename = MediaService.shared.savePhoto(
-            image, activityID: activity.id, date: Date()
-        ) else { return }
+    private func savePhotos(_ slotImages: [String: UIImage]) {
+        let date = Date()
+        var filenames: [String: String] = [:]
+        for (slot, image) in slotImages {
+            if let filename = MediaService.shared.savePhoto(image, activityID: activity.id, date: date, slot: slot) {
+                filenames[slot] = filename
+            }
+        }
+        guard !filenames.isEmpty else { return }
 
-        // Create a log entry with the photo
-        let log = ActivityLog(activity: activity, date: Date(), status: .completed)
-        log.photoFilename = filename
+        let log = ActivityLog(activity: activity, date: date, status: .completed)
+        log.photoFilenames = filenames
+        log.photoFilename = filenames.values.first  // Legacy compat
         modelContext.insert(log)
     }
 

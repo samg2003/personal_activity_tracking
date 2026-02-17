@@ -7,7 +7,8 @@ final class ActivityLog {
     var date: Date = Date()
     var statusRaw: String = LogStatus.completed.rawValue
     var value: Double?
-    var photoFilename: String?
+    var photoFilename: String?     // Legacy: single photo
+    var photoFilenamesData: Data?   // Multi-slot: JSON-encoded [String: String] (slot → filename)
     var note: String?
     var skipReason: String?
     var timeSlotRaw: String?
@@ -24,6 +25,29 @@ final class ActivityLog {
     var timeSlot: TimeSlot? {
         get { timeSlotRaw.flatMap { TimeSlot(rawValue: $0) } }
         set { timeSlotRaw = newValue?.rawValue }
+    }
+
+    /// Multi-slot photo filenames (slot name → relative filename)
+    var photoFilenames: [String: String] {
+        get {
+            if let data = photoFilenamesData,
+               let map = try? JSONDecoder().decode([String: String].self, from: data) {
+                return map
+            }
+            return [:]
+        }
+        set {
+            photoFilenamesData = newValue.isEmpty ? nil : (try? JSONEncoder().encode(newValue))
+        }
+    }
+
+    /// All photo file paths from both legacy and multi-slot storage
+    var allPhotoFiles: [String] {
+        var files = Array(photoFilenames.values)
+        if let legacy = photoFilename, !files.contains(legacy) {
+            files.append(legacy)
+        }
+        return files
     }
 
     init(

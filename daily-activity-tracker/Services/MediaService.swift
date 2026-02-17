@@ -16,8 +16,8 @@ final class MediaService {
         return dir
     }
 
-    /// Save a photo for a given activity and date. Returns the filename.
-    func savePhoto(_ image: UIImage, activityID: UUID, date: Date) -> String? {
+    /// Save a photo for a given activity and date. Returns the relative filename.
+    func savePhoto(_ image: UIImage, activityID: UUID, date: Date, slot: String? = nil) -> String? {
         let activityDir = photosDirectory.appendingPathComponent(activityID.uuidString, isDirectory: true)
         if !fileManager.fileExists(atPath: activityDir.path) {
             try? fileManager.createDirectory(at: activityDir, withIntermediateDirectories: true)
@@ -25,7 +25,10 @@ final class MediaService {
 
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd_HHmmss"
-        let filename = "\(formatter.string(from: date)).jpg"
+        let datePart = formatter.string(from: date)
+        // Include sanitized slot name in filename when provided
+        let slotSuffix = slot.map { "_\(Self.sanitize($0))" } ?? ""
+        let filename = "\(datePart)\(slotSuffix).jpg"
         let fileURL = activityDir.appendingPathComponent(filename)
 
         guard let data = image.jpegData(compressionQuality: 0.8) else { return nil }
@@ -55,10 +58,45 @@ final class MediaService {
             .map { "\(activityID.uuidString)/\($0)" }
     }
 
-    /// Get the most recent photo for ghost overlay
-    func latestPhoto(for activityID: UUID) -> UIImage? {
-        guard let latest = allPhotos(for: activityID).last else { return nil }
+    /// Get all photos for a specific slot, sorted chronologically
+    func allPhotos(for activityID: UUID, slot: String) -> [String] {
+        let sanitized = Self.sanitize(slot)
+        return allPhotos(for: activityID).filter { filename in
+            // Match files containing the slot suffix before .jpg
+            let base = filename.replacingOccurrences(of: ".jpg", with: "")
+            return base.hasSuffix("_\(sanitized)")
+        }
+    }
+
+    /// Get the most recent photo for ghost overlay (optionally slot-specific)
+    func latestPhoto(for activityID: UUID, slot: String? = nil) -> UIImage? {
+        let photos: [String]
+        if let slot {
+            photos = allPhotos(for: activityID, slot: slot)
+        } else {
+            photos = allPhotos(for: activityID)
+        }
+        guard let latest = photos.last else { return nil }
         return loadPhoto(filename: latest)
+    }
+
+    /// Sanitize a slot name for safe use in filenames
+    static func sanitize(_ name: String) -> String {
+        name.lowercased()
+            .replacingOccurrences(of: " ", with: "-")
+            .filter { $0.isLetter || $0.isNumber || $0 == "-" }
+    }
+
+    /// Extract the slot name from a photo filename (e.g. "UUID/2026-02-12_083000_front-view.jpg" → "front-view")
+    /// Returns nil for legacy filenames without a slot suffix.
+    static func slotName(from filename: String) -> String? {
+        guard let lastComponent = filename.split(separator: "/").last else { return nil }
+        let base = lastComponent.replacingOccurrences(of: ".jpg", with: "")
+        // Format: yyyy-MM-dd_HHmmss or yyyy-MM-dd_HHmmss_slot-name
+        let parts = base.split(separator: "_", maxSplits: 2)
+        // 3 parts = date + time + slot
+        guard parts.count >= 3 else { return nil }
+        return String(parts[2])
     }
 
     /// Returns all activity UUIDs that have at least one photo

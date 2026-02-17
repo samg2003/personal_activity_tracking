@@ -271,10 +271,20 @@ struct DashboardView: View {
                 NavigationStack {
                     CameraView(
                         activityID: activity.id,
-                        activityName: activity.name
-                    ) { image in
-                        if let filename = MediaService.shared.savePhoto(image, activityID: activity.id, date: today) {
-                            photoPromptLog?.photoFilename = filename
+                        activityName: activity.name,
+                        slots: activity.photoSlots
+                    ) { slotImages in
+                        let date = today
+                        var filenames: [String: String] = [:]
+                        for (slot, image) in slotImages {
+                            if let filename = MediaService.shared.savePhoto(image, activityID: activity.id, date: date, slot: slot) {
+                                filenames[slot] = filename
+                            }
+                        }
+                        if let log = photoPromptLog {
+                            log.photoFilenames = filenames
+                            // Legacy compat: set photoFilename to first captured slot
+                            log.photoFilename = filenames.values.first
                         }
                         photoPromptActivity = nil
                         photoPromptLog = nil

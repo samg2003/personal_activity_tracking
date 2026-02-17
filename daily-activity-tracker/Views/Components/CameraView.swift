@@ -2,19 +2,50 @@ import SwiftUI
 import Observation
 @preconcurrency import AVFoundation
 
-/// Camera view with ghost overlay of previous photo for consistent framing
+/// Camera view with multi-slot sequential capture and per-slot ghost overlay
 struct CameraView: View {
     let activityID: UUID
     let activityName: String
-    let onCapture: (UIImage) -> Void
+    let slots: [String]              // e.g. ["Front", "Left", "Right"]
+    let onComplete: ([String: UIImage]) -> Void  // slot name → captured image
 
     @Environment(\.dismiss) private var dismiss
     @State private var camera = CameraModel()
     @State private var ghostImage: UIImage?
     @State private var showGhost = true
     @State private var ghostOpacity: Double = 0.5
-    @State private var showOpacitySlider = false
+
     @State private var capturedImage: UIImage?
+
+    // Multi-slot state
+    @State private var currentSlotIndex = 0
+    @State private var capturedSlots: [String: UIImage] = [:]
+
+    /// Convenience initializer for legacy single-photo usage
+    init(activityID: UUID, activityName: String, onCapture: @escaping (UIImage) -> Void) {
+        self.activityID = activityID
+        self.activityName = activityName
+        self.slots = ["Photo"]
+        self.onComplete = { images in
+            if let image = images.values.first {
+                onCapture(image)
+            }
+        }
+    }
+
+    /// Full initializer with named slots
+    init(activityID: UUID, activityName: String, slots: [String], onComplete: @escaping ([String: UIImage]) -> Void) {
+        self.activityID = activityID
+        self.activityName = activityName
+        self.slots = slots.isEmpty ? ["Photo"] : slots
+        self.onComplete = onComplete
+    }
+
+    private var currentSlot: String {
+        slots.indices.contains(currentSlotIndex) ? slots[currentSlotIndex] : slots.last ?? "Photo"
+    }
+
+    private var isMultiSlot: Bool { slots.count > 1 }
 
     var body: some View {
         ZStack {
@@ -22,13 +53,11 @@ struct CameraView: View {
 
             switch camera.state {
             case .idle, .starting:
-                // Show spinner while camera initialises
                 ProgressView()
                     .tint(.white)
                     .scaleEffect(1.5)
 
             case .running:
-                // Live camera preview
                 CameraPreviewView(session: camera.session, isFrontCamera: camera.isFrontCamera)
                     .ignoresSafeArea()
 
@@ -39,8 +68,7 @@ struct CameraView: View {
                 cameraUnavailableView
             }
 
-            // Ghost overlay — match camera preview's aspect-fill crop exactly
-            // When front camera, mirror the ghost to match the mirrored preview
+            // Ghost overlay — per-slot
             if camera.state == .running, showGhost, let ghost = ghostImage {
                 GeometryReader { geo in
                     Image(uiImage: ghost)
@@ -55,15 +83,45 @@ struct CameraView: View {
                 .allowsHitTesting(false)
             }
 
-            // Grid lines (only when camera is running)
+            // Grid lines
             if camera.state == .running {
                 GridOverlay()
                     .ignoresSafeArea()
                     .allowsHitTesting(false)
             }
 
-            // Controls — always visible so user can dismiss
-            VStack {
+            // Vertical ghost opacity slider on right edge
+            if camera.state == .running, showGhost, ghostImage != nil {
+                VStack(spacing: 8) {
+                    Image(systemName: "eye.slash")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.7))
+
+                    // Rotated slider: top = low opacity, bottom = high opacity
+                    Slider(value: $ghostOpacity, in: 0.05...0.8)
+                        .tint(.yellow)
+                        .frame(width: 160)
+                        .rotationEffect(.degrees(-90))
+                        .frame(width: 30, height: 160)
+
+                    Image(systemName: "eye.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.7))
+
+                    Text("\(Int(ghostOpacity * 100))%")
+                        .font(.system(size: 10, weight: .medium).monospacedDigit())
+                        .foregroundStyle(.white.opacity(0.8))
+                }
+                .padding(.vertical, 12)
+                .padding(.horizontal, 6)
+                .background(.black.opacity(0.35))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                .padding(.trailing, 8)
+            }
+
+            // Controls
+            VStack(spacing: 0) {
                 // Top bar
                 HStack {
                     Button { dismiss() } label: {
@@ -75,9 +133,16 @@ struct CameraView: View {
 
                     Spacer()
 
-                    Text(activityName)
-                        .font(.headline)
-                        .foregroundStyle(.white)
+                    VStack(spacing: 2) {
+                        Text(activityName)
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                        if isMultiSlot {
+                            Text(currentSlot)
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.yellow)
+                        }
+                    }
 
                     Spacer()
 
@@ -91,85 +156,65 @@ struct CameraView: View {
                 }
                 .background(.ultraThinMaterial.opacity(0.3))
 
-                // Ghost opacity control (collapsed by default, expands on tap)
-                if showGhost, ghostImage != nil, camera.state == .running {
-                    HStack(spacing: 0) {
-                        Button {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                showOpacitySlider.toggle()
-                            }
-                        } label: {
-                            Image(systemName: "circle.lefthalf.filled")
-                                .font(.subheadline)
-                                .foregroundStyle(.white.opacity(0.8))
-                                .frame(width: 36, height: 36)
-                                .background(.ultraThinMaterial.opacity(0.4))
-                                .clipShape(Circle())
-                        }
-
-                        if showOpacitySlider {
-                            HStack(spacing: 8) {
-                                Slider(value: $ghostOpacity, in: 0.1...0.8)
-                                    .tint(.yellow)
-                                    .frame(width: 140)
-                                Text("\(Int(ghostOpacity * 100))%")
-                                    .font(.caption2.monospacedDigit())
-                                    .foregroundStyle(.white.opacity(0.7))
-                                    .frame(width: 30)
-                            }
-                            .padding(.trailing, 10)
-                            .padding(.leading, 6)
-                            .transition(.move(edge: .leading).combined(with: .opacity))
-                        }
-                    }
-                    .padding(.leading, 16)
-                    .padding(.top, 4)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                // Slot progress indicator (multi-slot only)
+                if isMultiSlot, camera.state == .running {
+                    slotProgressBar
+                        .padding(.top, 8)
                 }
 
                 Spacer()
 
-                // Bottom controls (only when camera is running)
+                // Bottom controls
                 if camera.state == .running {
-                    HStack {
-                        // Spacer for symmetry
-                        Color.clear.frame(width: 44, height: 44)
+                    VStack(spacing: 16) {
+                        // Skip slot button (multi-slot only, and must have at least 1 captured)
+                        if isMultiSlot {
+                            Button {
+                                advanceToNextSlot()
+                            } label: {
+                                Text("Skip \(currentSlot)")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.white.opacity(0.8))
+                            }
+                        }
 
-                        Spacer()
+                        HStack {
+                            Color.clear.frame(width: 44, height: 44)
 
-                        // Capture button
-                        Button {
-                            camera.capturePhoto { image in
-                                Task { @MainActor in
-                                    capturedImage = image
+                            Spacer()
+
+                            // Capture button
+                            Button {
+                                camera.capturePhoto { image in
+                                    Task { @MainActor in capturedImage = image }
+                                }
+                            } label: {
+                                ZStack {
+                                    Circle()
+                                        .stroke(.white, lineWidth: 4)
+                                        .frame(width: 72, height: 72)
+                                    Circle()
+                                        .fill(.white)
+                                        .frame(width: 60, height: 60)
                                 }
                             }
-                        } label: {
-                            ZStack {
-                                Circle()
-                                    .stroke(.white, lineWidth: 4)
-                                    .frame(width: 72, height: 72)
-                                Circle()
-                                    .fill(.white)
-                                    .frame(width: 60, height: 60)
+
+                            Spacer()
+
+                            // Flip camera
+                            Button {
+                                camera.flipCamera()
+                            } label: {
+                                Image(systemName: "camera.rotate.fill")
+                                    .font(.title2)
+                                    .foregroundStyle(.white)
+                                    .frame(width: 44, height: 44)
+                                    .background(.white.opacity(0.15))
+                                    .clipShape(Circle())
                             }
                         }
-
-                        Spacer()
-
-                        // Flip camera button
-                        Button {
-                            camera.flipCamera()
-                        } label: {
-                            Image(systemName: "camera.rotate.fill")
-                                .font(.title2)
-                                .foregroundStyle(.white)
-                                .frame(width: 44, height: 44)
-                                .background(.white.opacity(0.15))
-                                .clipShape(Circle())
-                        }
+                        .padding(.horizontal, 32)
                     }
-                    .padding(.horizontal, 32)
                     .padding(.bottom, 40)
                 }
             }
@@ -181,11 +226,33 @@ struct CameraView: View {
         }
         .onAppear {
             camera.checkPermissions()
-            ghostImage = MediaService.shared.latestPhoto(for: activityID)
+            loadGhostForCurrentSlot()
         }
         .onDisappear {
             camera.stop()
         }
+    }
+
+    // MARK: - Slot Progress Bar
+
+    private var slotProgressBar: some View {
+        HStack(spacing: 6) {
+            ForEach(Array(slots.enumerated()), id: \.offset) { index, slot in
+                let isCurrent = index == currentSlotIndex
+                let isCaptured = capturedSlots[slot] != nil
+
+                VStack(spacing: 3) {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(isCaptured ? Color.green : (isCurrent ? Color.yellow : Color.white.opacity(0.3)))
+                        .frame(height: 3)
+
+                    Text(slot)
+                        .font(.system(size: 9, weight: isCurrent ? .bold : .regular))
+                        .foregroundStyle(isCurrent ? .yellow : .white.opacity(0.6))
+                }
+            }
+        }
+        .padding(.horizontal, 24)
     }
 
     // MARK: - Permission Denied
@@ -222,7 +289,7 @@ struct CameraView: View {
         }
     }
 
-    // MARK: - Camera Unavailable (e.g. Simulator)
+    // MARK: - Camera Unavailable
 
     private var cameraUnavailableView: some View {
         VStack(spacing: 16) {
@@ -251,6 +318,21 @@ struct CameraView: View {
                 .resizable()
                 .scaledToFit()
 
+            // Show which slot this is for
+            if isMultiSlot {
+                VStack {
+                    Text(currentSlot)
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(.black.opacity(0.5))
+                        .clipShape(Capsule())
+                        .padding(.top, 60)
+                    Spacer()
+                }
+            }
+
             VStack {
                 Spacer()
                 HStack(spacing: 40) {
@@ -266,10 +348,10 @@ struct CameraView: View {
                     }
 
                     Button {
-                        onCapture(image)
-                        dismiss()
+                        acceptCurrentPhoto(image)
                     } label: {
-                        Label("Use Photo", systemImage: "checkmark")
+                        let buttonText = isLastSlot ? "Done" : "Next: \(nextSlotName)"
+                        Label(buttonText, systemImage: isLastSlot ? "checkmark" : "arrow.right")
                             .font(.headline)
                             .foregroundStyle(.black)
                             .padding()
@@ -280,6 +362,52 @@ struct CameraView: View {
                 .padding(.bottom, 40)
             }
         }
+    }
+
+    // MARK: - Slot Navigation
+
+    private var isLastSlot: Bool {
+        currentSlotIndex >= slots.count - 1
+    }
+
+    private var nextSlotName: String {
+        let next = currentSlotIndex + 1
+        return slots.indices.contains(next) ? slots[next] : ""
+    }
+
+    private func acceptCurrentPhoto(_ image: UIImage) {
+        capturedSlots[currentSlot] = image
+        capturedImage = nil
+
+        if isLastSlot {
+            finishCapture()
+        } else {
+            advanceToNextSlot()
+        }
+    }
+
+    private func advanceToNextSlot() {
+        capturedImage = nil
+        if currentSlotIndex < slots.count - 1 {
+            currentSlotIndex += 1
+            loadGhostForCurrentSlot()
+        } else {
+            // All slots done (or skipped)
+            finishCapture()
+        }
+    }
+
+    private func finishCapture() {
+        guard !capturedSlots.isEmpty else {
+            dismiss()
+            return
+        }
+        onComplete(capturedSlots)
+        dismiss()
+    }
+
+    private func loadGhostForCurrentSlot() {
+        ghostImage = MediaService.shared.latestPhoto(for: activityID, slot: currentSlot)
     }
 }
 
@@ -303,23 +431,21 @@ struct GridOverlay: View {
                 path.move(to: CGPoint(x: 0, y: 2 * h / 3))
                 path.addLine(to: CGPoint(x: w, y: 2 * h / 3))
             }
-            .stroke(.white.opacity(0.25), lineWidth: 0.5)
+            .stroke(.white.opacity(0.15), lineWidth: 0.5)
         }
     }
 }
 
-// MARK: - Camera Model (AVFoundation)
+// MARK: - Camera State & Model
 
 enum CameraState: Equatable {
-    case idle       // Not yet checked permissions
-    case starting   // Permission granted, session starting
-    case running    // Session is running, preview visible
-    case denied     // User denied camera permission
-    case unavailable // No camera on device (e.g. simulator)
+    case idle
+    case starting
+    case running
+    case denied
+    case unavailable
 }
 
-/// Manages AVCaptureSession lifecycle. Uses nonisolated(unsafe) for
-/// non-Sendable AVFoundation types that are only used on known queues.
 @Observable
 final class CameraModel: NSObject {
     nonisolated(unsafe) let session = AVCaptureSession()
@@ -353,11 +479,11 @@ final class CameraModel: NSObject {
 
     private func setupSession() {
         guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else {
-            // Try front camera as fallback
             guard let frontDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front) else {
                 state = .unavailable
                 return
             }
+            isFrontCamera = true
             configureSession(with: frontDevice)
             return
         }
@@ -398,7 +524,6 @@ final class CameraModel: NSObject {
               let newInput = try? AVCaptureDeviceInput(device: newDevice) else { return }
 
         session.beginConfiguration()
-        // Remove existing camera input
         if let currentInput = session.inputs.first as? AVCaptureDeviceInput {
             session.removeInput(currentInput)
         }
@@ -421,17 +546,14 @@ extension CameraModel: AVCapturePhotoCaptureDelegate {
         guard let data = photo.fileDataRepresentation(),
               let image = UIImage(data: data) else { return }
         // AVCapturePhotoOutput returns the true orientation (how others see you)
-        // regardless of the mirrored preview — no manual flip needed
         DispatchQueue.main.async { [weak self] in
             self?.completion?(image)
         }
     }
 }
 
-
 // MARK: - Camera Preview (UIViewRepresentable)
 
-/// Uses a custom UIView subclass to keep the preview layer frame in sync via layoutSubviews
 struct CameraPreviewView: UIViewRepresentable {
     let session: AVCaptureSession
     var isFrontCamera: Bool
@@ -447,7 +569,6 @@ struct CameraPreviewView: UIViewRepresentable {
         // Layout handled by PreviewUIView via layerClass
     }
 
-    /// UIView subclass that keeps its AVCaptureVideoPreviewLayer sized to bounds
     class PreviewUIView: UIView {
         override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
 

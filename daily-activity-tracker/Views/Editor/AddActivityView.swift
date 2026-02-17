@@ -36,6 +36,8 @@ struct AddActivityView: View {
 
     // Metric config (only when type == .metric)
     @State private var selectedMetricKind: MetricKind = .value
+    @State private var photoSlots: [String] = ["Photo"]
+    @State private var newSlotName: String = ""
 
     // HealthKit
     @State private var enableHealthKit = false
@@ -328,6 +330,11 @@ struct AddActivityView: View {
         if let kind = activity.metricKind {
             selectedMetricKind = kind
         }
+
+        // Restore Photo Slots
+        if activity.type == .metric && activity.metricKind == .photo {
+            photoSlots = activity.photoSlots
+        }
         
         // Restore Category/Parent
         selectedCategory = activity.category
@@ -522,6 +529,51 @@ struct AddActivityView: View {
                 case .value: Text("Log a numeric value each time you track.")
                 case .checkbox: Text("Mark a milestone as achieved or not yet.")
                 case .notes: Text("Write qualitative observations.")
+                }
+            }
+
+            // Photo slot editor (only when metric kind is photo)
+            if selectedMetricKind == .photo {
+                Section {
+                    ForEach(Array(photoSlots.enumerated()), id: \.offset) { index, slot in
+                        HStack {
+                            Image(systemName: "camera.fill")
+                                .foregroundStyle(.secondary)
+                                .frame(width: 24)
+                            TextField("Slot name", text: Binding(
+                                get: { photoSlots.indices.contains(index) ? photoSlots[index] : "" },
+                                set: { if photoSlots.indices.contains(index) { photoSlots[index] = $0 } }
+                            ))
+                            if photoSlots.count > 1 {
+                                Button {
+                                    photoSlots.remove(at: index)
+                                } label: {
+                                    Image(systemName: "minus.circle.fill")
+                                        .foregroundStyle(.red)
+                                }
+                            }
+                        }
+                    }
+
+                    HStack {
+                        Image(systemName: "plus.circle.fill")
+                            .foregroundStyle(.green)
+                            .frame(width: 24)
+                        TextField("Add view (e.g. Front, Left, Right)", text: $newSlotName)
+                            .onSubmit {
+                                addPhotoSlot()
+                            }
+                        if !newSlotName.trimmingCharacters(in: .whitespaces).isEmpty {
+                            Button("Add") {
+                                addPhotoSlot()
+                            }
+                            .font(.subheadline.weight(.medium))
+                        }
+                    }
+                } header: {
+                    Text("Photo Views")
+                } footer: {
+                    Text("Define which angles/views to capture. At least one photo is required to complete the activity.")
                 }
             }
         case .checkbox:
@@ -899,6 +951,9 @@ struct AddActivityView: View {
 
                 if effectiveType == .metric {
                     activity.metricKind = selectedMetricKind
+                    if selectedMetricKind == .photo {
+                        activity.photoSlots = photoSlots.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+                    }
                 }
 
                 if effectiveType == .value || effectiveType == .cumulative || (effectiveType == .metric && selectedMetricKind == .value) {
@@ -984,6 +1039,9 @@ struct AddActivityView: View {
 
             if selectedType == .metric {
                 activity.metricKind = selectedMetricKind
+                if selectedMetricKind == .photo {
+                    activity.photoSlots = photoSlots.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+                }
             }
 
             if selectedType != .container {
@@ -1023,6 +1081,13 @@ struct AddActivityView: View {
                 activity.healthKitModeRaw = nil
             }
         }
+    }
+
+    private func addPhotoSlot() {
+        let trimmed = newSlotName.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        photoSlots.append(trimmed)
+        newSlotName = ""
     }
 }
 

@@ -26,7 +26,8 @@ struct PhotoBankView: View {
                         ActivityPhotosGridView(
                             activityName: item.activity.name,
                             activityColor: item.activity.hexColor,
-                            filenames: item.filenames
+                            filenames: item.filenames,
+                            photoSlots: item.activity.photoSlots
                         ) {
                             refreshData()
                         }
@@ -44,7 +45,8 @@ struct PhotoBankView: View {
                             ActivityPhotosGridView(
                                 activityName: "Deleted Activity",
                                 activityColor: "#888888",
-                                filenames: item.filenames
+                                filenames: item.filenames,
+                                photoSlots: []
                             ) {
                                 refreshData()
                             }
@@ -171,10 +173,192 @@ struct PhotoBankView: View {
     }
 }
 
-// MARK: - Photo Grid (per activity)
+// MARK: - Photo Grid (per activity, grouped by slot)
 
-/// Grid view of all photos for a single activity, with multi-select and delete
+/// Grid view of all photos for a single activity, grouped by photo slot
 struct ActivityPhotosGridView: View {
+    let activityName: String
+    let activityColor: String
+    let filenames: [String]
+    let photoSlots: [String]  // Activity's defined slot names
+    let onDelete: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var photos: [String] = []
+    @State private var previewPhoto: String?
+
+    private let maxPreviewCount = 20
+
+    private let columns = [
+        GridItem(.flexible(), spacing: 2),
+        GridItem(.flexible(), spacing: 2),
+        GridItem(.flexible(), spacing: 2)
+    ]
+
+    /// Groups photos by their sanitized slot suffix, maintaining defined slot order
+    private var slotGroups: [(label: String, photos: [String])] {
+        guard photoSlots.count > 1 else { return [] }
+
+        var groups: [(label: String, photos: [String])] = []
+
+        for slot in photoSlots {
+            let sanitized = MediaService.sanitize(slot)
+            let matching = photos.filter { filename in
+                MediaService.slotName(from: filename) == sanitized
+            }
+            if !matching.isEmpty {
+                groups.append((slot, matching))
+            }
+        }
+
+        // Catch any photos without a matching slot (legacy or unrecognized)
+        let allGrouped = Set(groups.flatMap(\.photos))
+        let ungrouped = photos.filter { !allGrouped.contains($0) }
+        if !ungrouped.isEmpty {
+            groups.append(("Other", ungrouped))
+        }
+
+        return groups
+    }
+
+    private var isSingleSlot: Bool { photoSlots.count <= 1 }
+
+    var body: some View {
+        ScrollView {
+            if photos.isEmpty {
+                ContentUnavailableView(
+                    "No Photos",
+                    systemImage: "photo.on.rectangle.angled",
+                    description: Text("All photos have been deleted.")
+                )
+                .padding(.top, 60)
+            } else if isSingleSlot {
+                // Flat grid for single-slot activities
+                LazyVGrid(columns: columns, spacing: 2) {
+                    ForEach(photos, id: \.self) { filename in
+                        photoCell(filename)
+                    }
+                }
+                .padding(.horizontal, 2)
+            } else {
+                // Grouped by slot
+                LazyVStack(alignment: .leading, spacing: 20) {
+                    ForEach(slotGroups, id: \.label) { group in
+                        slotSection(group.label, photos: group.photos)
+                    }
+                }
+                .padding(.horizontal, 2)
+            }
+        }
+        .navigationTitle(activityName)
+        .navigationBarTitleDisplayMode(.inline)
+        .fullScreenCover(item: $previewPhoto) { filename in
+            PhotoPreviewView(filename: filename)
+        }
+        .onAppear { photos = filenames }
+    }
+
+    // MARK: - Slot Section
+
+    @ViewBuilder
+    private func slotSection(_ label: String, photos: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            NavigationLink {
+                SlotPhotosView(
+                    slotName: label,
+                    activityName: activityName,
+                    activityColor: activityColor,
+                    filenames: photos,
+                    onDelete: {
+                        self.photos.removeAll { photos.contains($0) }
+                        onDelete()
+                    }
+                )
+            } label: {
+                HStack(spacing: 6) {
+                    Text(label)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Text("\(photos.count)")
+                        .font(.caption.weight(.medium).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(.secondary.opacity(0.15))
+                        .clipShape(Capsule())
+                    Spacer()
+                    if photos.count > maxPreviewCount {
+                        Text("See All")
+                            .font(.caption)
+                            .foregroundStyle(Color(hex: activityColor))
+                    }
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+            }
+            .buttonStyle(.plain)
+
+            // Show up to maxPreviewCount photos
+            LazyVGrid(columns: columns, spacing: 2) {
+                ForEach(Array(photos.prefix(maxPreviewCount)), id: \.self) { filename in
+                    photoCell(filename)
+                }
+            }
+        }
+    }
+
+    // MARK: - Photo Cell
+
+    @ViewBuilder
+    private func photoCell(_ filename: String) -> some View {
+        Button {
+            previewPhoto = filename
+        } label: {
+            ZStack(alignment: .bottomLeading) {
+                if let image = MediaService.shared.loadPhoto(filename: filename) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0)
+                        .aspectRatio(1, contentMode: .fill)
+                        .clipped()
+                } else {
+                    Color.gray.opacity(0.2)
+                        .aspectRatio(1, contentMode: .fill)
+                }
+
+                if let date = dateFromFilename(filename) {
+                    Text(date)
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(.black.opacity(0.5))
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                        .padding(4)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func dateFromFilename(_ filename: String) -> String? {
+        guard let lastComponent = filename.split(separator: "/").last else { return nil }
+        let name = lastComponent.replacingOccurrences(of: ".jpg", with: "")
+        let parts = name.split(separator: "_")
+        guard let datePart = parts.first else { return nil }
+        return String(datePart)
+    }
+}
+
+// MARK: - Slot Photos (full view with multi-select & delete)
+
+/// Full photo grid for a single slot, with selection and delete capabilities
+struct SlotPhotosView: View {
+    let slotName: String
     let activityName: String
     let activityColor: String
     let filenames: [String]
@@ -199,19 +383,19 @@ struct ActivityPhotosGridView: View {
                 ContentUnavailableView(
                     "No Photos",
                     systemImage: "photo.on.rectangle.angled",
-                    description: Text("All photos have been deleted.")
+                    description: Text("All photos for this view have been deleted.")
                 )
                 .padding(.top, 60)
             } else {
                 LazyVGrid(columns: columns, spacing: 2) {
                     ForEach(photos, id: \.self) { filename in
-                        photoCell(filename)
+                        slotPhotoCell(filename)
                     }
                 }
                 .padding(.horizontal, 2)
             }
         }
-        .navigationTitle(activityName)
+        .navigationTitle(slotName)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -222,7 +406,6 @@ struct ActivityPhotosGridView: View {
                     }
                 }
             }
-
             if isSelecting {
                 ToolbarItem(placement: .topBarLeading) {
                     Button(selectedPhotos.count == photos.count ? "Deselect All" : "Select All") {
@@ -235,7 +418,6 @@ struct ActivityPhotosGridView: View {
                     .font(.subheadline)
                 }
             }
-
             if isSelecting && !selectedPhotos.isEmpty {
                 ToolbarItem(placement: .bottomBar) {
                     Button(role: .destructive) {
@@ -268,19 +450,13 @@ struct ActivityPhotosGridView: View {
         .onAppear { photos = filenames }
     }
 
-    // MARK: - Photo Cell
-
     @ViewBuilder
-    private func photoCell(_ filename: String) -> some View {
+    private func slotPhotoCell(_ filename: String) -> some View {
         let isSelected = selectedPhotos.contains(filename)
-
         Button {
             if isSelecting {
-                if isSelected {
-                    selectedPhotos.remove(filename)
-                } else {
-                    selectedPhotos.insert(filename)
-                }
+                if isSelected { selectedPhotos.remove(filename) }
+                else { selectedPhotos.insert(filename) }
             } else {
                 previewPhoto = filename
             }
@@ -305,22 +481,6 @@ struct ActivityPhotosGridView: View {
                         .shadow(radius: 2)
                         .padding(6)
                 }
-
-                // Date label at bottom
-                if let date = dateFromFilename(filename) {
-                    VStack {
-                        Spacer()
-                        Text(date)
-                            .font(.system(size: 9, weight: .medium))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 1)
-                            .background(.black.opacity(0.5))
-                            .clipShape(RoundedRectangle(cornerRadius: 3))
-                            .padding(4)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
             }
             .overlay {
                 if isSelected {
@@ -330,15 +490,6 @@ struct ActivityPhotosGridView: View {
             }
         }
         .buttonStyle(.plain)
-    }
-
-    private func dateFromFilename(_ filename: String) -> String? {
-        // filename format: "UUID/yyyy-MM-dd_HHmmss.jpg"
-        guard let lastComponent = filename.split(separator: "/").last else { return nil }
-        let name = lastComponent.replacingOccurrences(of: ".jpg", with: "")
-        let parts = name.split(separator: "_")
-        guard let datePart = parts.first else { return nil }
-        return String(datePart) // "yyyy-MM-dd"
     }
 }
 

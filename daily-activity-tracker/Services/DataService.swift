@@ -39,6 +39,7 @@ final class DataService {
         let targetValue: Double?
         let unit: String?
         let metricKindRaw: String?
+        let photoSlotsData: Data?
         let sortOrder: Int
         let isArchived: Bool
         let createdAt: Date
@@ -54,6 +55,7 @@ final class DataService {
              typeRaw: String, scheduleData: Data?, timeWindowData: Data?,
              timeSlotsData: Data?,
              targetValue: Double?, unit: String?, metricKindRaw: String?,
+             photoSlotsData: Data? = nil,
              sortOrder: Int, isArchived: Bool,
              createdAt: Date, categoryID: UUID?, parentID: UUID?,
              stoppedAt: Date? = nil,
@@ -65,6 +67,7 @@ final class DataService {
             self.timeWindowData = timeWindowData; self.timeSlotsData = timeSlotsData
             self.targetValue = targetValue; self.unit = unit
             self.metricKindRaw = metricKindRaw
+            self.photoSlotsData = photoSlotsData
             self.sortOrder = sortOrder; self.isArchived = isArchived
             self.createdAt = createdAt; self.categoryID = categoryID; self.parentID = parentID
             self.stoppedAt = stoppedAt; self.healthKitTypeID = healthKitTypeID
@@ -86,6 +89,7 @@ final class DataService {
             targetValue = try c.decodeIfPresent(Double.self, forKey: .targetValue)
             unit = try c.decodeIfPresent(String.self, forKey: .unit)
             metricKindRaw = try c.decodeIfPresent(String.self, forKey: .metricKindRaw)
+            photoSlotsData = try c.decodeIfPresent(Data.self, forKey: .photoSlotsData)
             sortOrder = try c.decodeIfPresent(Int.self, forKey: .sortOrder) ?? 0
             isArchived = try c.decodeIfPresent(Bool.self, forKey: .isArchived) ?? false
             createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
@@ -106,6 +110,7 @@ final class DataService {
         let statusRaw: String
         let value: Double?
         let photoFilename: String?
+        let photoFilenamesData: Data?
         let note: String?
         let skipReason: String?
         let timeSlotRaw: String?
@@ -113,10 +118,13 @@ final class DataService {
         let activityID: UUID
 
         init(id: UUID, date: Date, statusRaw: String, value: Double?,
-             photoFilename: String?, note: String?, skipReason: String?,
+             photoFilename: String?, photoFilenamesData: Data? = nil,
+             note: String?, skipReason: String?,
              timeSlotRaw: String?, completedAt: Date?, activityID: UUID) {
             self.id = id; self.date = date; self.statusRaw = statusRaw
-            self.value = value; self.photoFilename = photoFilename; self.note = note
+            self.value = value; self.photoFilename = photoFilename
+            self.photoFilenamesData = photoFilenamesData
+            self.note = note
             self.skipReason = skipReason; self.timeSlotRaw = timeSlotRaw
             self.completedAt = completedAt; self.activityID = activityID
         }
@@ -128,6 +136,7 @@ final class DataService {
             statusRaw = try c.decodeIfPresent(String.self, forKey: .statusRaw) ?? "completed"
             value = try c.decodeIfPresent(Double.self, forKey: .value)
             photoFilename = try c.decodeIfPresent(String.self, forKey: .photoFilename)
+            photoFilenamesData = try c.decodeIfPresent(Data.self, forKey: .photoFilenamesData)
             note = try c.decodeIfPresent(String.self, forKey: .note)
             skipReason = try c.decodeIfPresent(String.self, forKey: .skipReason)
             timeSlotRaw = try c.decodeIfPresent(String.self, forKey: .timeSlotRaw)
@@ -265,6 +274,7 @@ final class DataService {
                 targetValue: $0.targetValue,
                 unit: $0.unit,
                 metricKindRaw: $0.metricKindRaw,
+                photoSlotsData: $0.photoSlotsData,
                 sortOrder: $0.sortOrder,
                 isArchived: $0.isArchived,
                 createdAt: $0.createdDate,
@@ -283,6 +293,7 @@ final class DataService {
             return LogDTO(
                 id: log.id, date: log.date, statusRaw: log.statusRaw,
                 value: log.value, photoFilename: log.photoFilename,
+                photoFilenamesData: log.photoFilenamesData,
                 note: log.note, skipReason: log.skipReason,
                 timeSlotRaw: log.timeSlotRaw,
                 completedAt: log.completedAt, activityID: actID
@@ -416,6 +427,7 @@ final class DataService {
             act.healthKitTypeID = dto.healthKitTypeID
             act.healthKitModeRaw = dto.healthKitModeRaw
             act.aggregationModeRaw = dto.aggregationModeRaw
+            act.photoSlotsData = dto.photoSlotsData
             
             context.insert(act)
             activityMap[dto.id] = act
@@ -438,6 +450,7 @@ final class DataService {
             let log = ActivityLog(activity: act, date: dto.date, status: LogStatus(rawValue: dto.statusRaw) ?? .completed, value: dto.value)
             log.id = dto.id
             log.photoFilename = dto.photoFilename
+            log.photoFilenamesData = dto.photoFilenamesData
             log.note = dto.note
             log.skipReason = dto.skipReason
             log.timeSlotRaw = dto.timeSlotRaw

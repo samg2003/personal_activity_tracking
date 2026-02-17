@@ -84,7 +84,11 @@ Defines the trackers themselves.
   "pausedParentId": "UUID-OF-FORMER-CONTAINER",
   
   // Carry forward missed weekly/monthly occurrences (default: false, metrics default: true)
-  "carryForward": true
+  "carryForward": true,
+  
+  // Encoded [String] array of named photo slots (Optional, photo-metric only)
+  // Default: ["Photo"] for single-slot backward compat
+  "photoSlotsData": "BASE64-ENCODED-JSON-STRING"
 }
 ```
 
@@ -111,19 +115,22 @@ Records of activity completion.
   "value": 500,
   "completedAt": "2026-02-15T08:30:00Z",
   "photoFilename": null,
+  "photoFilenamesData": null,
   "skipReason": null,
   "timeSlotRaw": "morning"
 }
 ```
 
-| Field         | Type    | Description                                                       |
-| :------------ | :------ | :---------------------------------------------------------------- |
-| `activityID`  | UUID    | ID of the parent activity.                                        |
-| `date`        | ISO8601 | The "Day" of the log (usually 00:00:00 time).                     |
-| `statusRaw`   | String  | `"completed"` or `"skipped"`.                                     |
-| `value`       | Double  | (Optional) Numeric value for value/cumulative types.              |
-| `completedAt` | ISO8601 | (Optional) Exact timestamp of completion.                         |
-| `timeSlotRaw` | String  | (Optional) Session slot: `"morning"`, `"afternoon"`, `"evening"`. |
+| Field                | Type    | Description                                                                |
+| :------------------- | :------ | :------------------------------------------------------------------------- |
+| `activityID`         | UUID    | ID of the parent activity.                                                 |
+| `date`               | ISO8601 | The "Day" of the log (usually 00:00:00 time).                              |
+| `statusRaw`          | String  | `"completed"` or `"skipped"`.                                              |
+| `value`              | Double  | (Optional) Numeric value for value/cumulative types.                       |
+| `completedAt`        | ISO8601 | (Optional) Exact timestamp of completion.                                  |
+| `photoFilename`      | String  | (Optional) Legacy single photo filename.                                   |
+| `photoFilenamesData` | Data    | (Optional) JSON-encoded `{"slot": "filename"}` dict for multi-slot photos. |
+| `timeSlotRaw`        | String  | (Optional) Session slot: `"morning"`, `"afternoon"`, `"evening"`.          |
 
 ---
 

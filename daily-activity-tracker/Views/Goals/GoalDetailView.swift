@@ -297,7 +297,7 @@ struct GoalDetailView: View {
     @ViewBuilder
     private func photoMetricDisplay(activity: Activity) -> some View {
         let photoLogs = activity.logs
-            .filter { $0.photoFilename != nil }
+            .filter { !$0.allPhotoFiles.isEmpty }
             .sorted { $0.date > $1.date }
             .prefix(6)
 
@@ -312,7 +312,7 @@ struct GoalDetailView: View {
                         .fill(Color(hex: goal.hexColor).opacity(0.2))
                         .frame(height: 50)
                         .overlay {
-                            if let filename = log.photoFilename,
+                            if let filename = log.allPhotoFiles.first,
                                let uiImage = MediaService.shared.loadPhoto(filename: filename) {
                                 Image(uiImage: uiImage)
                                     .resizable()

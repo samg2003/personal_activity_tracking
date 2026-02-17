@@ -36,6 +36,7 @@ final class Activity {
     var targetValue: Double?
     var unit: String?
     var metricKindRaw: String?  // Only when type == .metric
+    var photoSlotsData: Data?   // Encoded [String] of slot names for photo metrics
     var aggregationModeRaw: String?  // Only cumulative: "sum" (default) or "average"
     var sortOrder: Int = 0
     /// @deprecated — Kept for SwiftData schema; use `isStopped` instead.
@@ -98,6 +99,25 @@ final class Activity {
     var metricKind: MetricKind? {
         get { metricKindRaw.flatMap { MetricKind(rawValue: $0) } }
         set { metricKindRaw = newValue?.rawValue }
+    }
+
+    /// Named photo slots for photo metrics (e.g. ["Front", "Left", "Right"])
+    var photoSlots: [String] {
+        get {
+            if let data = photoSlotsData,
+               let slots = try? JSONDecoder().decode([String].self, from: data),
+               !slots.isEmpty {
+                return slots
+            }
+            return ["Photo"]  // Default single slot for backward compat
+        }
+        set {
+            if newValue.count <= 1 && newValue.first == "Photo" {
+                photoSlotsData = nil  // Don't store the default
+            } else {
+                photoSlotsData = try? JSONEncoder().encode(newValue)
+            }
+        }
     }
 
     var aggregationMode: AggregationMode {

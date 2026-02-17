@@ -430,7 +430,7 @@ daily-activity-tracker/
 | -------------------- | ------------------------------------------------------------------------------- | ---------------------------------------------------- |
 | **P0: Foundation**   | Models, ScheduleEngine, Dashboard (Checkbox only)                               | Working today-view with tap-to-complete              |
 | **P1: Rich Types**   | Value, Cumulative, Container hierarchy, partial scoring                         | All activity types functional                        |
-| **P2: Photos**       | MediaService, CameraView (ghost), PhotoTimeline                                 | Photo capture and review                             |
+| **P2: Photos**       | MediaService, CameraView (ghost, multi-slot), PhotoTimeline, PhotoBank          | Photo capture with sequential multi-slot support     |
 | **P3: Analytics**    | InsightSummaryCard, Heatmap, ValueChart, streaks, behind schedule, biggest wins | Activity-focused analytics and habit insights        |
 | **P4: Integrations** | HealthKit, Notifications, EventKit                                              | External system connections                          |
 | **P5: Polish**       | Past-day browser, vacation mode, haptics, undo                                  | Full UX refinement including editing, deleting, etc. |
