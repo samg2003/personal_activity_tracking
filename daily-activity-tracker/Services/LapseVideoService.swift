@@ -35,61 +35,151 @@ enum VideoResolution: String, CaseIterable, Identifiable {
 }
 
 /// Stitches an array of photos into a video file for smooth time-lapse playback.
+/// Simple design: disk-cached videos keyed by content hash, serial build queue.
 final class LapseVideoService {
     static let shared = LapseVideoService()
     private init() {}
 
     private let queue = DispatchQueue(label: "com.simplyloop.lapsevideo", qos: .userInitiated)
-    private var cache: [String: URL] = [:] // cacheKey -> video URL
 
     /// Duration each photo is shown in the video (seconds)
     private let frameDuration: Double = 0.4
 
-    /// Generate a time-lapse video from photos. Returns the file URL on completion.
-    /// Cached on disk — survives app restarts. Only regenerates when photo count changes.
-    /// `progress` is called on main thread with (currentFrame, totalFrames).
+    /// Keys currently being built (prevents duplicate builds)
+    private var building: Set<String> = []
+
+    /// Shared progress per build so late viewers can read it
+    private(set) var buildProgress: [String: (current: Int, total: Int)] = [:]
+
+    // MARK: - Public API
+
+    /// Pre-generate lapse videos for an activity after a new photo is saved.
+    /// Runs in background, fire-and-forget.
+    func preGenerateVideos(activityID: UUID, photoSlots: [String]) {
+        let media = MediaService.shared
+
+        let entries: [(slot: String, photos: [String])]
+        if photoSlots.count <= 1 {
+            let all = media.allPhotos(for: activityID)
+            guard !all.isEmpty else { return }
+            entries = [(slot: photoSlots.first ?? "Photos", photos: all)]
+        } else {
+            entries = photoSlots.compactMap { slot in
+                let sanitized = MediaService.sanitize(slot)
+                let photos = media.allPhotos(for: activityID, slot: sanitized)
+                return photos.isEmpty ? nil : (slot: slot, photos: photos)
+            }
+        }
+
+        for entry in entries {
+            let key = "\(activityID.uuidString)_\(entry.slot)_\(entry.photos.count)"
+            startBuildIfNeeded(photos: entry.photos, cacheKey: key, progress: nil, completion: nil)
+        }
+    }
+
+    /// Generate (or retrieve cached) time-lapse video.
+    /// `progress` fires on main thread with (currentFrame, totalFrames).
+    /// `completion` fires on main thread with the video URL (or nil on failure).
     func generateVideo(
         photos: [String],
         cacheKey: String,
         progress: ((Int, Int) -> Void)? = nil,
         completion: @escaping (URL?) -> Void
     ) {
-        let filename = "\(cacheKey).mp4"
-        let fileURL = cacheDirectory().appendingPathComponent(filename)
+        let fileURL = videoURL(for: cacheKey)
 
-        // Check in-memory cache first
-        if let cached = cache[cacheKey], FileManager.default.fileExists(atPath: cached.path) {
-            completion(cached)
-            return
-        }
-
-        // Check disk cache (survives app restart)
+        // Already built? Return immediately.
         if FileManager.default.fileExists(atPath: fileURL.path) {
-            cache[cacheKey] = fileURL
             completion(fileURL)
             return
         }
 
-        // Clean up old versions with different photo counts
-        cleanStaleVideos(baseKey: cacheKey)
+        // Build already in-flight from pre-generation? Poll for the file.
+        if building.contains(cacheKey) {
+            pollForFile(cacheKey: cacheKey, progress: progress, completion: completion)
+            return
+        }
+
+        // Not cached, not building — start a new build
+        startBuildIfNeeded(photos: photos, cacheKey: cacheKey, progress: progress, completion: completion)
+    }
+
+    /// Start a build if one isn't already running for this key
+    private func startBuildIfNeeded(
+        photos: [String],
+        cacheKey: String,
+        progress: ((Int, Int) -> Void)?,
+        completion: ((URL?) -> Void)?
+    ) {
+        let fileURL = videoURL(for: cacheKey)
+
+        // Skip if already built or already building
+        guard !FileManager.default.fileExists(atPath: fileURL.path),
+              !building.contains(cacheKey) else {
+            completion?(fileURL)
+            return
+        }
+
+        building.insert(cacheKey)
+        cleanStaleVideos(prefix: stablePrefix(from: cacheKey))
 
         queue.async { [weak self] in
-            guard let self else { return }
-            let url = self.buildVideo(from: photos, outputURL: fileURL, progress: progress)
-            DispatchQueue.main.async {
-                if let url {
-                    self.cache[cacheKey] = url
+            let url = self?.buildVideo(from: photos, outputURL: fileURL) { current, total in
+                DispatchQueue.main.async {
+                    self?.buildProgress[cacheKey] = (current, total)
+                    progress?(current, total)
                 }
-                completion(url)
+            }
+            DispatchQueue.main.async {
+                self?.building.remove(cacheKey)
+                self?.buildProgress.removeValue(forKey: cacheKey)
+                completion?(url)
+            }
+        }
+    }
+
+    /// Poll for an in-flight build to finish, forwarding shared progress
+    private func pollForFile(
+        cacheKey: String,
+        progress: ((Int, Int) -> Void)?,
+        completion: @escaping (URL?) -> Void
+    ) {
+        let fileURL = videoURL(for: cacheKey)
+
+        // Immediately deliver current progress if available
+        if let p = buildProgress[cacheKey] {
+            progress?(p.current, p.total)
+        }
+
+        // Check every 0.3s
+        Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { [weak self] timer in
+            // Forward progress
+            if let p = self?.buildProgress[cacheKey] {
+                progress?(p.current, p.total)
+            }
+
+            // Check if file is ready (atomic .tmp → .mp4 rename means it's complete)
+            if FileManager.default.fileExists(atPath: fileURL.path) {
+                timer.invalidate()
+                completion(fileURL)
+            }
+
+            // Build failed or service gone
+            if self == nil || self?.building.contains(cacheKey) == false {
+                timer.invalidate()
+                if FileManager.default.fileExists(atPath: fileURL.path) {
+                    completion(fileURL)
+                } else {
+                    completion(nil)
+                }
             }
         }
     }
 
     /// Invalidate cached video for a given key
     func invalidate(cacheKey: String) {
-        if let url = cache.removeValue(forKey: cacheKey) {
-            try? FileManager.default.removeItem(at: url)
-        }
+        let url = videoURL(for: cacheKey)
+        try? FileManager.default.removeItem(at: url)
     }
 
     /// List all cached lapse videos with their file sizes
@@ -128,18 +218,29 @@ final class LapseVideoService {
                 try? FileManager.default.removeItem(at: dir.appendingPathComponent(file))
             }
         }
-        cache.removeAll()
     }
 
-    /// Remove old videos that share the same base key but different photo count
-    private func cleanStaleVideos(baseKey: String) {
-        // baseKey format: "UUID_Slot_Count" — extract the prefix before count
-        let parts = baseKey.split(separator: "_")
-        guard parts.count >= 2 else { return }
-        let prefix = parts.dropLast().joined(separator: "_")
+    // MARK: - Private Helpers
+
+    private func videoURL(for cacheKey: String) -> URL {
+        cacheDirectory().appendingPathComponent("\(cacheKey).mp4")
+    }
+
+    /// Extract the stable part of a cache key (UUID_Slot) without the photo count.
+    /// Cache key format: "UUID_SlotName_Count"
+    private func stablePrefix(from cacheKey: String) -> String {
+        // Find the last underscore — everything before it is the stable prefix
+        if let range = cacheKey.range(of: "_", options: .backwards) {
+            return String(cacheKey[..<range.lowerBound])
+        }
+        return cacheKey
+    }
+
+    /// Remove old videos that share the same activity+slot but different photo count
+    private func cleanStaleVideos(prefix: String) {
         let dir = cacheDirectory()
         if let files = try? FileManager.default.contentsOfDirectory(atPath: dir.path) {
-            for file in files where file.hasPrefix(prefix) && file.hasSuffix(".mp4") {
+            for file in files where file.hasPrefix(prefix) && (file.hasSuffix(".mp4") || file.hasSuffix(".tmp")) {
                 try? FileManager.default.removeItem(at: dir.appendingPathComponent(file))
             }
         }
@@ -147,10 +248,10 @@ final class LapseVideoService {
 
     // MARK: - Video Builder
 
-    private func buildVideo(from photos: [String], outputURL: URL, progress: ((Int, Int) -> Void)? = nil) -> URL? {
+    private func buildVideo(from photos: [String], outputURL: URL, progress: ((Int, Int) -> Void)?) -> URL? {
         guard !photos.isEmpty else { return nil }
 
-        // Determine video size from the first image only, then release it
+        // Determine video size from the first image
         let videoSize: CGSize
         if let first = MediaService.shared.loadPhoto(filename: photos[0]) {
             let w = min(first.size.width, VideoResolution.current.maxWidth)
@@ -160,9 +261,14 @@ final class LapseVideoService {
             return nil
         }
 
+        // Write to a temp file so partial writes don't appear as valid .mp4 files.
+        // AVAssetWriter creates the file on startWriting(), so any concurrent
+        // fileExists check on the .mp4 path must not find an incomplete file.
+        let tempURL = outputURL.deletingPathExtension().appendingPathExtension("tmp")
+        try? FileManager.default.removeItem(at: tempURL)
         try? FileManager.default.removeItem(at: outputURL)
 
-        guard let writer = try? AVAssetWriter(url: outputURL, fileType: .mp4) else { return nil }
+        guard let writer = try? AVAssetWriter(url: tempURL, fileType: .mp4) else { return nil }
 
         let videoSettings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264,
@@ -189,7 +295,6 @@ final class LapseVideoService {
         let frameCMTime = CMTimeMake(value: Int64(frameDuration * 600), timescale: 600)
         let total = photos.count
 
-        // Stream one image at a time — never hold more than one in memory
         for index in 0..<photos.count {
             autoreleasepool {
                 let presentationTime = CMTimeMultiply(frameCMTime, multiplier: Int32(index))
@@ -202,7 +307,6 @@ final class LapseVideoService {
                       let buffer = pixelBuffer(from: image, size: videoSize) else { return }
                 adaptor.append(buffer, withPresentationTime: presentationTime)
 
-                // Report progress on main thread
                 if let progress {
                     let current = index + 1
                     DispatchQueue.main.async {
@@ -218,7 +322,20 @@ final class LapseVideoService {
         writer.finishWriting { semaphore.signal() }
         semaphore.wait()
 
-        return writer.status == AVAssetWriter.Status.completed ? outputURL : nil
+        guard writer.status == .completed else {
+            try? FileManager.default.removeItem(at: tempURL)
+            return nil
+        }
+
+        // Atomic rename: .tmp → .mp4. Only now will fileExists return true.
+        do {
+            try FileManager.default.moveItem(at: tempURL, to: outputURL)
+        } catch {
+            try? FileManager.default.removeItem(at: tempURL)
+            return nil
+        }
+
+        return outputURL
     }
 
     /// Normalize UIImage orientation so cgImage pixels match visual orientation.
@@ -231,7 +348,6 @@ final class LapseVideoService {
     }
 
     private func pixelBuffer(from image: UIImage, size: CGSize) -> CVPixelBuffer? {
-        // Bake orientation into pixels before extracting cgImage
         let oriented = normalizeOrientation(image)
 
         let attrs: [String: Any] = [
@@ -263,11 +379,9 @@ final class LapseVideoService {
             bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue
         ) else { return nil }
 
-        // Black background
         context.setFillColor(UIColor.black.cgColor)
         context.fill(CGRect(origin: .zero, size: size))
 
-        // Draw orientation-corrected image scaled to fit (no crop)
         guard let cgImage = oriented.cgImage else { return nil }
         let imgW = CGFloat(cgImage.width)
         let imgH = CGFloat(cgImage.height)

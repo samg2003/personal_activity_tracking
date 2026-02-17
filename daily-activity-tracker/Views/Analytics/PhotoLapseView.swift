@@ -90,14 +90,19 @@ private struct SlotVideoSection: View {
                 Color.black
 
                 if isGenerating {
-                    VStack(spacing: 8) {
-                        ProgressView()
-                            .tint(.white)
+                    VStack(spacing: 12) {
                         if let p = generatingProgress {
+                            let fraction = Double(p.current) / max(Double(p.total), 1)
+                            ProgressView(value: fraction)
+                                .progressViewStyle(.linear)
+                                .tint(.white)
+                                .frame(width: 180)
                             Text("Building time-lapse… \(p.current)/\(p.total)")
                                 .font(.caption2.monospacedDigit())
-                                .foregroundStyle(.white.opacity(0.6))
+                                .foregroundStyle(.white.opacity(0.7))
                         } else {
+                            ProgressView()
+                                .tint(.white)
                             Text("Preparing…")
                                 .font(.caption2)
                                 .foregroundStyle(.white.opacity(0.6))
@@ -167,33 +172,35 @@ private struct SlotVideoSection: View {
     }
 
     private func generateVideo() {
+        isGenerating = true
+        generatingProgress = nil
+
         LapseVideoService.shared.generateVideo(
             photos: photos,
             cacheKey: cacheKey,
             progress: { current, total in
-                generatingProgress = (current, total)
+                self.generatingProgress = (current, total)
             }
         ) { url in
             guard let url else {
-                isGenerating = false
+                self.isGenerating = false
                 return
             }
 
             let avPlayer = AVPlayer(url: url)
             avPlayer.actionAtItemEnd = .pause
 
-            // Observe time for scrubber sync
             let interval = CMTime(seconds: 0.05, preferredTimescale: 600)
             let observer = avPlayer.addPeriodicTimeObserver(forInterval: interval, queue: .main) { time in
-                if !isSeeking {
-                    currentTime = time.seconds
+                if !self.isSeeking {
+                    self.currentTime = time.seconds
                 }
-                isPlaying = avPlayer.rate > 0
+                self.isPlaying = avPlayer.rate > 0
             }
 
-            timeObserver = observer
-            player = avPlayer
-            isGenerating = false
+            self.timeObserver = observer
+            self.player = avPlayer
+            self.isGenerating = false
         }
     }
 

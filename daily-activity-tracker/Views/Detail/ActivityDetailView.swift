@@ -185,6 +185,9 @@ struct ActivityDetailView: View {
         log.photoFilenames = filenames
         log.photoFilename = filenames.values.first  // Legacy compat
         modelContext.insert(log)
+
+        // Pre-generate lapse video in background for instant analytics
+        LapseVideoService.shared.preGenerateVideos(activityID: activity.id, photoSlots: activity.photoSlots)
     }
 
     private var currentStreak: Int {

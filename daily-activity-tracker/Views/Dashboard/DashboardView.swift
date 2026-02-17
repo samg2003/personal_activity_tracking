@@ -316,6 +316,8 @@ struct DashboardView: View {
                             log.photoFilenames = filenames
                             log.photoFilename = filenames.values.first
                         }
+                        // Pre-generate lapse video in background for instant analytics
+                        LapseVideoService.shared.preGenerateVideos(activityID: activity.id, photoSlots: activity.photoSlots)
                         // Clear prompt state (onDismiss will skip delete since photos exist)
                         photoPromptActivity = nil
                     }
