@@ -1,6 +1,39 @@
 import AVFoundation
 import UIKit
 
+/// Available video resolution options for time-lapse generation
+enum VideoResolution: String, CaseIterable, Identifiable {
+    case p720 = "720p"
+    case p1080 = "1080p"
+    case k2 = "2K"
+    case k4 = "4K"
+
+    var id: String { rawValue }
+
+    var maxWidth: CGFloat {
+        switch self {
+        case .p720: return 720
+        case .p1080: return 1080
+        case .k2: return 2560
+        case .k4: return 3840
+        }
+    }
+
+    static let defaultResolution: VideoResolution = .k2
+    static let userDefaultsKey = "lapseVideoResolution"
+
+    static var current: VideoResolution {
+        get {
+            guard let raw = UserDefaults.standard.string(forKey: userDefaultsKey),
+                  let res = VideoResolution(rawValue: raw) else { return .defaultResolution }
+            return res
+        }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: userDefaultsKey)
+        }
+    }
+}
+
 /// Stitches an array of photos into a video file for smooth time-lapse playback.
 final class LapseVideoService {
     static let shared = LapseVideoService()
@@ -13,21 +46,34 @@ final class LapseVideoService {
     private let frameDuration: Double = 0.4
 
     /// Generate a time-lapse video from photos. Returns the file URL on completion.
-    /// Results are cached in memory by a key derived from the photo list.
+    /// Cached on disk — survives app restarts. Only regenerates when photo count changes.
     func generateVideo(
         photos: [String],
         cacheKey: String,
         completion: @escaping (URL?) -> Void
     ) {
-        // Return cached video if available and file exists
+        let filename = "\(cacheKey).mp4"
+        let fileURL = cacheDirectory().appendingPathComponent(filename)
+
+        // Check in-memory cache first
         if let cached = cache[cacheKey], FileManager.default.fileExists(atPath: cached.path) {
             completion(cached)
             return
         }
 
+        // Check disk cache (survives app restart)
+        if FileManager.default.fileExists(atPath: fileURL.path) {
+            cache[cacheKey] = fileURL
+            completion(fileURL)
+            return
+        }
+
+        // Clean up old versions with different photo counts
+        cleanStaleVideos(baseKey: cacheKey)
+
         queue.async { [weak self] in
             guard let self else { return }
-            let url = self.buildVideo(from: photos, key: cacheKey)
+            let url = self.buildVideo(from: photos, outputURL: fileURL)
             DispatchQueue.main.async {
                 if let url {
                     self.cache[cacheKey] = url
@@ -44,25 +90,76 @@ final class LapseVideoService {
         }
     }
 
+    /// List all cached lapse videos with their file sizes
+    func cachedVideos() -> [(name: String, size: String, url: URL)] {
+        let dir = cacheDirectory()
+        guard let files = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else { return [] }
+        return files
+            .filter { $0.hasSuffix(".mp4") }
+            .sorted()
+            .compactMap { filename in
+                let url = dir.appendingPathComponent(filename)
+                guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+                      let bytes = attrs[.size] as? Int64 else { return nil }
+                let size = ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+                let label = filename.replacingOccurrences(of: ".mp4", with: "")
+                return (name: label, size: size, url: url)
+            }
+    }
+
+    /// Total size of all cached lapse videos in bytes
+    func totalCacheSize() -> Int64 {
+        let dir = cacheDirectory()
+        guard let files = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else { return 0 }
+        return files.reduce(Int64(0)) { total, filename in
+            let path = dir.appendingPathComponent(filename).path
+            let size = (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? Int64) ?? 0
+            return total + size
+        }
+    }
+
+    /// Delete all cached lapse videos
+    func clearAllCache() {
+        let dir = cacheDirectory()
+        if let files = try? FileManager.default.contentsOfDirectory(atPath: dir.path) {
+            for file in files {
+                try? FileManager.default.removeItem(at: dir.appendingPathComponent(file))
+            }
+        }
+        cache.removeAll()
+    }
+
+    /// Remove old videos that share the same base key but different photo count
+    private func cleanStaleVideos(baseKey: String) {
+        // baseKey format: "UUID_Slot_Count" — extract the prefix before count
+        let parts = baseKey.split(separator: "_")
+        guard parts.count >= 2 else { return }
+        let prefix = parts.dropLast().joined(separator: "_")
+        let dir = cacheDirectory()
+        if let files = try? FileManager.default.contentsOfDirectory(atPath: dir.path) {
+            for file in files where file.hasPrefix(prefix) && file.hasSuffix(".mp4") {
+                try? FileManager.default.removeItem(at: dir.appendingPathComponent(file))
+            }
+        }
+    }
+
     // MARK: - Video Builder
 
-    private func buildVideo(from photos: [String], key: String) -> URL? {
-        // Load all images first, determine output size
-        let images: [UIImage] = photos.compactMap { MediaService.shared.loadPhoto(filename: $0) }
-        guard !images.isEmpty else { return nil }
+    private func buildVideo(from photos: [String], outputURL: URL) -> URL? {
+        guard !photos.isEmpty else { return nil }
 
-        // Use the size of the first image as the video dimensions
-        let firstSize = images[0].size
-        let videoWidth = min(firstSize.width, 1080)
-        let scale = videoWidth / firstSize.width
-        let videoHeight = (firstSize.height * scale).rounded(.down)
-        let videoSize = CGSize(width: videoWidth, height: videoHeight)
+        // Determine video size from the first image only, then release it
+        let videoSize: CGSize
+        if let first = MediaService.shared.loadPhoto(filename: photos[0]) {
+            let w = min(first.size.width, VideoResolution.current.maxWidth)
+            let scale = w / first.size.width
+            videoSize = CGSize(width: w, height: (first.size.height * scale).rounded(.down))
+        } else {
+            return nil
+        }
 
-        // Output path
-        let outputURL = cacheDirectory().appendingPathComponent("\(key).mp4")
         try? FileManager.default.removeItem(at: outputURL)
 
-        // Setup writer
         guard let writer = try? AVAssetWriter(url: outputURL, fileType: .mp4) else { return nil }
 
         let videoSettings: [String: Any] = [
@@ -85,20 +182,24 @@ final class LapseVideoService {
 
         writer.add(writerInput)
         guard writer.startWriting() else { return nil }
-        writer.startSession(atSourceTime: .zero)
+        writer.startSession(atSourceTime: CMTime.zero)
 
         let frameCMTime = CMTimeMake(value: Int64(frameDuration * 600), timescale: 600)
 
-        for (index, image) in images.enumerated() {
-            let presentationTime = CMTimeMultiply(frameCMTime, multiplier: Int32(index))
+        // Stream one image at a time — never hold more than one in memory
+        for index in 0..<photos.count {
+            autoreleasepool {
+                let presentationTime = CMTimeMultiply(frameCMTime, multiplier: Int32(index))
 
-            // Wait for input to be ready
-            while !writerInput.isReadyForMoreMediaData {
-                Thread.sleep(forTimeInterval: 0.01)
+                while !writerInput.isReadyForMoreMediaData {
+                    Thread.sleep(forTimeInterval: 0.01)
+                }
+
+                guard let image = MediaService.shared.loadPhoto(filename: photos[index]),
+                      let buffer = pixelBuffer(from: image, size: videoSize) else { return }
+                adaptor.append(buffer, withPresentationTime: presentationTime)
+                // image and buffer released at end of autoreleasepool
             }
-
-            guard let pixelBuffer = pixelBuffer(from: image, size: videoSize) else { continue }
-            adaptor.append(pixelBuffer, withPresentationTime: presentationTime)
         }
 
         writerInput.markAsFinished()
@@ -107,10 +208,22 @@ final class LapseVideoService {
         writer.finishWriting { semaphore.signal() }
         semaphore.wait()
 
-        return writer.status == .completed ? outputURL : nil
+        return writer.status == AVAssetWriter.Status.completed ? outputURL : nil
+    }
+
+    /// Normalize UIImage orientation so cgImage pixels match visual orientation.
+    private func normalizeOrientation(_ image: UIImage) -> UIImage {
+        guard image.imageOrientation != .up else { return image }
+        let renderer = UIGraphicsImageRenderer(size: image.size)
+        return renderer.image { _ in
+            image.draw(at: .zero)
+        }
     }
 
     private func pixelBuffer(from image: UIImage, size: CGSize) -> CVPixelBuffer? {
+        // Bake orientation into pixels before extracting cgImage
+        let oriented = normalizeOrientation(image)
+
         let attrs: [String: Any] = [
             kCVPixelBufferCGImageCompatibilityKey as String: true,
             kCVPixelBufferCGBitmapContextCompatibilityKey as String: true,
@@ -144,8 +257,8 @@ final class LapseVideoService {
         context.setFillColor(UIColor.black.cgColor)
         context.fill(CGRect(origin: .zero, size: size))
 
-        // Draw image scaled to fit (no crop)
-        guard let cgImage = image.cgImage else { return nil }
+        // Draw orientation-corrected image scaled to fit (no crop)
+        guard let cgImage = oriented.cgImage else { return nil }
         let imgW = CGFloat(cgImage.width)
         let imgH = CGFloat(cgImage.height)
         let fitScale = min(size.width / imgW, size.height / imgH)

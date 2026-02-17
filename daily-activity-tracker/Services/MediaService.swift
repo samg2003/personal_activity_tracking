@@ -48,6 +48,30 @@ final class MediaService {
         return UIImage(data: data)
     }
 
+    /// Get file size (formatted) and friendly resolution for a photo
+    func photoFileInfo(filename: String) -> (size: String, resolution: String)? {
+        let url = photosDirectory.appendingPathComponent(filename)
+        guard let attrs = try? fileManager.attributesOfItem(atPath: url.path),
+              let bytes = attrs[.size] as? Int64 else { return nil }
+        let size = ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let w = props[kCGImagePropertyPixelWidth] as? Int,
+              let h = props[kCGImagePropertyPixelHeight] as? Int else {
+            return (size: size, resolution: "?")
+        }
+        let maxDim = max(w, h)
+        let res: String
+        switch maxDim {
+        case ..<960: res = "SD"
+        case ..<1400: res = "720p"
+        case ..<2200: res = "1080p"
+        case ..<3200: res = "2K"
+        default: res = "4K"
+        }
+        return (size: size, resolution: res)
+    }
+
     /// Get all photo filenames for an activity, sorted chronologically
     func allPhotos(for activityID: UUID) -> [String] {
         let activityDir = photosDirectory.appendingPathComponent(activityID.uuidString)

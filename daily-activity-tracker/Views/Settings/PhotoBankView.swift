@@ -7,6 +7,7 @@ struct PhotoBankView: View {
 
     @State private var activityPhotos: [(activity: Activity, filenames: [String])] = []
     @State private var orphanPhotos: [(activityID: UUID, filenames: [String])] = []
+    @State private var lapseVideos: [(name: String, size: String, url: URL)] = []
     @State private var totalSize: String = ""
 
     var body: some View {
@@ -77,6 +78,54 @@ struct PhotoBankView: View {
                                 .buttonStyle(.borderless)
                             }
                         }
+                    }
+                }
+            }
+
+            // Cached time-lapse videos
+            Section {
+                // Resolution picker
+                Picker("Resolution", selection: Binding(
+                    get: { VideoResolution.current },
+                    set: { newRes in
+                        VideoResolution.current = newRes
+                        LapseVideoService.shared.clearAllCache()
+                        refreshData()
+                    }
+                )) {
+                    ForEach(VideoResolution.allCases) { res in
+                        Text(res.rawValue).tag(res)
+                    }
+                }
+                .font(.subheadline)
+
+                if !lapseVideos.isEmpty {
+                    ForEach(lapseVideos, id: \.name) { video in
+                        HStack {
+                            Image(systemName: "film.stack")
+                                .foregroundStyle(.secondary)
+                                .frame(width: 24)
+                            Text(friendlyVideoName(video.name))
+                                .font(.subheadline)
+                                .lineLimit(1)
+                            Spacer()
+                            Text(video.size)
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+            } header: {
+                HStack {
+                    Text("Time-Lapse Videos")
+                    Spacer()
+                    if !lapseVideos.isEmpty {
+                        Button("Clear All") {
+                            LapseVideoService.shared.clearAllCache()
+                            refreshData()
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.red)
                     }
                 }
             }
@@ -167,9 +216,33 @@ struct PhotoBankView: View {
         activityPhotos = matched.sorted { $0.activity.name.localizedCaseInsensitiveCompare($1.activity.name) == .orderedAscending }
         orphanPhotos = orphans
 
-        // Calculate total size
-        let bytes = media.totalPhotoSize()
-        totalSize = ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+        // Load lapse videos
+        lapseVideos = LapseVideoService.shared.cachedVideos()
+
+        // Calculate total size (photos + lapse video cache)
+        let photoBytes = media.totalPhotoSize()
+        let videoBytes = LapseVideoService.shared.totalCacheSize()
+        totalSize = ByteCountFormatter.string(fromByteCount: photoBytes + videoBytes, countStyle: .file)
+    }
+
+    /// Convert video cache key (UUID_Slot_Count) into a readable label
+    private func friendlyVideoName(_ cacheKey: String) -> String {
+        let parts = cacheKey.split(separator: "_")
+        guard parts.count >= 2,
+              let uuid = UUID(uuidString: String(parts[0])) else { return cacheKey }
+
+        let activityName = allActivities.first { $0.id == uuid }?.name ?? "Unknown"
+        let slot = parts.count >= 3 ? String(parts[1]) : ""
+        let count = parts.last.flatMap { Int($0) }
+
+        var label = activityName
+        if !slot.isEmpty && slot != "Photos" {
+            label += " · \(slot)"
+        }
+        if let count {
+            label += " (\(count) frames)"
+        }
+        return label
     }
 }
 
@@ -335,11 +408,13 @@ struct ActivityPhotosGridView: View {
                 }
 
                 if let date = dateFromFilename(filename) {
-                    Text(date)
-                        .font(.system(size: 9, weight: .medium))
+                    let info = MediaService.shared.photoFileInfo(filename: filename)
+                    let parts = [date, info?.resolution, info?.size].compactMap { $0 }
+                    Text(parts.joined(separator: " / "))
+                        .font(.system(size: 8, weight: .medium))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 4)
-                        .padding(.vertical, 1)
+                        .padding(.vertical, 2)
                         .background(.black.opacity(0.5))
                         .clipShape(RoundedRectangle(cornerRadius: 3))
                         .padding(4)
@@ -352,9 +427,15 @@ struct ActivityPhotosGridView: View {
     private func dateFromFilename(_ filename: String) -> String? {
         guard let lastComponent = filename.split(separator: "/").last else { return nil }
         let name = lastComponent.replacingOccurrences(of: ".jpg", with: "")
-        let parts = name.split(separator: "_")
-        guard let datePart = parts.first else { return nil }
-        return String(datePart)
+        guard let datePart = name.split(separator: "_").first else { return nil }
+        // Parse yyyy-MM-dd into "Mon DD, YY"
+        let parts = datePart.split(separator: "-")
+        guard parts.count == 3,
+              let month = Int(parts[1]),
+              month >= 1, month <= 12 else { return String(datePart) }
+        let months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+        let yy = parts[0].suffix(2)
+        return "\(months[month - 1]) \(parts[2]), \(yy)"
     }
 }
 
@@ -469,7 +550,7 @@ struct SlotPhotosView: View {
                 previewPhoto = filename
             }
         } label: {
-            ZStack(alignment: .topTrailing) {
+            ZStack {
                 if let image = MediaService.shared.loadPhoto(filename: filename) {
                     Image(uiImage: image)
                         .resizable()
@@ -482,12 +563,43 @@ struct SlotPhotosView: View {
                         .aspectRatio(1, contentMode: .fill)
                 }
 
+                // Date + size + resolution label
+                VStack {
+                    Spacer()
+                    HStack {
+                        if let info = MediaService.shared.photoFileInfo(filename: filename) {
+                            let datePart = filename.split(separator: "/").last?
+                                .replacingOccurrences(of: ".jpg", with: "")
+                                .split(separator: "_").first
+                                .map(String.init) ?? ""
+                            let dateLabel = formatDate(datePart)
+                            let parts = [dateLabel, info.resolution, info.size].compactMap { $0 }
+                            Text(parts.joined(separator: " / "))
+                                .font(.system(size: 8, weight: .medium))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 2)
+                                .background(.black.opacity(0.5))
+                                .clipShape(RoundedRectangle(cornerRadius: 3))
+                        }
+                        Spacer()
+                    }
+                    .padding(4)
+                }
+
+                // Selection indicator
                 if isSelecting {
-                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                        .font(.title3)
-                        .foregroundStyle(isSelected ? Color(hex: activityColor) : .white)
-                        .shadow(radius: 2)
-                        .padding(6)
+                    VStack {
+                        HStack {
+                            Spacer()
+                            Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                                .font(.title3)
+                                .foregroundStyle(isSelected ? Color(hex: activityColor) : .white)
+                                .shadow(radius: 2)
+                                .padding(6)
+                        }
+                        Spacer()
+                    }
                 }
             }
             .overlay {
@@ -498,6 +610,16 @@ struct SlotPhotosView: View {
             }
         }
         .buttonStyle(.plain)
+    }
+
+    private func formatDate(_ datePart: String) -> String? {
+        let parts = datePart.split(separator: "-")
+        guard parts.count == 3,
+              let month = Int(parts[1]),
+              month >= 1, month <= 12 else { return datePart.isEmpty ? nil : datePart }
+        let months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+        let yy = parts[0].suffix(2)
+        return "\(months[month - 1]) \(parts[2]), \(yy)"
     }
 }
 

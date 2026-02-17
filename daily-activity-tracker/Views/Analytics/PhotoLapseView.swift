@@ -24,7 +24,7 @@ struct PhotoLapseView: View {
                     SlotVideoSection(
                         slotLabel: entry.slot,
                         photos: entry.photos,
-                        cacheKey: "\(activityID.uuidString)_\(entry.slot)",
+                        cacheKey: "\(activityID.uuidString)_\(entry.slot)_\(entry.photos.count)",
                         accentColor: Color(hex: activityColor),
                         showLabel: slotData.count > 1,
                         frameDuration: 0.4
