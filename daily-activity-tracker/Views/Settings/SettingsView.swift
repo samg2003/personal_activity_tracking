@@ -187,7 +187,13 @@ struct SettingsView: View {
             let vacations = try modelContext.fetch(FetchDescriptor<VacationDay>())
             for vacation in vacations { modelContext.delete(vacation) }
 
-            // 4. Delete Categories (EXCEPT Base Defaults)
+            // 4. Delete Goal links then Goals
+            let goalLinks = try modelContext.fetch(FetchDescriptor<GoalActivity>())
+            for link in goalLinks { modelContext.delete(link) }
+            let goals = try modelContext.fetch(FetchDescriptor<Goal>())
+            for goal in goals { modelContext.delete(goal) }
+
+            // 5. Delete Categories (EXCEPT Base Defaults)
             let categories = try modelContext.fetch(FetchDescriptor<Category>())
             let defaultNames = Category.defaults.map { $0.name }
             for category in categories {

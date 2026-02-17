@@ -36,7 +36,7 @@ final class Goal {
     var icon: String = "target"
     var hexColor: String = "#FF3B30"
     var deadline: Date?
-    var isArchived: Bool = false
+    var isManuallyPaused: Bool = false
     var createdAt: Date?
     var sortOrder: Int = 0
 
@@ -90,9 +90,12 @@ final class Goal {
         !activeMetrics.isEmpty
     }
 
-    /// Goal is "On Hold" when it has metric links but ALL are paused/stopped
-    var isOnHold: Bool {
-        !metricLinks.isEmpty && activeMetrics.isEmpty
+    /// Goal is "Paused" when manually paused OR all linked activities/metrics are stopped
+    var isPaused: Bool {
+        if isManuallyPaused { return true }
+        let allLinks = linkedActivities
+        guard !allLinks.isEmpty else { return false }
+        return activeActivities.isEmpty && activeMetrics.isEmpty
     }
 
     /// Progress for a specific metric link (0.0 to 1.0, nil if not calculable)

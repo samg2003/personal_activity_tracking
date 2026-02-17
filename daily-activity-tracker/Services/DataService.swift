@@ -195,13 +195,16 @@ final class DataService {
         let hexColor: String
         let deadline: Date?
         let isArchived: Bool
+        let isManuallyPaused: Bool
         let createdAt: Date
         let sortOrder: Int
 
         init(id: UUID, title: String, icon: String, hexColor: String,
-             deadline: Date?, isArchived: Bool, createdAt: Date, sortOrder: Int) {
+             deadline: Date?, isArchived: Bool, isManuallyPaused: Bool,
+             createdAt: Date, sortOrder: Int) {
             self.id = id; self.title = title; self.icon = icon; self.hexColor = hexColor
             self.deadline = deadline; self.isArchived = isArchived
+            self.isManuallyPaused = isManuallyPaused
             self.createdAt = createdAt; self.sortOrder = sortOrder
         }
 
@@ -213,6 +216,7 @@ final class DataService {
             hexColor = try c.decodeIfPresent(String.self, forKey: .hexColor) ?? "#FF3B30"
             deadline = try c.decodeIfPresent(Date.self, forKey: .deadline)
             isArchived = try c.decodeIfPresent(Bool.self, forKey: .isArchived) ?? false
+            isManuallyPaused = try c.decodeIfPresent(Bool.self, forKey: .isManuallyPaused) ?? false
             createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
             sortOrder = try c.decodeIfPresent(Int.self, forKey: .sortOrder) ?? 0
         }
@@ -326,7 +330,8 @@ final class DataService {
 
         let goalDTOs = goals.map { g in
             GoalDTO(id: g.id, title: g.title, icon: g.icon, hexColor: g.hexColor,
-                    deadline: g.deadline, isArchived: g.isArchived,
+                    deadline: g.deadline, isArchived: false,
+                    isManuallyPaused: g.isManuallyPaused,
                     createdAt: g.createdDate, sortOrder: g.sortOrder)
         }
         let goalActDTOs = goalLinks.compactMap { link -> GoalActivityDTO? in
@@ -499,7 +504,7 @@ final class DataService {
                              sortOrder: dto.sortOrder)
                 g.id = dto.id
                 g.deadline = dto.deadline
-                g.isArchived = dto.isArchived
+                g.isManuallyPaused = dto.isManuallyPaused
                 g.createdAt = dto.createdAt
                 context.insert(g)
                 goalMap[dto.id] = g

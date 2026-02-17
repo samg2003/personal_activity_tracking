@@ -34,9 +34,13 @@ struct GoalDetailView: View {
                         Label("Edit Goal", systemImage: "pencil")
                     }
                     Button {
-                        goal.isArchived = true
+                        goal.isManuallyPaused.toggle()
                     } label: {
-                        Label("Archive", systemImage: "archivebox")
+                        if goal.isManuallyPaused {
+                            Label("Unpause", systemImage: "play.circle")
+                        } else {
+                            Label("Pause", systemImage: "pause.circle")
+                        }
                     }
                 } label: {
                     Image(systemName: "ellipsis.circle")
@@ -52,12 +56,14 @@ struct GoalDetailView: View {
 
     private var headerCard: some View {
         VStack(spacing: 12) {
-            // On Hold banner
-            if goal.isOnHold {
+            // Paused banner
+            if goal.isPaused {
                 HStack(spacing: 6) {
                     Image(systemName: "pause.circle.fill")
                         .font(.caption)
-                    Text("All metrics are paused — goal is on hold")
+                    Text(goal.isManuallyPaused
+                         ? "Goal is paused"
+                         : "Goal is paused — no active metrics found")
                         .font(.caption.weight(.medium))
                 }
                 .foregroundStyle(.orange)
@@ -70,9 +76,9 @@ struct GoalDetailView: View {
             HStack {
                 Image(systemName: goal.icon)
                     .font(.system(size: 28, weight: .semibold))
-                    .foregroundStyle(goal.isOnHold ? .secondary : Color(hex: goal.hexColor))
-                    .frame(width: 48, height: 48)
-                    .background((goal.isOnHold ? Color.gray : Color(hex: goal.hexColor)).opacity(0.15))
+                    .foregroundStyle(goal.isPaused ? .secondary : Color(hex: goal.hexColor))
+                    .frame(width: 44, height: 44)
+                    .background((goal.isPaused ? Color.gray : Color(hex: goal.hexColor)).opacity(0.15))
                     .clipShape(RoundedRectangle(cornerRadius: 12))
 
                 VStack(alignment: .leading, spacing: 2) {
@@ -97,7 +103,7 @@ struct GoalDetailView: View {
             }
 
             // Overall consistency score
-            if goal.isOnHold {
+            if goal.isPaused {
                 VStack(spacing: 4) {
                     Text("—")
                         .font(.system(size: 42, weight: .bold, design: .rounded))

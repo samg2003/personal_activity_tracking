@@ -127,7 +127,6 @@ erDiagram
         String icon
         String hexColor
         Date deadline "optional"
-        Bool isArchived
         Date createdAt
         Int sortOrder
     }
@@ -422,6 +421,22 @@ daily-activity-tracker/
 - `effectiveLogs(for:)` searches logs on the effective date for undo/uncomplete operations
 - Visual treatment: light red row background + "⏳ Due from (Mon Day)" capsule label
 - Applies to all log types: checkbox, value, cumulative, and skip
+
+---
+
+### ADR-18: Goal Pause Replaces Archive
+
+**Decision**: Removed manual `isArchived` toggle from Goals. Goals are now automatically "paused" when ALL linked activities and metrics are stopped (paused). A computed `isPaused` property replaces the persisted `isArchived` field.
+
+**Rationale**: Manual archiving was redundant — if all underlying activities are paused, the goal is inherently inactive. Deriving pause state from linked activities eliminates user confusion about the difference between "archived" and "on hold" goals, and ensures goal state stays consistent with activity state automatically.
+
+**Implications**:
+- `isArchived` removed from `Goal` SwiftData model (lightweight migration)
+- `isOnHold` replaced by broader `isPaused` (checks both activity and metric links)
+- `GoalsView` shows paused goals in a collapsible "Paused" section with grayscale full-size cards
+- Export DTO keeps `isArchived: false` for backward compatibility
+- Import ignores the `isArchived` field from legacy exports
+- Clear Data now also deletes goals and goal-activity links
 
 ---
 

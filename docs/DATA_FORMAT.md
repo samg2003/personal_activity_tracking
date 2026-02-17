@@ -204,14 +204,14 @@ Defines overarching objectives that link to daily activities.
 }
 ```
 
-| Field        | Type    | Description                        |
-| :----------- | :------ | :--------------------------------- |
-| `title`      | String  | Goal name.                         |
-| `icon`       | String  | SF Symbol name.                    |
-| `hexColor`   | String  | Hex color code.                    |
-| `deadline`   | ISO8601 | (Optional) Target completion date. |
-| `isArchived` | Bool    | Whether goal is archived.          |
-| `sortOrder`  | Int     | Display order.                     |
+| Field        | Type    | Description                                                                                             |
+| :----------- | :------ | :------------------------------------------------------------------------------------------------------ |
+| `title`      | String  | Goal name.                                                                                              |
+| `icon`       | String  | SF Symbol name.                                                                                         |
+| `hexColor`   | String  | Hex color code.                                                                                         |
+| `deadline`   | ISO8601 | (Optional) Target completion date.                                                                      |
+| `isArchived` | Bool    | Legacy field, always `false`. Goals are now auto-paused when all linked activities/metrics are stopped. |
+| `sortOrder`  | Int     | Display order.                                                                                          |
 
 ---
 

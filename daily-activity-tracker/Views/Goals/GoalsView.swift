@@ -14,11 +14,11 @@ struct GoalsView: View {
     @State private var editingGoal: Goal?
 
     private var activeGoals: [Goal] {
-        allGoals.filter { !$0.isArchived }
+        allGoals.filter { !$0.isPaused }
     }
 
-    private var archivedGoals: [Goal] {
-        allGoals.filter { $0.isArchived }
+    private var pausedGoals: [Goal] {
+        allGoals.filter { $0.isPaused }
     }
 
     var body: some View {
@@ -41,8 +41,8 @@ struct GoalsView: View {
                         }
                     }
 
-                    if !archivedGoals.isEmpty {
-                        archivedSection
+                    if !pausedGoals.isEmpty {
+                        pausedSection
                     }
                 }
                 .padding()
@@ -100,25 +100,29 @@ struct GoalsView: View {
         .padding(.top, 60)
     }
 
-    // MARK: - Archived
+    // MARK: - Paused
 
-    private var archivedSection: some View {
+    private var pausedSection: some View {
         DisclosureGroup {
-            ForEach(archivedGoals) { goal in
-                HStack(spacing: 10) {
-                    Image(systemName: goal.icon)
-                        .font(.caption)
-                        .foregroundStyle(Color(hex: goal.hexColor))
-                    Text(goal.title)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    Spacer()
+            ForEach(pausedGoals) { goal in
+                NavigationLink(value: goal.id) {
+                    GoalCardView(
+                        goal: goal,
+                        score: 0,
+                        logs: allLogs,
+                        vacationDays: vacationDays
+                    )
+                    .grayscale(1)
+                    .opacity(0.7)
                 }
+                .buttonStyle(.plain)
                 .contextMenu {
-                    Button {
-                        goal.isArchived = false
-                    } label: {
-                        Label("Unarchive", systemImage: "tray.and.arrow.up")
+                    if goal.isManuallyPaused {
+                        Button {
+                            goal.isManuallyPaused = false
+                        } label: {
+                            Label("Unpause", systemImage: "play.circle")
+                        }
                     }
                     Button(role: .destructive) {
                         modelContext.delete(goal)
@@ -129,9 +133,9 @@ struct GoalsView: View {
             }
         } label: {
             HStack(spacing: 6) {
-                Image(systemName: "archivebox")
+                Image(systemName: "pause.circle")
                     .font(.caption)
-                Text("Archived (\(archivedGoals.count))")
+                Text("Paused (\(pausedGoals.count))")
                     .font(.caption.weight(.medium))
             }
             .foregroundStyle(.secondary)
@@ -160,18 +164,18 @@ struct GoalCardView: View {
             HStack {
                 Image(systemName: goal.icon)
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(goal.isOnHold ? .secondary : Color(hex: goal.hexColor))
+                    .foregroundStyle(goal.isPaused ? .secondary : Color(hex: goal.hexColor))
                     .frame(width: 32, height: 32)
-                    .background((goal.isOnHold ? Color.gray : Color(hex: goal.hexColor)).opacity(0.15))
+                    .background((goal.isPaused ? Color.gray : Color(hex: goal.hexColor)).opacity(0.15))
                     .clipShape(RoundedRectangle(cornerRadius: 8))
 
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(goal.title)
                             .font(.headline)
-                            .foregroundStyle(goal.isOnHold ? .secondary : .primary)
-                        if goal.isOnHold {
-                            Text("ON HOLD")
+                            .foregroundStyle(goal.isPaused ? .secondary : .primary)
+                        if goal.isPaused {
+                            Text("PAUSED")
                                 .font(.caption2.weight(.bold))
                                 .foregroundStyle(.orange)
                                 .padding(.horizontal, 6)
@@ -198,7 +202,7 @@ struct GoalCardView: View {
             }
 
             // Consistency bar — skip for on-hold goals
-            if goal.isOnHold {
+            if goal.isPaused {
                 HStack {
                     Text("7-Day Consistency")
                         .font(.caption)
@@ -228,7 +232,7 @@ struct GoalCardView: View {
         .padding(16)
         .background(Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 14))
-        .opacity(goal.isOnHold ? 0.7 : 1.0)
+        .opacity(goal.isPaused ? 0.7 : 1.0)
     }
 
     private func consistencyBar(score: Double) -> some View {
