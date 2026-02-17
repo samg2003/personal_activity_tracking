@@ -27,6 +27,9 @@ struct daily_activity_trackerApp: App {
         // Backfill NULL createdAt (seconds since 2001-01-01 reference date; 0 = Jan 1 2001)
         sqlite3_exec(db, "UPDATE ZACTIVITY SET ZCREATEDAT = 0 WHERE ZCREATEDAT IS NULL", nil, nil, nil)
         sqlite3_exec(db, "UPDATE ZGOAL SET ZCREATEDAT = 0 WHERE ZCREATEDAT IS NULL", nil, nil, nil)
+
+        // Backfill carryForward for existing metric activities (preserves behavior after ADR-16 generalization)
+        sqlite3_exec(db, "UPDATE ZACTIVITY SET ZCARRYFORWARD = 1 WHERE ZTYPERAW = 'metric' AND (ZCARRYFORWARD IS NULL OR ZCARRYFORWARD = 0)", nil, nil, nil)
     }
     var sharedModelContainer: ModelContainer = {
         // Fix corrupted data BEFORE SwiftData opens the store

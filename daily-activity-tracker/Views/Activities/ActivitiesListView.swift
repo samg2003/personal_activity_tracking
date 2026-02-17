@@ -889,6 +889,9 @@ struct ActivitiesListView: View {
         if type == .value || type == .cumulative || type == .metric {
             activity.unit = ActivityAppearance.suggestUnit(for: name)
         }
+        if type == .metric {
+            activity.carryForward = true
+        }
         modelContext.insert(activity)
     }
 
@@ -906,6 +909,9 @@ struct ActivitiesListView: View {
         // Smart unit default for types that use units
         if type == .value || type == .cumulative || type == .metric {
             child.unit = ActivityAppearance.suggestUnit(for: name)
+        }
+        if type == .metric {
+            child.carryForward = true
         }
         child.parent = parent
         child.category = parent.category

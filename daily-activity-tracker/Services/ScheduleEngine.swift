@@ -37,13 +37,13 @@ final class ScheduleEngine: ScheduleEngineProtocol {
         }
     }
 
-    // MARK: - Carry-Forward for Missed Metrics
+    // MARK: - Carry-Forward for Missed Occurrences
 
-    /// Checks if a metric activity has a missed scheduled occurrence that should carry forward to `date`.
+    /// Checks if an activity has a missed scheduled occurrence that should carry forward to `date`.
     /// Returns true if the most recent scheduled day before `date` has no completed/skipped log.
     private func shouldCarryForward(_ activity: Activity, on date: Date, logs: [ActivityLog]) -> Bool {
         guard !activity.isStopped else { return false }
-        guard activity.type == .metric else { return false }
+        guard activity.carryForward else { return false }
         let schedule = activity.scheduleActive(on: date)
         guard schedule.type == .weekly || schedule.type == .monthly else { return false }
         if shouldShow(activity, on: date) { return false }
@@ -60,7 +60,7 @@ final class ScheduleEngine: ScheduleEngineProtocol {
     /// For multi-session: only slots not completed/skipped on the original date (or today) carry forward.
     /// For single-session: returns the activity's slot if it's overdue.
     func carriedForwardSlots(for activity: Activity, on date: Date, logs: [ActivityLog]) -> (date: Date, slots: [TimeSlot])? {
-        guard activity.type == .metric else { return nil }
+        guard activity.carryForward else { return nil }
         let schedule = activity.scheduleActive(on: date)
         guard schedule.type == .weekly || schedule.type == .monthly else { return nil }
 
@@ -147,7 +147,7 @@ final class ScheduleEngine: ScheduleEngineProtocol {
         var result = topLevel
             .filter { shouldShow($0, on: date) }
 
-        // Add carry-forward metrics (avoid duplicates)
+        // Add carry-forward activities (avoid duplicates)
         let resultIDs = Set(result.map { $0.id })
         let carryForward = topLevel.filter { activity in
             !resultIDs.contains(activity.id) && shouldCarryForward(activity, on: date, logs: logs)

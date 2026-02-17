@@ -44,6 +44,8 @@ final class Activity {
     var stoppedAt: Date?  // Non-nil = paused tracking from this date
     /// Remembers the parent container's id when a child is paused, so it can be restored on resume
     var pausedParentId: UUID?
+    /// When true, missed weekly/monthly occurrences carry forward to subsequent days until completed
+    var carryForward: Bool = false
 
     // HealthKit (future)
     var healthKitTypeID: String?

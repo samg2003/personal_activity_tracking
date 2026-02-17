@@ -395,6 +395,21 @@ daily-activity-tracker/
 
 ---
 
+### ADR-19: Generalized Carry Forward Toggle
+
+**Decision**: Replaced the hardcoded metric-only carry forward behavior with a configurable `carryForward` Bool flag on the Activity model.
+
+**Rationale**: Carry forward was useful beyond metrics — weekly/monthly value or cumulative activities also benefit from being reminded about missed occurrences. Making it configurable gives users control without changing the underlying mechanism.
+
+**Key behaviors**:
+- `carryForward: Bool = false` on Activity model — lightweight schema migration
+- ScheduleEngine uses `activity.carryForward` instead of `activity.type == .metric`
+- Toggle in AddActivityView advanced section, visible only for weekly/monthly non-container activities
+- Metrics auto-default to `carryForward = true` on type selection and quick-create
+- Existing metrics retain their behavior via the unchanged ScheduleEngine logic
+
+---
+
 ## Phased Implementation Strategy
 
 | Phase                | Scope                                                                           | Deliverable                                          |

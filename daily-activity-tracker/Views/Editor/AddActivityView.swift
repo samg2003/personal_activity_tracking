@@ -45,6 +45,7 @@ struct AddActivityView: View {
     // Container config
     @State private var selectedParent: Activity?
     @State private var isSubActivity = false
+    @State private var carryForward = false
     
     // Tracks whether appearance/category/unit was auto-set (reset on manual override)
     @State private var appearanceAutoSet = true
@@ -180,6 +181,7 @@ struct AddActivityView: View {
                         if selectedType != .container && selectedType != .metric {
                             healthKitSection
                         }
+                        carryForwardSection
                         appearanceSection
                     }
                     if activityToEdit == nil {
@@ -331,13 +333,15 @@ struct AddActivityView: View {
             isSubActivity = true
             selectedParent = parent
         }
-        
         // Restore HealthKit
         if let hkID = activity.healthKitTypeID {
             enableHealthKit = true
             hkType = hkID
             hkMode = activity.healthKitModeRaw ?? "read"
         }
+
+        // Restore carry forward
+        carryForward = activity.carryForward
 
         // Detect reminder mode when editing
         if scheduleType == .sticky || scheduleType == .adhoc {
@@ -439,6 +443,8 @@ struct AddActivityView: View {
                     }
                     settingUnitFromSuggestion = false
                 }
+                // Metrics default to carry forward
+                carryForward = (newType == .metric)
             }
         }
     }
@@ -810,6 +816,17 @@ struct AddActivityView: View {
         }
     }
 
+    @ViewBuilder
+    private var carryForwardSection: some View {
+        if selectedType != .container && (scheduleType == .weekly || scheduleType == .monthly) {
+            Section {
+                Toggle("Carry Forward", isOn: $carryForward)
+            } footer: {
+                Text("When enabled, missed occurrences appear on subsequent days until completed or skipped.")
+            }
+        }
+    }
+
     // MARK: - Save
 
     private func save() {
@@ -858,6 +875,8 @@ struct AddActivityView: View {
                     (effectiveType != .container ? TimeWindow(slot: isMultiSession ? (selectedSlots.sorted().first ?? .morning) : selectedSlot) : nil),
                 category: entityMode == .reminder ? nil : selectedCategory
             )
+
+            activity.carryForward = carryForward
 
             if entityMode == .activity {
                 if isMultiSession && selectedSlots.count > 1 {
@@ -946,6 +965,7 @@ struct AddActivityView: View {
         } else {
             activity.type = selectedType
             activity.scheduleData = try? JSONEncoder().encode(schedule)
+            activity.carryForward = carryForward
             activity.category = selectedCategory
 
             if selectedType == .metric {

@@ -81,7 +81,10 @@ Defines the trackers themselves.
   "stoppedAt": "2026-06-01T00:00:00Z",
   
   // Optional: remembers container parent when paused
-  "pausedParentId": "UUID-OF-FORMER-CONTAINER"
+  "pausedParentId": "UUID-OF-FORMER-CONTAINER",
+  
+  // Carry forward missed weekly/monthly occurrences (default: false, metrics default: true)
+  "carryForward": true
 }
 ```
 
