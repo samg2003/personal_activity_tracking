@@ -10,6 +10,9 @@ struct PhotoBankView: View {
     @State private var lapseVideos: [(name: String, size: String, url: URL)] = []
     @State private var totalSize: String = ""
 
+    @State private var photoFormat: PhotoFormat = PhotoFormat.current
+    @State private var photoResolution: PhotoSaveResolution = PhotoSaveResolution.current
+
     var body: some View {
         List {
             if activityPhotos.isEmpty && orphanPhotos.isEmpty {
@@ -79,6 +82,29 @@ struct PhotoBankView: View {
                             }
                         }
                     }
+                }
+            }
+
+            // Photo capture settings
+            Section("Photo Settings") {
+                Picker("Format", selection: $photoFormat) {
+                    ForEach(PhotoFormat.allCases) { fmt in
+                        Text(fmt.rawValue).tag(fmt)
+                    }
+                }
+                .font(.subheadline)
+                .onChange(of: photoFormat) { _, newVal in
+                    PhotoFormat.current = newVal
+                }
+
+                Picker("Resolution", selection: $photoResolution) {
+                    ForEach(PhotoSaveResolution.allCases) { res in
+                        Text(res.rawValue).tag(res)
+                    }
+                }
+                .font(.subheadline)
+                .onChange(of: photoResolution) { _, newVal in
+                    PhotoSaveResolution.current = newVal
                 }
             }
 
@@ -268,9 +294,13 @@ struct ActivityPhotosGridView: View {
         GridItem(.flexible(), spacing: 2)
     ]
 
-    /// Groups photos by their sanitized slot suffix, maintaining defined slot order
+    /// Groups photos by their sanitized slot suffix, maintaining defined slot order.
+    /// Single-slot or no-slot activities get a default "Photos" group.
     private var slotGroups: [(label: String, photos: [String])] {
-        guard photoSlots.count > 1 else { return [] }
+        guard photoSlots.count > 1 else {
+            // Single-slot: all photos under one default label
+            return photos.isEmpty ? [] : [("Photos", photos)]
+        }
 
         var groups: [(label: String, photos: [String])] = []
 
@@ -306,10 +336,11 @@ struct ActivityPhotosGridView: View {
                 )
                 .padding(.top, 60)
             } else if isSingleSlot {
-                // Flat grid for single-slot activities
-                LazyVGrid(columns: columns, spacing: 2) {
-                    ForEach(photos, id: \.self) { filename in
-                        photoCell(filename)
+                // Single-slot: go directly into SlotPhotosView for select/delete support
+                // This NavigationLink auto-activates, sending the user straight to the photo grid
+                LazyVStack(alignment: .leading, spacing: 20) {
+                    ForEach(slotGroups, id: \.label) { group in
+                        slotSection(group.label, photos: group.photos)
                     }
                 }
                 .padding(.horizontal, 2)
@@ -409,9 +440,10 @@ struct ActivityPhotosGridView: View {
 
                 if let date = dateFromFilename(filename) {
                     let info = MediaService.shared.photoFileInfo(filename: filename)
-                    let parts = [date, info?.resolution, info?.size].compactMap { $0 }
-                    Text(parts.joined(separator: " / "))
-                        .font(.system(size: 8, weight: .medium))
+                    let parts = [date, info?.format, info?.resolution, info?.size].compactMap { $0 }
+                    Text(parts.joined(separator: " · "))
+                        .font(.system(size: 7, weight: .medium))
+                        .lineLimit(1)
                         .foregroundStyle(.white)
                         .padding(.horizontal, 4)
                         .padding(.vertical, 2)
@@ -426,7 +458,7 @@ struct ActivityPhotosGridView: View {
 
     private func dateFromFilename(_ filename: String) -> String? {
         guard let lastComponent = filename.split(separator: "/").last else { return nil }
-        let name = lastComponent.replacingOccurrences(of: ".jpg", with: "")
+        let name = (String(lastComponent) as NSString).deletingPathExtension
         guard let datePart = name.split(separator: "_").first else { return nil }
         // Parse yyyy-MM-dd into "Mon DD, YY"
         let parts = datePart.split(separator: "-")
@@ -568,14 +600,15 @@ struct SlotPhotosView: View {
                     Spacer()
                     HStack {
                         if let info = MediaService.shared.photoFileInfo(filename: filename) {
-                            let datePart = filename.split(separator: "/").last?
-                                .replacingOccurrences(of: ".jpg", with: "")
+                            let datePart = filename.split(separator: "/").last
+                                .map { (String($0) as NSString).deletingPathExtension }?
                                 .split(separator: "_").first
                                 .map(String.init) ?? ""
                             let dateLabel = formatDate(datePart)
-                            let parts = [dateLabel, info.resolution, info.size].compactMap { $0 }
-                            Text(parts.joined(separator: " / "))
-                                .font(.system(size: 8, weight: .medium))
+                            let parts = [dateLabel, info.format, info.resolution, info.size].compactMap { $0 }
+                            Text(parts.joined(separator: " · "))
+                                .font(.system(size: 7, weight: .medium))
+                                .lineLimit(1)
                                 .foregroundStyle(.white)
                                 .padding(.horizontal, 4)
                                 .padding(.vertical, 2)

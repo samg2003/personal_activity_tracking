@@ -107,7 +107,7 @@ struct PhotoComparisonCard: View {
     /// Extract a human-readable date (including year) from the photo filename
     private func dateFromFilename(_ filename: String) -> String? {
         guard let lastComponent = filename.split(separator: "/").last else { return nil }
-        let base = lastComponent.replacingOccurrences(of: ".jpg", with: "")
+        let base = (String(lastComponent) as NSString).deletingPathExtension
         let parts = base.split(separator: "_")
         guard let datePart = parts.first else { return nil }
 

@@ -305,8 +305,8 @@ daily-activity-tracker/
 **Rationale**: Avoids join tables for a personal app. Filtering ~200 activities in memory is negligible. Makes the schema simpler and more flexible to extend (add a new schedule type = add an enum case, no migration).
 
 ### ADR-3: Photos in FileManager, Paths in SwiftData
-**Decision**: Save images to `Documents/ActivityPhotos/{activityID}/{date}.jpg`. Store filename in `ActivityLog.photoFilename`.
-**Rationale**: Avoids bloating the SwiftData store. CloudKit has payload limits; large binaries are better synced via CloudKit Assets separately or excluded from sync.
+**Decision**: Save images to `Documents/ActivityPhotos/{activityID}/{date}.{heic|jpg}`. Store filename in `ActivityLog.photoFilename`. User chooses format (HEIC default, JPEG) and capture resolution (1080p/2K/4K/Original, default 4K) in Photo Bank settings.
+**Rationale**: Avoids bloating the SwiftData store. HEIC offers ~40% smaller files vs JPEG at similar quality. Both formats are read-compatible, so switching the setting doesn't break existing photos. CloudKit has payload limits; large binaries are better synced via CloudKit Assets separately or excluded from sync.
 
 ### ADR-4: Dependency Ordering via Soft References
 **Decision**: Activity has an optional `sortAfter` relationship to another Activity.

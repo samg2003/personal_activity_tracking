@@ -135,11 +135,11 @@ struct PhotoTimelineView: View {
         }
     }
 
-    /// Extract display date from filename like "UUID/2026-02-12_083000.jpg"
+    /// Extract display date from filename like "UUID/2026-02-12_083000.heic"
     private func dateFromFilename(_ path: String?) -> String {
         guard let path = path else { return "" }
         let filename = path.components(separatedBy: "/").last ?? ""
-        let dateStr = filename.replacingOccurrences(of: ".jpg", with: "")
+        let dateStr = (filename as NSString).deletingPathExtension
             .replacingOccurrences(of: "_", with: " ")
         // Return just the date part
         return String(dateStr.prefix(10))

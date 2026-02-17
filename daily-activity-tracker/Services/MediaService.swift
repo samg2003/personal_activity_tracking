@@ -1,5 +1,79 @@
 import Foundation
 import UIKit
+import UniformTypeIdentifiers
+
+/// User-selectable photo file format
+enum PhotoFormat: String, CaseIterable, Identifiable {
+    case heic = "HEIC"
+    case jpeg = "JPEG"
+
+    var id: String { rawValue }
+    var fileExtension: String {
+        switch self {
+        case .heic: return "heic"
+        case .jpeg: return "jpg"
+        }
+    }
+
+    static let userDefaultsKey = "photoSaveFormat"
+    static var current: PhotoFormat {
+        get {
+            guard let raw = UserDefaults.standard.string(forKey: userDefaultsKey),
+                  let fmt = PhotoFormat(rawValue: raw) else { return .heic }
+            return fmt
+        }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: userDefaultsKey) }
+    }
+}
+
+/// User-selectable photo save resolution (max dimension)
+enum PhotoSaveResolution: String, CaseIterable, Identifiable {
+    case p1080 = "1080p"
+    case k2 = "2K"
+    case k4 = "4K"
+    case original = "Original"
+
+    var id: String { rawValue }
+
+    /// Max pixel dimension (longest edge). nil = no resize.
+    var maxDimension: CGFloat? {
+        switch self {
+        case .p1080: return 1080
+        case .k2: return 2560
+        case .k4: return 3840
+        case .original: return nil
+        }
+    }
+
+    static let userDefaultsKey = "photoSaveResolution"
+    static var current: PhotoSaveResolution {
+        get {
+            guard let raw = UserDefaults.standard.string(forKey: userDefaultsKey),
+                  let res = PhotoSaveResolution(rawValue: raw) else { return .k4 }
+            return res
+        }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: userDefaultsKey) }
+    }
+}
+
+/// Supported photo extensions for loading/filtering
+private let photoExtensions: Set<String> = ["jpg", "jpeg", "heic"]
+
+/// Check if a filename is a supported photo
+private func isPhoto(_ filename: String) -> Bool {
+    let ext = (filename as NSString).pathExtension.lowercased()
+    return photoExtensions.contains(ext)
+}
+
+/// Strip the file extension from a photo filename (handles .jpg, .jpeg, .heic)
+private func stripPhotoExtension(_ filename: String) -> String {
+    let ns = filename as NSString
+    let ext = ns.pathExtension.lowercased()
+    if photoExtensions.contains(ext) {
+        return ns.deletingPathExtension
+    }
+    return filename
+}
 
 /// Handles saving and loading photos for activities
 final class MediaService {
@@ -26,12 +100,17 @@ final class MediaService {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd_HHmmss"
         let datePart = formatter.string(from: date)
-        // Include sanitized slot name in filename when provided
         let slotSuffix = slot.map { "_\(Self.sanitize($0))" } ?? ""
-        let filename = "\(datePart)\(slotSuffix).jpg"
+
+        let format = PhotoFormat.current
+        let filename = "\(datePart)\(slotSuffix).\(format.fileExtension)"
         let fileURL = activityDir.appendingPathComponent(filename)
 
-        guard let data = image.jpegData(compressionQuality: 0.8) else { return nil }
+        // Resize + normalize orientation/pixel format in one pass
+        let prepared = prepareForSaving(image)
+
+        // Encode in the selected format
+        guard let data = encodeImage(prepared, format: format) else { return nil }
 
         do {
             try data.write(to: fileURL)
@@ -41,24 +120,26 @@ final class MediaService {
         }
     }
 
-    /// Load a photo by its relative filename
+    /// Load a photo by its relative filename (supports .jpg, .heic)
     func loadPhoto(filename: String) -> UIImage? {
         let url = photosDirectory.appendingPathComponent(filename)
         guard let data = try? Data(contentsOf: url) else { return nil }
         return UIImage(data: data)
     }
 
-    /// Get file size (formatted) and friendly resolution for a photo
-    func photoFileInfo(filename: String) -> (size: String, resolution: String)? {
+    /// Get file size (formatted), resolution label, and format for a photo
+    func photoFileInfo(filename: String) -> (size: String, resolution: String, format: String)? {
         let url = photosDirectory.appendingPathComponent(filename)
         guard let attrs = try? fileManager.attributesOfItem(atPath: url.path),
               let bytes = attrs[.size] as? Int64 else { return nil }
         let size = ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+        let ext = url.pathExtension.lowercased()
+        let format = ext == "heic" ? "HEC" : "JPG"
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
               let w = props[kCGImagePropertyPixelWidth] as? Int,
               let h = props[kCGImagePropertyPixelHeight] as? Int else {
-            return (size: size, resolution: "?")
+            return (size: size, resolution: "?", format: format)
         }
         let maxDim = max(w, h)
         let res: String
@@ -69,7 +150,7 @@ final class MediaService {
         case ..<3200: res = "2K"
         default: res = "4K"
         }
-        return (size: size, resolution: res)
+        return (size: size, resolution: res, format: format)
     }
 
     /// Get all photo filenames for an activity, sorted chronologically
@@ -77,7 +158,7 @@ final class MediaService {
         let activityDir = photosDirectory.appendingPathComponent(activityID.uuidString)
         guard let files = try? fileManager.contentsOfDirectory(atPath: activityDir.path) else { return [] }
         return files
-            .filter { $0.hasSuffix(".jpg") }
+            .filter { isPhoto($0) }
             .sorted()
             .map { "\(activityID.uuidString)/\($0)" }
     }
@@ -86,8 +167,7 @@ final class MediaService {
     func allPhotos(for activityID: UUID, slot: String) -> [String] {
         let sanitized = Self.sanitize(slot)
         return allPhotos(for: activityID).filter { filename in
-            // Match files containing the slot suffix before .jpg
-            let base = filename.replacingOccurrences(of: ".jpg", with: "")
+            let base = stripPhotoExtension(filename)
             return base.hasSuffix("_\(sanitized)")
         }
     }
@@ -111,14 +191,12 @@ final class MediaService {
             .filter { $0.isLetter || $0.isNumber || $0 == "-" }
     }
 
-    /// Extract the slot name from a photo filename (e.g. "UUID/2026-02-12_083000_front-view.jpg" → "front-view")
+    /// Extract the slot name from a photo filename (e.g. "UUID/2026-02-12_083000_front-view.heic" → "front-view")
     /// Returns nil for legacy filenames without a slot suffix.
     static func slotName(from filename: String) -> String? {
         guard let lastComponent = filename.split(separator: "/").last else { return nil }
-        let base = lastComponent.replacingOccurrences(of: ".jpg", with: "")
-        // Format: yyyy-MM-dd_HHmmss or yyyy-MM-dd_HHmmss_slot-name
+        let base = stripPhotoExtension(String(lastComponent))
         let parts = base.split(separator: "_", maxSplits: 2)
-        // 3 parts = date + time + slot
         guard parts.count >= 3 else { return nil }
         return String(parts[2])
     }
@@ -126,7 +204,7 @@ final class MediaService {
     /// Parse the date from a photo filename
     static func dateFromFilename(_ filename: String) -> Date? {
         guard let lastComponent = filename.split(separator: "/").last else { return nil }
-        let base = lastComponent.replacingOccurrences(of: ".jpg", with: "")
+        let base = stripPhotoExtension(String(lastComponent))
         let parts = base.split(separator: "_", maxSplits: 2)
         guard parts.count >= 2 else { return nil }
         let dateTimeStr = "\(parts[0])_\(parts[1])"
@@ -136,27 +214,27 @@ final class MediaService {
     }
 
     /// Rename a photo's date portion on disk. Returns the new relative filename or nil on failure.
-    /// Only changes the date (yyyy-MM-dd), preserving the original time and slot suffix.
+    /// Only changes the date (yyyy-MM-dd), preserving the original time, slot suffix, and file extension.
     func renamePhotoDate(_ filename: String, to newDate: Date) -> String? {
         guard let lastComponent = filename.split(separator: "/").last,
               let dirComponent = filename.split(separator: "/").first else { return nil }
 
-        let base = lastComponent.replacingOccurrences(of: ".jpg", with: "")
+        let lastStr = String(lastComponent)
+        let ext = (lastStr as NSString).pathExtension
+        let base = stripPhotoExtension(lastStr)
         let parts = base.split(separator: "_", maxSplits: 2)
         guard parts.count >= 2 else { return nil }
 
-        let originalTime = parts[1]  // Preserve original HHmmss
+        let originalTime = parts[1]
 
         let dateFmt = DateFormatter()
         dateFmt.dateFormat = "yyyy-MM-dd"
         let newDatePart = dateFmt.string(from: newDate)
 
-        // Rebuild: newDate_originalTime_slot.jpg or newDate_originalTime.jpg
         let slotSuffix = parts.count >= 3 ? "_\(parts[2])" : ""
-        let newFilename = "\(newDatePart)_\(originalTime)\(slotSuffix).jpg"
+        let newFilename = "\(newDatePart)_\(originalTime)\(slotSuffix).\(ext)"
         let newRelative = "\(dirComponent)/\(newFilename)"
 
-        // Avoid no-op rename
         if filename == newRelative { return filename }
 
         let oldURL = photosDirectory.appendingPathComponent(filename)
@@ -180,9 +258,8 @@ final class MediaService {
         return contents.compactMap { url -> UUID? in
             guard url.hasDirectoryPath else { return nil }
             let id = UUID(uuidString: url.lastPathComponent)
-            // Only include if directory contains at least one jpg
             if let id, let files = try? fileManager.contentsOfDirectory(atPath: url.path),
-               files.contains(where: { $0.hasSuffix(".jpg") }) {
+               files.contains(where: { isPhoto($0) }) {
                 return id
             }
             return nil
@@ -227,5 +304,61 @@ final class MediaService {
             }
         }
         return total
+    }
+
+    // MARK: - Private Helpers
+
+    /// Prepare image for saving: resize to user's selected resolution AND normalize
+    /// orientation + pixel format in a single renderer pass.
+    /// Camera images have non-standard pixel formats (YCbCr, wide color) and orientation
+    /// metadata. Drawing through UIGraphicsImageRenderer converts to standard sRGB and
+    /// applies orientation, producing a clean image for both JPEG and HEIC encoding.
+    private func prepareForSaving(_ image: UIImage) -> UIImage {
+        let targetSize: CGSize
+        if let maxDim = PhotoSaveResolution.current.maxDimension {
+            let longestEdge = max(image.size.width, image.size.height)
+            if longestEdge > maxDim {
+                let scale = maxDim / longestEdge
+                targetSize = CGSize(width: (image.size.width * scale).rounded(.down),
+                                    height: (image.size.height * scale).rounded(.down))
+            } else {
+                targetSize = image.size
+            }
+        } else {
+            targetSize = image.size
+        }
+
+        // Scale 1.0 is critical: UIGraphicsImageRenderer defaults to device screen
+        // scale (3x on modern iPhones). Without this, a 4K image becomes 12K pixels.
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1.0
+        let renderer = UIGraphicsImageRenderer(size: targetSize, format: format)
+        return renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: targetSize))
+        }
+    }
+
+    /// Encode a prepared image in the selected format.
+    /// Image must already be normalized via prepareForSaving().
+    private func encodeImage(_ preparedImage: UIImage, format: PhotoFormat) -> Data? {
+        switch format {
+        case .heic:
+            guard let cgImage = preparedImage.cgImage else {
+                return preparedImage.jpegData(compressionQuality: 0.8)
+            }
+            let data = NSMutableData()
+            guard let dest = CGImageDestinationCreateWithData(
+                data, UTType.heic.identifier as CFString, 1, nil
+            ) else { return preparedImage.jpegData(compressionQuality: 0.8) }
+            // HEIC quality curve is much flatter than JPEG: 0.5 ≈ JPEG 0.8 visually
+            let options: [CFString: Any] = [kCGImageDestinationLossyCompressionQuality: 0.5]
+            CGImageDestinationAddImage(dest, cgImage, options as CFDictionary)
+            guard CGImageDestinationFinalize(dest) else {
+                return preparedImage.jpegData(compressionQuality: 0.8)
+            }
+            return data as Data
+        case .jpeg:
+            return preparedImage.jpegData(compressionQuality: 0.8)
+        }
     }
 }
