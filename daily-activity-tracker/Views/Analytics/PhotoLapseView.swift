@@ -1,7 +1,9 @@
 import SwiftUI
+import AVKit
+import AVFoundation
 
-/// A photo time-lapse viewer that plays like a video — photos change
-/// in-place driven by a scrubber. No horizontal scrolling.
+/// A photo time-lapse viewer that stitches photos into a real video
+/// and plays it with AVPlayer for perfectly smooth scrubbing.
 struct PhotoLapseView: View {
     let activityID: UUID
     let activityColor: String
@@ -19,11 +21,13 @@ struct PhotoLapseView: View {
                     .padding(.vertical, 24)
             } else {
                 ForEach(slotData, id: \.slot) { entry in
-                    SlotLapseSection(
+                    SlotVideoSection(
                         slotLabel: entry.slot,
                         photos: entry.photos,
+                        cacheKey: "\(activityID.uuidString)_\(entry.slot)",
                         accentColor: Color(hex: activityColor),
-                        showLabel: slotData.count > 1
+                        showLabel: slotData.count > 1,
+                        frameDuration: 0.4
                     )
                 }
             }
@@ -49,25 +53,26 @@ struct PhotoLapseView: View {
     }
 }
 
-// MARK: - Per-Slot Lapse Section
+// MARK: - Per-Slot Video Section
 
-/// One in-place video-style timeline for a single photo slot.
-/// The scrubber drives which frame (photo) is displayed — no scrolling.
-private struct SlotLapseSection: View {
+private struct SlotVideoSection: View {
     let slotLabel: String
     let photos: [String]
+    let cacheKey: String
     let accentColor: Color
     let showLabel: Bool
+    let frameDuration: Double
 
-    @State private var currentIndex: Int = 0
-    @State private var isPlaying: Bool = false
-    @State private var playTimer: Timer? = nil
+    @State private var player: AVPlayer?
+    @State private var isGenerating = true
+    @State private var currentTime: Double = 0
+    @State private var isPlaying = false
+    @State private var timeObserver: Any?
 
-    // Preloaded images for instant scrubbing
-    @State private var imageCache: [Int: UIImage] = [:]
-    @State private var cacheReady = false
-
-    private var photoCount: Int { photos.count }
+    private var totalDuration: Double { Double(photos.count) * frameDuration }
+    private var currentIndex: Int {
+        min(Int(currentTime / frameDuration), photos.count - 1)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -79,19 +84,20 @@ private struct SlotLapseSection: View {
                     .padding(.horizontal, 4)
             }
 
-            // Fixed frame — photo changes in-place
+            // Video player area
             ZStack {
                 Color.black
 
-                if let image = imageCache[currentIndex] {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFit()
-                        .id(currentIndex)
-                        .transition(.opacity.animation(.linear(duration: 0.08)))
-                } else if !cacheReady {
-                    ProgressView()
-                        .tint(.white)
+                if isGenerating {
+                    VStack(spacing: 8) {
+                        ProgressView()
+                            .tint(.white)
+                        Text("Building time-lapse…")
+                            .font(.caption2)
+                            .foregroundStyle(.white.opacity(0.6))
+                    }
+                } else if let player {
+                    VideoPlayerView(player: player)
                 }
             }
             .frame(maxWidth: .infinity)
@@ -99,127 +105,169 @@ private struct SlotLapseSection: View {
             .clipShape(RoundedRectangle(cornerRadius: 14))
 
             // Controls
-            VStack(spacing: 6) {
-                // Scrubber
-                LapseScrubber(
-                    currentIndex: $currentIndex,
-                    totalCount: photoCount,
-                    accentColor: accentColor
-                )
+            if !isGenerating {
+                VStack(spacing: 6) {
+                    // Seek scrubber
+                    VideoScrubber(
+                        currentTime: $currentTime,
+                        duration: totalDuration,
+                        accentColor: accentColor,
+                        onSeek: { time in
+                            seekTo(time)
+                        }
+                    )
 
-                // Date + play button + position
-                HStack {
-                    if currentIndex < photos.count,
-                       let date = MediaService.dateFromFilename(photos[currentIndex]) {
-                        Text(date, format: .dateTime.month(.abbreviated).day().year())
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(.secondary)
-                    }
+                    // Date + play + counter
+                    HStack {
+                        if currentIndex < photos.count,
+                           let date = MediaService.dateFromFilename(photos[currentIndex]) {
+                            Text(date, format: .dateTime.month(.abbreviated).day().year())
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.secondary)
+                        }
 
-                    Spacer()
+                        Spacer()
 
-                    // Play/pause auto-advance
-                    if photoCount > 1 {
                         Button {
                             togglePlayback()
                         } label: {
                             Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                                .font(.system(size: 22))
+                                .font(.system(size: 24))
                                 .foregroundStyle(accentColor)
                         }
                         .buttonStyle(.plain)
+
+                        Spacer()
+
+                        Text("\(currentIndex + 1) / \(photos.count)")
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.tertiary)
                     }
-
-                    Spacer()
-
-                    Text("\(currentIndex + 1) / \(photoCount)")
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 4)
                 }
-                .padding(.horizontal, 4)
             }
         }
-        .onAppear { preloadImages() }
-        .onDisappear { stopPlayback() }
+        .onAppear { generateVideo() }
+        .onDisappear { cleanup() }
     }
 
-    // Preload all images into memory for instant scrubbing
-    private func preloadImages() {
-        DispatchQueue.global(qos: .userInitiated).async {
-            var cache: [Int: UIImage] = [:]
-            for (index, filename) in photos.enumerated() {
-                if let img = MediaService.shared.loadPhoto(filename: filename) {
-                    cache[index] = img
+    private func generateVideo() {
+        LapseVideoService.shared.generateVideo(photos: photos, cacheKey: cacheKey) { url in
+            guard let url else {
+                isGenerating = false
+                return
+            }
+
+            let avPlayer = AVPlayer(url: url)
+            avPlayer.actionAtItemEnd = .pause
+
+            // Observe time for scrubber sync
+            let interval = CMTime(seconds: 0.05, preferredTimescale: 600)
+            let observer = avPlayer.addPeriodicTimeObserver(forInterval: interval, queue: .main) { time in
+                if !isSeeking {
+                    currentTime = time.seconds
                 }
+                // Update playing state
+                isPlaying = avPlayer.rate > 0
             }
-            DispatchQueue.main.async {
-                imageCache = cache
-                cacheReady = true
-            }
+
+            timeObserver = observer
+            player = avPlayer
+            isGenerating = false
+        }
+    }
+
+    @State private var isSeeking = false
+
+    private func seekTo(_ time: Double) {
+        guard let player else { return }
+        isSeeking = true
+        let cmTime = CMTime(seconds: time, preferredTimescale: 600)
+        player.seek(to: cmTime, toleranceBefore: .zero, toleranceAfter: .zero) { _ in
+            isSeeking = false
         }
     }
 
     private func togglePlayback() {
+        guard let player else { return }
         if isPlaying {
-            stopPlayback()
+            player.pause()
         } else {
-            startPlayback()
-        }
-    }
-
-    private func startPlayback() {
-        isPlaying = true
-        // If at end, restart from beginning
-        if currentIndex >= photoCount - 1 {
-            currentIndex = 0
-        }
-        playTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { _ in
-            if currentIndex < photoCount - 1 {
-                currentIndex += 1
-            } else {
-                stopPlayback()
+            // If at end, restart
+            if currentTime >= totalDuration - 0.1 {
+                seekTo(0)
             }
+            player.play()
         }
+        isPlaying.toggle()
     }
 
-    private func stopPlayback() {
-        isPlaying = false
-        playTimer?.invalidate()
-        playTimer = nil
+    private func cleanup() {
+        if let observer = timeObserver, let player {
+            player.removeTimeObserver(observer)
+        }
+        player?.pause()
+        player = nil
     }
 }
 
-// MARK: - Scrubber
+// MARK: - AVPlayer UIKit wrapper (no default controls)
 
-/// A draggable scrubber — like a video timeline seek bar
-private struct LapseScrubber: View {
-    @Binding var currentIndex: Int
-    let totalCount: Int
+private struct VideoPlayerView: UIViewRepresentable {
+    let player: AVPlayer
+
+    func makeUIView(context: Context) -> UIView {
+        let view = PlayerUIView()
+        view.player = player
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        (uiView as? PlayerUIView)?.player = player
+    }
+
+    private class PlayerUIView: UIView {
+        var player: AVPlayer? {
+            didSet {
+                playerLayer.player = player
+                playerLayer.videoGravity = .resizeAspect
+            }
+        }
+
+        override class var layerClass: AnyClass { AVPlayerLayer.self }
+        private var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+    }
+}
+
+// MARK: - Video Scrubber
+
+private struct VideoScrubber: View {
+    @Binding var currentTime: Double
+    let duration: Double
     let accentColor: Color
+    var onSeek: ((Double) -> Void)?
 
     @State private var isDragging = false
 
     var body: some View {
         GeometryReader { geo in
             let width = geo.size.width
+            let fraction = duration > 0 ? min(1, max(0, currentTime / duration)) : 0
 
             ZStack(alignment: .leading) {
-                // Track background
                 Capsule()
                     .fill(Color(.systemGray5))
                     .frame(height: 4)
 
-                // Filled progress
                 Capsule()
                     .fill(accentColor)
-                    .frame(width: progressWidth(in: width), height: 4)
+                    .frame(width: width * fraction, height: 4)
 
-                // Thumb
                 Circle()
                     .fill(accentColor)
                     .frame(width: isDragging ? 20 : 12, height: isDragging ? 20 : 12)
                     .shadow(color: accentColor.opacity(0.4), radius: isDragging ? 6 : 2)
-                    .offset(x: thumbOffset(in: width))
+                    .offset(x: max(0, width * fraction - (isDragging ? 10 : 6)))
             }
             .frame(height: 24)
             .contentShape(Rectangle())
@@ -227,11 +275,10 @@ private struct LapseScrubber: View {
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
                         isDragging = true
-                        let fraction = max(0, min(1, value.location.x / width))
-                        let newIndex = Int(round(fraction * Double(totalCount - 1)))
-                        if newIndex != currentIndex {
-                            currentIndex = newIndex
-                        }
+                        let frac = max(0, min(1, value.location.x / width))
+                        let seekTime = frac * duration
+                        currentTime = seekTime
+                        onSeek?(seekTime)
                     }
                     .onEnded { _ in
                         isDragging = false
@@ -240,17 +287,5 @@ private struct LapseScrubber: View {
             .animation(.interactiveSpring(response: 0.15), value: isDragging)
         }
         .frame(height: 24)
-    }
-
-    private func progressWidth(in totalWidth: CGFloat) -> CGFloat {
-        guard totalCount > 1 else { return totalWidth }
-        return totalWidth * CGFloat(currentIndex) / CGFloat(totalCount - 1)
-    }
-
-    private func thumbOffset(in totalWidth: CGFloat) -> CGFloat {
-        guard totalCount > 1 else { return 0 }
-        let pos = totalWidth * CGFloat(currentIndex) / CGFloat(totalCount - 1)
-        let halfThumb: CGFloat = isDragging ? 10 : 6
-        return max(0, pos - halfThumb)
     }
 }
