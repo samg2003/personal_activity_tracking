@@ -56,6 +56,82 @@ enum PhotoSaveResolution: String, CaseIterable, Identifiable {
     }
 }
 
+/// User-selectable compression quality
+enum PhotoQuality: String, CaseIterable, Identifiable {
+    case low = "Low"
+    case medium = "Medium"
+    case high = "High"
+    case max = "Max"
+
+    var id: String { rawValue }
+
+    /// JPEG compression quality (0.0–1.0)
+    var jpegQuality: CGFloat {
+        switch self {
+        case .low: return 0.5
+        case .medium: return 0.7
+        case .high: return 0.85
+        case .max: return 0.95
+        }
+    }
+
+    /// HEIC compression quality (flatter curve — lower values still look great)
+    var heicQuality: CGFloat {
+        switch self {
+        case .low: return 0.3
+        case .medium: return 0.5
+        case .high: return 0.65
+        case .max: return 0.8
+        }
+    }
+
+    /// Estimated file size range string for a given resolution and format
+    func estimatedSize(resolution: PhotoSaveResolution, format: PhotoFormat) -> String {
+        // Base sizes in MB for a 4K photo at quality=high in JPEG
+        let baseMB: Double
+        switch resolution {
+        case .p1080: baseMB = 0.4
+        case .k2:    baseMB = 0.9
+        case .k4:    baseMB = 1.8
+        case .original: baseMB = 2.5
+        }
+
+        let qualityMultiplier: Double
+        switch self {
+        case .low:    qualityMultiplier = 0.4
+        case .medium: qualityMultiplier = 0.7
+        case .high:   qualityMultiplier = 1.0
+        case .max:    qualityMultiplier = 1.5
+        }
+
+        let formatMultiplier: Double = (format == .heic) ? 0.6 : 1.0
+
+        let estimated = baseMB * qualityMultiplier * formatMultiplier
+        // Show a range (±30%)
+        let low = estimated * 0.7
+        let high = estimated * 1.3
+
+        func fmt(_ v: Double) -> String {
+            if v < 1.0 {
+                return "\(Int(v * 1000))KB"
+            } else {
+                return String(format: "%.1fMB", v)
+            }
+        }
+        return "\(fmt(low)) – \(fmt(high))"
+    }
+
+    static let userDefaultsKey = "photoSaveQuality"
+    static var current: PhotoQuality {
+        get {
+            guard let raw = UserDefaults.standard.string(forKey: userDefaultsKey),
+                  let q = PhotoQuality(rawValue: raw) else { return .high }
+            return q
+        }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: userDefaultsKey) }
+    }
+}
+
 /// Supported photo extensions for loading/filtering
 private let photoExtensions: Set<String> = ["jpg", "jpeg", "heic"]
 
@@ -341,24 +417,24 @@ final class MediaService {
     /// Encode a prepared image in the selected format.
     /// Image must already be normalized via prepareForSaving().
     private func encodeImage(_ preparedImage: UIImage, format: PhotoFormat) -> Data? {
+        let quality = PhotoQuality.current
         switch format {
         case .heic:
             guard let cgImage = preparedImage.cgImage else {
-                return preparedImage.jpegData(compressionQuality: 0.8)
+                return preparedImage.jpegData(compressionQuality: quality.jpegQuality)
             }
             let data = NSMutableData()
             guard let dest = CGImageDestinationCreateWithData(
                 data, UTType.heic.identifier as CFString, 1, nil
-            ) else { return preparedImage.jpegData(compressionQuality: 0.8) }
-            // HEIC quality curve is much flatter than JPEG: 0.5 ≈ JPEG 0.8 visually
-            let options: [CFString: Any] = [kCGImageDestinationLossyCompressionQuality: 0.5]
+            ) else { return preparedImage.jpegData(compressionQuality: quality.jpegQuality) }
+            let options: [CFString: Any] = [kCGImageDestinationLossyCompressionQuality: quality.heicQuality]
             CGImageDestinationAddImage(dest, cgImage, options as CFDictionary)
             guard CGImageDestinationFinalize(dest) else {
-                return preparedImage.jpegData(compressionQuality: 0.8)
+                return preparedImage.jpegData(compressionQuality: quality.jpegQuality)
             }
             return data as Data
         case .jpeg:
-            return preparedImage.jpegData(compressionQuality: 0.8)
+            return preparedImage.jpegData(compressionQuality: quality.jpegQuality)
         }
     }
 }

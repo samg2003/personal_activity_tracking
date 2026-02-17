@@ -12,6 +12,7 @@ struct PhotoBankView: View {
 
     @State private var photoFormat: PhotoFormat = PhotoFormat.current
     @State private var photoResolution: PhotoSaveResolution = PhotoSaveResolution.current
+    @State private var photoQuality: PhotoQuality = PhotoQuality.current
 
     var body: some View {
         List {
@@ -86,7 +87,7 @@ struct PhotoBankView: View {
             }
 
             // Photo capture settings
-            Section("Photo Settings") {
+            Section {
                 Picker("Format", selection: $photoFormat) {
                     ForEach(PhotoFormat.allCases) { fmt in
                         Text(fmt.rawValue).tag(fmt)
@@ -106,6 +107,30 @@ struct PhotoBankView: View {
                 .onChange(of: photoResolution) { _, newVal in
                     PhotoSaveResolution.current = newVal
                 }
+
+                Picker("Quality", selection: $photoQuality) {
+                    ForEach(PhotoQuality.allCases) { q in
+                        Text(q.rawValue).tag(q)
+                    }
+                }
+                .font(.subheadline)
+                .onChange(of: photoQuality) { _, newVal in
+                    PhotoQuality.current = newVal
+                }
+
+                HStack {
+                    Text("Est. Photo Size")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(photoQuality.estimatedSize(resolution: photoResolution, format: photoFormat))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Photo & Video Quality")
+            } footer: {
+                Text("Quality affects photo capture file size. Lower quality = smaller files.")
             }
 
             // Cached time-lapse videos
