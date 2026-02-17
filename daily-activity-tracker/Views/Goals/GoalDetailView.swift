@@ -293,44 +293,62 @@ struct GoalDetailView: View {
         }
     }
 
-    /// Photo metric: thumbnail grid
+    /// Photo metric: miniaturized first → latest side-by-side comparison
     @ViewBuilder
     private func photoMetricDisplay(activity: Activity) -> some View {
-        let photoLogs = activity.logs
-            .filter { !$0.allPhotoFiles.isEmpty }
-            .sorted { $0.date > $1.date }
-            .prefix(6)
+        let allPhotos = MediaService.shared.allPhotos(for: activity.id)
 
-        if photoLogs.isEmpty {
+        if allPhotos.isEmpty {
             Text("No photos logged yet")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         } else {
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 3), spacing: 4) {
-                ForEach(Array(photoLogs), id: \.id) { log in
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Color(hex: goal.hexColor).opacity(0.2))
-                        .frame(height: 50)
-                        .overlay {
-                            if let filename = log.allPhotoFiles.first,
-                               let uiImage = MediaService.shared.loadPhoto(filename: filename) {
-                                Image(uiImage: uiImage)
-                                    .resizable()
-                                    .scaledToFill()
-                                    .frame(height: 50)
-                                    .clipped()
-                                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                            } else {
-                                VStack(spacing: 2) {
-                                    Image(systemName: "photo.fill")
-                                        .font(.caption2)
-                                    Text(log.date, style: .date)
-                                        .font(.system(size: 8))
-                                }
-                                .foregroundStyle(.secondary)
-                            }
-                        }
+            VStack(spacing: 6) {
+                HStack(alignment: .center, spacing: 8) {
+                    // First photo
+                    miniPhoto(filename: allPhotos.first, label: "First")
+
+                    if allPhotos.count > 1 {
+                        Image(systemName: "arrow.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
+                        // Latest photo
+                        miniPhoto(filename: allPhotos.last, label: "Latest")
+                    }
                 }
+
+                Text("\(allPhotos.count) photo\(allPhotos.count == 1 ? "" : "s")")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func miniPhoto(filename: String?, label: String) -> some View {
+        VStack(spacing: 3) {
+            if let filename, let image = MediaService.shared.loadPhoto(filename: filename) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 60, height: 80)
+                    .clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+            } else {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color.gray.opacity(0.15))
+                    .frame(width: 60, height: 80)
+            }
+
+            Text(label)
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(.secondary)
+
+            if let filename, let date = MediaService.dateFromFilename(filename) {
+                Text(date, format: .dateTime.month(.abbreviated).day())
+                    .font(.system(size: 8))
+                    .foregroundStyle(.tertiary)
             }
         }
     }
