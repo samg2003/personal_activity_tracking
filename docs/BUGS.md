@@ -125,6 +125,13 @@
     - [87] `shouldShow` sticky: ANY completion hid sticky activity, even if only 1/3 sessions done
   - AI Reply: Fixed all 6 — (82) container child skip now checks `childCompleted == 0` before skipping. (83-84) Streak skip replaced with `isActivityDayFullySkipped` (skip && no completions). (85) Container streak replaced with `isContainerDayFullySkipped` (all children skipped, none completed). (86) Carry-forward now counts completions vs `sessionsPerDay`. (87) Sticky counts completed vs `sessionsPerDay`.
 
+- [88] **DashboardView: multi-session only worked for checkbox/metric, not value type.** [AI found]
+  - `isFullyCompleted` had multi-session check inside the checkbox/metric switch case only — value type checked ANY completion log.
+  - `activityView` rendered `.value` as a single row with no slot awareness.
+  - `logValue`/`removeValueLog`/`latestValue` had no slot parameter — couldn't distinguish per-session logs.
+  - Result: logging one value session marked ALL sessions complete in the UI.
+  - AI Reply: Fixed — unified `isFullyCompleted` multi-session check before type switch (applies to all types). Value type now renders per-slot with slot-aware `logValue(slot:)`, `removeValueLog(slot:)`, `latestValue(slot:)`. Cumulative is all-day, doesn't apply.
+
 - [46] **Export/Import loses `aggregationModeRaw`** [AI found]
   - AI Reply: Fixed — added `aggregationModeRaw` to `ActivityDTO`: field, both initializers, custom decoder, export mapping, and import mapping. Older export files without this field gracefully decode as `nil` (defaults to `.sum`). No breaking changes.
 

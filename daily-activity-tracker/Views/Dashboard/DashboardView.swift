@@ -534,14 +534,25 @@ struct DashboardView: View {
                     )
                 }
             case .value:
-                ValueInputRow(
-                    activity: activity,
-                    currentValue: latestValue(for: activity),
-                    onLog: { value in logValue(activity, value: value) },
-                    onSkip: { reason in skipActivity(activity, reason: reason) },
-                    onRemove: { removeValueLog(activity) },
-                    onTakePhoto: nil
-                )
+                if activity.isMultiSession, let slot {
+                    ValueInputRow(
+                        activity: activity,
+                        currentValue: latestValue(for: activity, slot: slot),
+                        onLog: { value in logValue(activity, value: value, slot: slot) },
+                        onSkip: { reason in skipActivity(activity, reason: reason, slot: slot) },
+                        onRemove: { removeValueLog(activity, slot: slot) },
+                        onTakePhoto: nil
+                    )
+                } else {
+                    ValueInputRow(
+                        activity: activity,
+                        currentValue: latestValue(for: activity),
+                        onLog: { value in logValue(activity, value: value) },
+                        onSkip: { reason in skipActivity(activity, reason: reason) },
+                        onRemove: { removeValueLog(activity) },
+                        onTakePhoto: nil
+                    )
+                }
             case .cumulative:
                 ValueInputRow(
                     activity: activity,
@@ -586,16 +597,14 @@ struct DashboardView: View {
     // MARK: - Completion Logic
 
     private func isFullyCompleted(_ activity: Activity) -> Bool {
-        switch activity.type {
-        case .checkbox, .metric:
-            if activity.isMultiSession {
-                // ALL sessions must have a completion log
-                return activity.timeSlots.allSatisfy { slot in
-                    isSessionCompleted(activity, slot: slot)
-                }
+        // Multi-session: ALL sessions must have a completion log (uniform for all types)
+        if activity.isMultiSession {
+            return activity.timeSlots.allSatisfy { slot in
+                isSessionCompleted(activity, slot: slot)
             }
-            return todayLogs.contains { $0.activity?.id == activity.id && $0.status == .completed }
-        case .value:
+        }
+        switch activity.type {
+        case .checkbox, .metric, .value:
             return todayLogs.contains { $0.activity?.id == activity.id && $0.status == .completed }
         case .cumulative:
             guard let target = activity.targetValue, target > 0 else { return false }
@@ -715,7 +724,24 @@ struct DashboardView: View {
         }
     }
 
-    private func logValue(_ activity: Activity, value: Double) {
+    private func logValue(_ activity: Activity, value: Double, slot: TimeSlot? = nil) {
+        if let slot, activity.isMultiSession {
+            // Multi-session: find existing log for this specific slot
+            if let existing = todayLogs.first(where: {
+                $0.activity?.id == activity.id && $0.status == .completed && $0.timeSlot == slot
+            }) {
+                modelContext.delete(existing)
+            }
+            let log = ActivityLog(activity: activity, date: today, status: .completed, value: value)
+            log.timeSlotRaw = slot.rawValue
+            modelContext.insert(log)
+            writeToHealthKit(activity: activity, value: value)
+            if isPhotoDue(for: activity) {
+                photoPromptLog = log
+                photoPromptActivity = activity
+            }
+            return
+        }
         if let existing = todayLogs.first(where: { $0.activity?.id == activity.id && $0.status == .completed }) {
             modelContext.delete(existing)
         }
@@ -743,13 +769,23 @@ struct DashboardView: View {
         }
     }
 
-    private func removeValueLog(_ activity: Activity) {
-        guard let log = todayLogs.first(where: { $0.activity?.id == activity.id && $0.status == .completed }) else { return }
+    private func removeValueLog(_ activity: Activity, slot: TimeSlot? = nil) {
+        let matchLog: ActivityLog?
+        if let slot, activity.isMultiSession {
+            matchLog = todayLogs.first(where: {
+                $0.activity?.id == activity.id && $0.status == .completed && $0.timeSlot == slot
+            })
+        } else {
+            matchLog = todayLogs.first(where: { $0.activity?.id == activity.id && $0.status == .completed })
+        }
+        guard let log = matchLog else { return }
         let oldValue = log.value
+        let oldSlotRaw = log.timeSlotRaw
         modelContext.delete(log)
         
         showUndo("Cleared \(activity.name)") {
             let restored = ActivityLog(activity: activity, date: today, status: .completed, value: oldValue)
+            restored.timeSlotRaw = oldSlotRaw
             modelContext.insert(restored)
         }
     }
@@ -888,8 +924,13 @@ struct DashboardView: View {
 
     // MARK: - Value Queries
 
-    private func latestValue(for activity: Activity) -> Double? {
-        todayLogs.first(where: { $0.activity?.id == activity.id && $0.status == .completed })?.value
+    private func latestValue(for activity: Activity, slot: TimeSlot? = nil) -> Double? {
+        if let slot, activity.isMultiSession {
+            return todayLogs.first(where: {
+                $0.activity?.id == activity.id && $0.status == .completed && $0.timeSlot == slot
+            })?.value
+        }
+        return todayLogs.first(where: { $0.activity?.id == activity.id && $0.status == .completed })?.value
     }
 
     private func cumulativeValue(for activity: Activity) -> Double {
