@@ -8,8 +8,8 @@ struct ContainerRowView: View {
     let scheduleEngine: ScheduleEngineProtocol
     let today: Date
     let allActivities: [Activity]
-    let onCompleteChild: (Activity) -> Void
-    let onSkipChild: (Activity, String) -> Void
+    let onCompleteChild: (Activity, TimeSlot?) -> Void
+    let onSkipChild: (Activity, String, TimeSlot?) -> Void
 
     /// When set, only show children applicable to this time slot
     var slotFilter: TimeSlot? = nil
@@ -109,7 +109,17 @@ struct ContainerRowView: View {
         childCompletion(child) >= 1.0
     }
 
-    private func isChildSkipped(_ child: Activity) -> Bool {
+    /// Whether a specific session of a child is completed
+    private func isChildSessionCompleted(_ child: Activity, slot: TimeSlot) -> Bool {
+        todayLogs.contains { $0.activity?.id == child.id && $0.status == .completed && $0.timeSlot == slot }
+    }
+
+    /// Whether a specific session of a child is skipped
+    private func isChildSessionSkipped(_ child: Activity, slot: TimeSlot) -> Bool {
+        todayLogs.contains { $0.activity?.id == child.id && $0.status == .skipped && $0.timeSlot == slot }
+    }
+
+    private func isChildFullySkipped(_ child: Activity) -> Bool {
         let childLogs = todayLogs.filter { $0.activity?.id == child.id }
         if child.isMultiSession {
             let nonCompleted = child.timeSlots.filter { slot in
@@ -122,20 +132,60 @@ struct ContainerRowView: View {
         return childLogs.contains { $0.status == .skipped }
     }
 
+    /// Count of completed sessions (not just fully-completed children)
     private var doneCount: Int {
-        todayChildren.filter { isChildCompleted($0) }.count
+        todayChildren.reduce(0) { sum, child in
+            if child.isMultiSession {
+                let slotsToCount = slotFilter.map { [$0] } ?? child.timeSlots
+                return sum + slotsToCount.filter { isChildSessionCompleted(child, slot: $0) }.count
+            }
+            return sum + (isChildCompleted(child) ? 1 : 0)
+        }
+    }
+
+    /// Total sessions count (not just children count)
+    private var totalCount: Int {
+        todayChildren.reduce(0) { sum, child in
+            if child.isMultiSession {
+                let slotsToCount = slotFilter.map { [$0] } ?? child.timeSlots
+                return sum + slotsToCount.count
+            }
+            return sum + 1
+        }
     }
 
     private var pendingChildren: [Activity] {
-        todayChildren.filter { !isChildCompleted($0) && !isChildSkipped($0) }
+        todayChildren.filter { child in
+            if child.isMultiSession {
+                let slotsToCheck = slotFilter.map { [$0] } ?? child.timeSlots
+                return slotsToCheck.contains { slot in
+                    !isChildSessionCompleted(child, slot: slot) && !isChildSessionSkipped(child, slot: slot)
+                }
+            }
+            return !isChildCompleted(child) && !isChildFullySkipped(child)
+        }
     }
-    
+
     private var completedChildren: [Activity] {
-        todayChildren.filter { isChildCompleted($0) }
+        todayChildren.filter { child in
+            if child.isMultiSession {
+                let slotsToCheck = slotFilter.map { [$0] } ?? child.timeSlots
+                return slotsToCheck.contains { isChildSessionCompleted(child, slot: $0) }
+            }
+            return isChildCompleted(child)
+        }
     }
-    
+
     private var skippedChildren: [Activity] {
-        todayChildren.filter { isChildSkipped($0) }
+        todayChildren.filter { child in
+            if child.isMultiSession {
+                let slotsToCheck = slotFilter.map { [$0] } ?? child.timeSlots
+                return slotsToCheck.contains { slot in
+                    isChildSessionSkipped(child, slot: slot) && !isChildSessionCompleted(child, slot: slot)
+                }
+            }
+            return isChildFullySkipped(child) && !isChildCompleted(child)
+        }
     }
 
     var body: some View {
@@ -167,7 +217,7 @@ struct ContainerRowView: View {
 
                     Spacer()
 
-                    Text("\(doneCount)/\(todayChildren.count)")
+                    Text("\(doneCount)/\(totalCount)")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
 
@@ -184,9 +234,17 @@ struct ContainerRowView: View {
             .contextMenu {
                 if !pendingChildren.isEmpty {
                     Button {
-                        pendingChildren
-                            .filter { $0.type == .checkbox }
-                            .forEach { onCompleteChild($0) }
+                        for child in pendingChildren.filter({ $0.type == .checkbox }) {
+                            if child.isMultiSession {
+                                let slotsToComplete = (slotFilter.map { [$0] } ?? child.timeSlots)
+                                    .filter { !isChildSessionCompleted(child, slot: $0) && !isChildSessionSkipped(child, slot: $0) }
+                                for slot in slotsToComplete {
+                                    onCompleteChild(child, slot)
+                                }
+                            } else {
+                                onCompleteChild(child, nil)
+                            }
+                        }
                     } label: {
                         Label("Complete All", systemImage: "checkmark.circle")
                     }
@@ -200,7 +258,17 @@ struct ContainerRowView: View {
                 
                 if !completedChildren.isEmpty {
                     Button(role: .destructive) {
-                        completedChildren.forEach { onCompleteChild($0) }
+                        for child in completedChildren {
+                            if child.isMultiSession {
+                                let slotsToUndo = (slotFilter.map { [$0] } ?? child.timeSlots)
+                                    .filter { isChildSessionCompleted(child, slot: $0) }
+                                for slot in slotsToUndo {
+                                    onCompleteChild(child, slot)
+                                }
+                            } else {
+                                onCompleteChild(child, nil)
+                            }
+                        }
                     } label: {
                         Label("Undo All", systemImage: "arrow.uturn.backward")
                     }
@@ -209,7 +277,17 @@ struct ContainerRowView: View {
             .confirmationDialog("Reason for skipping", isPresented: $showSkipSheet) {
                 ForEach(SkipReasons.defaults, id: \.self) { reason in
                     Button(reason) {
-                        pendingChildren.forEach { onSkipChild($0, reason) }
+                        for child in pendingChildren {
+                            if child.isMultiSession {
+                                let slotsToSkip = (slotFilter.map { [$0] } ?? child.timeSlots)
+                                    .filter { !isChildSessionCompleted(child, slot: $0) && !isChildSessionSkipped(child, slot: $0) }
+                                for slot in slotsToSkip {
+                                    onSkipChild(child, reason, slot)
+                                }
+                            } else {
+                                onSkipChild(child, reason, nil)
+                            }
+                        }
                     }
                 }
                 Button("Cancel", role: .cancel) { }
@@ -308,9 +386,17 @@ struct ContainerRowView: View {
                     // "Mark All Done" shortcut — only if there are still pending children
                     if !pendingChildren.isEmpty {
                         Button {
-                            todayChildren
-                                .filter { !isChildCompleted($0) && !isChildSkipped($0) && $0.type != .container }
-                                .forEach { onCompleteChild($0) }
+                            for child in todayChildren.filter({ !isChildCompleted($0) && !isChildFullySkipped($0) && $0.type != .container }) {
+                                if child.isMultiSession {
+                                    let slotsToComplete = (slotFilter.map { [$0] } ?? child.timeSlots)
+                                        .filter { !isChildSessionCompleted(child, slot: $0) && !isChildSessionSkipped(child, slot: $0) }
+                                    for slot in slotsToComplete {
+                                        onCompleteChild(child, slot)
+                                    }
+                                } else {
+                                    onCompleteChild(child, nil)
+                                }
+                            }
                         } label: {
                             Text("Mark All Done")
                                 .font(.caption)
@@ -331,25 +417,23 @@ struct ContainerRowView: View {
 
     @ViewBuilder
     private func childRow(_ child: Activity) -> some View {
-        switch child.type {
-        case .checkbox:
-            ActivityRowView(
-                activity: child,
-                isCompleted: isChildCompleted(child),
-                isSkipped: isChildSkipped(child),
-                onComplete: { onCompleteChild(child) },
-                onSkip: { reason in onSkipChild(child, reason) }
-            )
-        default:
-            // Value/Cumulative children rendered as checkbox rows for P1
-            ActivityRowView(
-                activity: child,
-                isCompleted: isChildCompleted(child),
-                isSkipped: isChildSkipped(child),
-                onComplete: { onCompleteChild(child) },
-                onSkip: { reason in onSkipChild(child, reason) }
-            )
+        let completed: Bool
+        let skipped: Bool
+        if child.isMultiSession, let slot = slotFilter {
+            completed = isChildSessionCompleted(child, slot: slot)
+            skipped = isChildSessionSkipped(child, slot: slot)
+        } else {
+            completed = isChildCompleted(child)
+            skipped = isChildFullySkipped(child)
         }
+
+        ActivityRowView(
+            activity: child,
+            isCompleted: completed,
+            isSkipped: skipped,
+            onComplete: { onCompleteChild(child, slotFilter) },
+            onSkip: { reason in onSkipChild(child, reason, slotFilter) }
+        )
     }
     
     private func skipReason(for child: Activity) -> String? {

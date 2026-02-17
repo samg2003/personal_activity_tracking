@@ -270,6 +270,12 @@
   - AI Reply: Fixed — added `Activity.timeSlotsActive(on:)` and `isMultiSession(on:)` for snapshot-aware slot iteration. Used throughout ScheduleEngine.
 - [101] `completionFraction` in DashboardView treated entire multi-session as skipped/not-skipped instead of per-slot. [AI found]
   - AI Reply: Fixed — per-slot counting with skipped sessions deducted from denominator, matching ScheduleEngine logic.
+- [102] ContainerRowView `onCompleteChild`/`onSkipChild` callbacks don't pass TimeSlot — multi-session children completed/skipped as single-session. [AI found]
+  - AI Reply: Fixed — callbacks changed to `(Activity, TimeSlot?) -> Void` and `(Activity, String, TimeSlot?) -> Void`. `childRow` passes `slotFilter`. DashboardView caller updated to pipe slot to `completeCheckbox`/`skipActivity`.
+- [103] ContainerRowView `completedChildren`/`skippedChildren` require ALL sessions done/skipped for multi-session children — partial completions stuck in pending. [AI found]
+  - AI Reply: Fixed — buckets now use per-slot checks: ANY completed session → `completedChildren`, ANY skipped session → `skippedChildren`, ANY pending session → `pendingChildren`.
+- [104] ContainerRowView `doneCount` counts fully-completed children, not sessions — shows incorrect progress for multi-session. [AI found]
+  - AI Reply: Fixed — `doneCount` and `totalCount` now count individual sessions for multi-session children, respecting `slotFilter`.
 
 
 # Human Approved Bugs:

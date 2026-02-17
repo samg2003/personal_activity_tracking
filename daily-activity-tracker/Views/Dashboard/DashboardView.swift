@@ -656,8 +656,8 @@ struct DashboardView: View {
                     scheduleEngine: scheduleEngine,
                     today: today,
                     allActivities: allActivities,
-                    onCompleteChild: { child in completeCheckbox(child) },
-                    onSkipChild: { child, reason in skipActivity(child, reason: reason) },
+                    onCompleteChild: { child, childSlot in completeCheckbox(child, slot: childSlot) },
+                    onSkipChild: { child, reason, childSlot in skipActivity(child, reason: reason, slot: childSlot) },
                     slotFilter: slot
                 )
             }
