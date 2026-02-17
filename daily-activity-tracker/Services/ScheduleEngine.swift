@@ -6,6 +6,7 @@ protocol ScheduleEngineProtocol {
     func activitiesForToday(from activities: [Activity], on date: Date, vacationDays: [VacationDay]) -> [Activity]
     func activitiesForToday(from activities: [Activity], on date: Date, vacationDays: [VacationDay], logs: [ActivityLog]) -> [Activity]
     func carriedForwardDate(for activity: Activity, on date: Date, logs: [ActivityLog]) -> Date?
+    func carriedForwardSlots(for activity: Activity, on date: Date, logs: [ActivityLog]) -> (date: Date, slots: [TimeSlot])?
     func completionStatus(on date: Date, activities: [Activity], allActivities: [Activity], logs: [ActivityLog], vacationDays: [VacationDay]) -> DayCompletionStatus
     func isContainerCompleted(_ container: Activity, on day: Date, allActivities: [Activity], logs: [ActivityLog]) -> Bool
     func completionRate(for activity: Activity, days: Int, logs: [ActivityLog], vacationDays: [VacationDay], allActivities: [Activity]) -> Double
@@ -46,7 +47,7 @@ final class ScheduleEngine: ScheduleEngineProtocol {
     /// Returns true if the most recent scheduled day before `date` has no completed/skipped log.
     private func shouldCarryForward(_ activity: Activity, on date: Date, logs: [ActivityLog]) -> Bool {
         guard !activity.isArchived else { return false }
-        guard activity.type == .checkbox || activity.type == .value || activity.type == .metric else { return false }
+        guard activity.type == .metric else { return false }
         let schedule = activity.scheduleActive(on: date)
         guard schedule.type == .weekly || schedule.type == .monthly else { return false }
         if shouldShow(activity, on: date) { return false }
@@ -56,7 +57,14 @@ final class ScheduleEngine: ScheduleEngineProtocol {
     /// Returns the original scheduled date that is being carried forward, or nil if nothing is overdue.
     /// Returns nil when the activity is normally scheduled today — each occurrence is independent.
     func carriedForwardDate(for activity: Activity, on date: Date, logs: [ActivityLog]) -> Date? {
-        guard activity.type == .checkbox || activity.type == .value || activity.type == .metric else { return nil }
+        carriedForwardSlots(for: activity, on: date, logs: logs)?.date
+    }
+
+    /// Returns the original scheduled date AND which specific slots are overdue, or nil.
+    /// For multi-session: only slots not completed/skipped on the original date (or today) carry forward.
+    /// For single-session: returns the activity's slot if it's overdue.
+    func carriedForwardSlots(for activity: Activity, on date: Date, logs: [ActivityLog]) -> (date: Date, slots: [TimeSlot])? {
+        guard activity.type == .metric else { return nil }
         let schedule = activity.scheduleActive(on: date)
         guard schedule.type == .weekly || schedule.type == .monthly else { return nil }
 
@@ -72,21 +80,34 @@ final class ScheduleEngine: ScheduleEngineProtocol {
             if checkDate.startOfDay < activity.createdDate.startOfDay { break }
             if let stopped = activity.stoppedAt, checkDate.startOfDay > stopped { continue }
 
-            // Use the schedule that was active on the historical day
             let historicalSchedule = activity.scheduleActive(on: checkDate)
             guard historicalSchedule.isScheduled(on: checkDate) else { continue }
 
-            // Found most recent scheduled day — check if fully completed/skipped that day OR today
+            // Found most recent scheduled day — check per-slot
             let activityLogs = logs.filter { $0.activity?.id == activity.id }
-            let checkDateLogs = activityLogs.filter {
+            let relevantLogs = activityLogs.filter {
                 calendar.isDate($0.date, inSameDayAs: checkDate) || calendar.isDate($0.date, inSameDayAs: date)
             }
-            let completedCount = checkDateLogs.filter { $0.status == .completed }.count
-            let hasSkip = checkDateLogs.contains { $0.status == .skipped }
-            let sessions = activity.sessionsPerDay(on: checkDate)
-            let done = completedCount >= sessions || (hasSkip && completedCount == 0)
 
-            return done ? nil : checkDate.startOfDay
+            if activity.isMultiSession {
+                // Per-slot: find slots that are neither completed nor skipped
+                let historicalSlots = activity.timeSlotsActive(on: checkDate)
+                let overdueSlots = historicalSlots.filter { slot in
+                    let completed = relevantLogs.contains { $0.status == .completed && $0.timeSlot == slot }
+                    let skipped = relevantLogs.contains { $0.status == .skipped && $0.timeSlot == slot }
+                    return !completed && !skipped
+                }
+                return overdueSlots.isEmpty ? nil : (checkDate.startOfDay, overdueSlots)
+            } else {
+                // Single-session: same logic as before
+                let completedCount = relevantLogs.filter { $0.status == .completed }.count
+                let hasSkip = relevantLogs.contains { $0.status == .skipped }
+                let sessions = activity.sessionsPerDay(on: checkDate)
+                let done = completedCount >= sessions || (hasSkip && completedCount == 0)
+                if done { return nil }
+                let slot = activity.timeWindow?.slot ?? .morning
+                return (checkDate.startOfDay, [slot])
+            }
         }
 
         return nil
@@ -325,8 +346,8 @@ extension ScheduleEngine {
     ) -> Double {
         let calendar = Calendar.current
         let today = Date().startOfDay
-        var totalDays = 0
-        var completedDays = 0
+        var totalWeight = 0.0
+        var completedWeight = 0.0
 
         for offset in 0..<days {
             guard let day = calendar.date(byAdding: .day, value: -offset, to: today) else { continue }
@@ -345,27 +366,48 @@ extension ScheduleEngine {
             }
             guard !scheduledChildren.isEmpty else { continue }
 
-            // Exclude days where all children are skipped (none completed)
-            let allSkipped = scheduledChildren.allSatisfy { child in
-                logs.contains { $0.activity?.id == child.id && $0.status == .skipped && $0.date.isSameDay(as: day) }
-            }
-            let anyCompleted = scheduledChildren.contains { child in
-                logs.contains { $0.activity?.id == child.id && $0.status == .completed && $0.date.isSameDay(as: day) }
-            }
-            if allSkipped && !anyCompleted { continue }
+            // Per-child fractional scoring, excluding skipped items
+            var dayExpected = 0.0
+            var dayCompleted = 0.0
 
-            totalDays += 1
-            let allDone = scheduledChildren.allSatisfy { child in
-                let completed = logs.filter {
-                    $0.activity?.id == child.id && $0.status == .completed && $0.date.isSameDay(as: day)
-                }.count
-                return completed >= child.sessionsPerDay(on: day)
+            for child in scheduledChildren {
+                let childLogs = logs.filter { $0.activity?.id == child.id && $0.date.isSameDay(as: day) }
+                let slots = child.timeSlotsActive(on: day)
+                let sessions = child.sessionsPerDay(on: day)
+
+                if slots.count > 1 {
+                    // Multi-session child
+                    var slotsDone = 0
+                    var slotsSkipped = 0
+                    for slot in slots {
+                        if childLogs.contains(where: { $0.status == .completed && $0.timeSlot == slot }) {
+                            slotsDone += 1
+                        } else if childLogs.contains(where: { $0.status == .skipped && $0.timeSlot == slot }) {
+                            slotsSkipped += 1
+                        }
+                    }
+                    // All sessions skipped with none completed → exclude child
+                    if slotsSkipped == sessions && slotsDone == 0 { continue }
+                    dayExpected += Double(sessions - slotsSkipped)
+                    dayCompleted += Double(min(slotsDone, sessions - slotsSkipped))
+                } else {
+                    // Single-session child
+                    let completed = childLogs.filter { $0.status == .completed }.count
+                    let skipped = childLogs.contains { $0.status == .skipped }
+                    if skipped && completed == 0 { continue }
+                    dayExpected += Double(sessions)
+                    dayCompleted += Double(min(completed, sessions))
+                }
             }
-            if allDone { completedDays += 1 }
+
+            // All children skipped → exclude day
+            guard dayExpected > 0 else { continue }
+            totalWeight += 1.0
+            completedWeight += dayCompleted / dayExpected
         }
 
-        guard totalDays > 0 else { return 0 }
-        return Double(completedDays) / Double(totalDays)
+        guard totalWeight > 0 else { return 0 }
+        return completedWeight / totalWeight
     }
 }
 

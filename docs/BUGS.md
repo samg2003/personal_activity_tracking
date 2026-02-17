@@ -1,110 +1,6 @@
 # Backlog
 
-- [77] **Multi-session: `isContainerCompleted` ignores session count.** [AI found]
-  - `isContainerCompleted` checks `logs.contains(.completed)` per child — passes if child has 1 of 3 sessions done.
-  - **Impact**: Container shown as complete in streaks/analytics when multi-session children are only partially done.
-
-- [78] **Multi-session: `containerCompletionRate` same bug as [77].** [AI found]
-  - `allSatisfy` in `containerCompletionRate` uses same ANY-completion check.
-  - **Impact**: Inflated container completion rates for containers with multi-session children.
-
-- [79] **Multi-session: `completionStatus` container children counts `total += 1` ignoring sessions.** [AI found]
-  - When computing day completion status for container children, each child adds 1 to total regardless of session count. A 3-session child should add 3.
-  - **Impact**: Progress bar understates required work for multi-session container children.
-
-- [80] **Multi-session: `currentStreak` uses `completedDates` Set — collapses sessions.** [AI found]
-  - `Set<Date>` collapses all completion logs to 1 per day. Completing 1 of 3 sessions counts the day as fully completed for streak purposes.
-  - **Impact**: Inflated current streak for multi-session activities.
-
-- [81] **Multi-session: `longestStreak` same bug as [80].** [AI found]
-  - Same `completedDates` Set pattern.
-  - **Impact**: Inflated longest streak for multi-session activities.
-
-
-- [63] **Dead code: `Item.swift` still in project.** [AI found]
-  - File contains only a comment saying "This file is no longer used. Delete from Xcode project." (3 lines). Should be removed from the project and filesystem.
-  - **Impact**: Low — cosmetic, but clutters project navigator and confuses new contributors.
-
-- [64] **Duplicate streak logic across `AnalyticsView` and `ActivityAnalyticsView`.** [AI found]
-  - `AnalyticsView.streakFor(_:)` (~90 lines) and `ActivityAnalyticsView.computeStreak()`/`computeContainerStreak()`/`longestStreak` (~100 lines) implement nearly identical streak-counting algorithms (walk backwards from today, check schedule, count consecutive completed days). Both also have their own `isContainerCompleted(_:on:)` helper with ~identical logic.
-  - **Refactor**: Extract a shared `StreakCalculator` service (or add to `ScheduleEngine`) with `currentStreak(for:logs:activities:)` and `longestStreak(for:logs:activities:)`. Both views should delegate to it.
-  - **Impact**: High — any future streak logic fix must be applied in 2+ places. Bug [50] already showed this fragility.
-
-- [65] **`DashboardView.completionFraction` duplicates `ScheduleEngine.completionStatus`.** [AI found]
-  - `DashboardView.completionFraction` (lines 80-116, ~37 lines) reimplements the same completion calculation that was just centralized into `ScheduleEngine.completionStatus()`. It handles containers, cumulatives, multi-session, skipped states — all of which are now in `ScheduleEngine`.
-  - **Refactor**: Replace `completionFraction` body with `scheduleEngine.completionStatus(on: today, activities: todayActivities, logs: allLogs, vacationDays: vacationDays).rate`, similar to what was done for DatePickerBar.
-  - **Impact**: High — this is the main progress bar. Any drift between the two implementations causes the progress bar to disagree with the date picker dots. Note it currently uses `todayActivities` (includes carry-forwards) while the shared method uses `activitiesForToday` without carry-forwards — need to decide which is correct.
-
-- [66] **`GoalDetailView` reimplements its own completion rate logic instead of reusing `ScheduleEngine`/analytics helpers.** [AI found]
-  - `activityRate(_:)` (~50 lines, lines 576-624), `containerRate(_:)` (~70 lines, lines 628-698), and `overallScore` (~22 lines) all implement their own schedule-checking, vacation-filtering, skip-handling, and completion counting. This largely duplicates `AnalyticsView.completionRate(for:)` and could be unified.
-  - `dayCell(activity:date:)` (lines 424-486) also reimplements its own schedule type switch and skip/complete checking per day — could use the centralized `ScheduleEngine.completionStatus()` or a single-activity variant.
-  - **Refactor**: Extract a `CompletionCalculator` or extend `ScheduleEngine` with `completionRate(for:over:logs:vacationDays:activities:)`. Both GoalDetailView and AnalyticsView should delegate.
-  - **Impact**: High — 5 separate functions across 2 files all doing similar work. Bug [59] already showed how these diverge.
-
-- [67] **Inline schedule-type switch statements scattered across 6+ files instead of using `ScheduleEngine.shouldShow`.** [AI found]
-  - Files that re-implement `case .daily: / case .weekly: weekdays.contains(...) / case .monthly: monthDays.contains(...)` inline: `AnalyticsView` (streakFor, completionRate), `ActivityAnalyticsView` (computeStreak, longestStreak, computeContainerStreak), `GoalDetailView` (activityRate, containerRate, dayCell), `GoalsView`.
-  - `ScheduleEngine.shouldShow(_:on:)` already handles this correctly and accounts for `createdDate`, `stoppedAt`, and snapshots.
-  - **Refactor**: Replace all inline schedule switches with calls to `scheduleEngine.shouldShow()` or `activity.scheduleActive(on:).isScheduled(on:)`.
-  - **Impact**: Medium-High — any new schedule type (e.g., biweekly, custom intervals) would need to be added in 6+ places. Single source of truth avoids this.
-
-- [68] **`scoreColor(_:)` utility function duplicated in `GoalDetailView` and `GoalsView`.** [AI found]
-  - Both files define identical `scoreColor(_ score: Double) -> Color` functions (`>= 0.8 green, >= 0.5 orange, else red`).
-  - **Refactor**: Move to a shared extension on `Color` or a `Utils/` helper.
-  - **Impact**: Low — cosmetic duplication, but easy to consolidate.
-
-- [69] **`DashboardView.swift` is 973 lines — should be decomposed.** [AI found]
-  - Contains UI layout, all completion/skip/session logic, all action handlers (complete, skip, unskip, log value, remove value, add cumulative, HealthKit sync, photo prompt), and the FAB. This makes it fragile and hard to navigate.
-  - **Refactor**: Extract action handlers into a `DashboardActions` helper or a ViewModel. Move completion logic (isFullyCompleted, isSkipped, isSessionCompleted, isSessionSkipped, cumulativeValue) into a shared service or model extension. The view should primarily handle layout and delegate business logic.
-  - **Impact**: Medium — maintainability improvement. Currently every new feature (photo flow, vacation, undo) adds more lines to this monolith.
-
-- [70] **`ActivityDetailView.currentStreak` is a 4th streak implementation — ignores schedule entirely.** [AI found]
-  - Lines 181-192. Naively walks backward counting consecutive days with a `.completed` log. Does not check if the activity was scheduled on each day, doesn't handle skipped/vacation days, doesn't handle containers or multi-session. Shows misleading streak counts for weekly/monthly activities.
-  - **Files**: `ActivityDetailView.swift` (lines 181-192)
-  - **Refactor**: Replace with call to the shared `StreakCalculator` once bug [64] is addressed.
-  - **Impact**: Medium — users see different streak numbers on the detail page vs the analytics page.
-
-- [71] **`GoalsView.consistencyScore(for:)` duplicates `GoalDetailView.overallScore`.** [AI found]
-  - Both compute a 14-day weighted average of per-activity completion rates, with identical inline schedule switches, vacation filtering, and skip handling. ~60 lines each.
-  - **Files**: `GoalsView.swift` (lines 142-201), `GoalDetailView.swift` (lines 554-575)
-  - **Refactor**: Extract a shared `consistencyScore(for:logs:vacationDays:activities:)` utility. Both views call it.
-  - **Impact**: Medium — any fix to scoring logic must be applied in both files.
-
-- [72] **`skipReasons` array hardcoded identically in 4 separate views.** [AI found]
-  - `["Injury", "Weather", "Sick", "Gym Closed", "Other"]` appears (with minor variation — `ContainerRowView` has "Not Feeling Well" instead of "Gym Closed") as a `private static let` in:
-    - `ContainerRowView.swift` (line 18)
-    - `CumulativeRingView.swift` (line 12)
-    - `ValueInputRow.swift` (line 17)
-    - `DashboardView.swift` (skip sheet inline)
-  - **Refactor**: Move to a shared constant (e.g., `SkipReasons.defaults` or on the model layer). The inconsistency between "Gym Closed" vs "Not Feeling Well" may be a bug itself.
-  - **Impact**: Low-Medium — adding/changing skip reasons requires editing 4 files.
-
-- [73] **`formatValue(_:)` helper duplicated identically across multiple component files.** [AI found]
-  - Same implementation (`truncatingRemainder(dividingBy: 1) == 0` → `%.0f` else `%.1f`) exists in:
-    - `CumulativeRingView.swift` (line 131)
-    - `ValueInputRow.swift` (line 143)
-    - `DashboardView.swift` (formatQuickAddCurrent uses similar logic)
-  - **Refactor**: Move to a shared `Double` extension (e.g., `Double.cleanString`).
-  - **Impact**: Low — cosmetic duplication, easy to consolidate.
-
-- [74] **`AddActivityView.swift` is 853 lines with ~70 lines of inline icon data arrays.** [AI found]
-  - The `iconCategories` property (lines 57-119) defines 7 icon category groups with ~80 SF Symbol names as string literals inline in the view. This makes the view file very long and mixes data with presentation.
-  - **Refactor**: Extract icon data to a separate `IconCatalog` enum/struct. This also makes it testable and reusable if other parts of the app need the icon list (e.g., future icon search). The view handles type selection, schedule configuration, HealthKit config, edit mode, and snapshot creation — consider splitting into smaller sub-views.
-  - **Impact**: Medium — maintainability improvement for a frequently edited file.
-
-- [75] **`AnalyticsView.completionRate(for:)` (~80 lines) duplicates core logic with 3 other files.** [AI found]
-  - This function at lines 144-223 implements schedule-aware 7-day completion calculation. Nearly identical logic exists in:
-    - `GoalDetailView.activityRate`/`containerRate` (14-day window)
-    - `GoalsView.consistencyScore` (14-day window)
-    - `ScheduleEngine.completionStatus` (single day)
-  - All four re-implement schedule-type switching, vacation filtering, skip handling, container child traversal, and multi-session counting.
-  - **Refactor**: Build a general-purpose `completionRate(for:over:logs:vacationDays:activities:)` method on `ScheduleEngine` that accepts a date range. All three call sites simply pass different ranges (1 day, 7 days, 14 days). This would reduce ~300 lines of duplicated code to ~3 call sites.
-  - **Impact**: High — this is the most impactful consolidation opportunity in the codebase.
-
-- [76] **`ActivitiesListView` container removal/archive logic duplicates snapshot creation patterns.** [AI found]
-  - Lines 170-196 in `ActivitiesListView.swift` contain "Future Only" and "Remove Everywhere" dialog handlers that create `ActivityConfigSnapshot` objects and manage parent/child relationships. Similar snapshot creation code exists in `AddActivityView.swift` for schedule changes.
-  - **Refactor**: Extract snapshot creation into a service method (e.g., `ScheduleEngine.createSnapshot(for:changes:)`) so both views delegate.
-  - **Impact**: Low-Medium — reduces risk of snapshot creation inconsistencies.
-
+- 
 # Promoted for human review 
 
 - [77-81] **Multi-session bugs: activities repeated multiple times per day (morning/afternoon/evening) incorrectly counted.** [AI found]
@@ -276,6 +172,26 @@
   - AI Reply: Fixed — buckets now use per-slot checks: ANY completed session → `completedChildren`, ANY skipped session → `skippedChildren`, ANY pending session → `pendingChildren`.
 - [104] ContainerRowView `doneCount` counts fully-completed children, not sessions — shows incorrect progress for multi-session. [AI found]
   - AI Reply: Fixed — `doneCount` and `totalCount` now count individual sessions for multi-session children, respecting `slotFilter`.
+- [105] Completed/skipped sections render as flat list — not grouped by time bucket like pending. [AI found]
+  - AI Reply: Fixed — both sections now grouped by All Day/Morning/Afternoon/Evening with headers, using `groupedCompletedBySlot` and `groupedSkippedBySlot`.
+- [106] Carry-forward is activity-level, not per-session — all sessions carry forward even if some were completed on original date. [AI found]
+  - AI Reply: Fixed — added `carriedForwardSlots` to ScheduleEngine returning per-slot overdue info. `groupedBySlot` uses it so only un-completed slots carry forward.
+- [107] Container `isSkipped` doesn't handle multi-session children per-slot — treats child skip as single log check. [AI found]
+  - AI Reply: Fixed — container isSkipped branch now checks per-slot for multi-session children (all non-completed slots must be skipped).
+- [108] Container `completionFraction` uses binary `isFullyCompleted` — multi-session child with 2/3 sessions done counts as 0. [AI found]
+  - AI Reply: Fixed — per-slot partial credit for multi-session container children.
+- [109] Skipped container children only visible inside ContainerRowView — user wants them in main skipped section. [User feedback]
+  - AI Reply: Fixed — `skippedActivities` expanded to include container children. ContainerRowView skipped section removed.
+- [110] `groupedBySlot` doesn't include carry-forward children for containers — overdue container children missing from pending. [AI found]
+  - AI Reply: Fixed — `groupedBySlot` container branch now includes carry-forward children and uses `carriedForwardSlots` for per-slot.
+- [111] `completed` only returns top-level activities — container children never appear in completed section even when individually done. [User feedback]
+  - AI Reply: Fixed — `completed` now iterates into container children via `containerApplicableChildren`, including multi-session children if any session is completed.
+- [112] `groupedBySlot` (pending), `groupedCompletedBySlot`, `groupedSkippedBySlot` all miss `.allDay` slot — allDay container children invisible. [AI found]
+  - AI Reply: Fixed — all slot iteration and return statements now include `TimeSlot.allDay`.
+- [113] Container helper functions used inconsistent child resolution — `isFullyCompleted`, `isSkipped`, `unskipActivity`, `skipReason`, `completionFraction` only checked `shouldShow`, missing carry-forward children. [AI found]
+  - AI Reply: Fixed — extracted `containerApplicableChildren` (scheduled + carry-forward) used by all 8 container-referencing functions.
+- [114] Carry-forward applied to checkbox, value, AND metric types — should only apply to metrics. Non-metric weekly/monthly activities incorrectly showed on off-days. [User feedback]
+  - AI Reply: Fixed — `shouldCarryForward` and `carriedForwardSlots` type guards changed from `.checkbox || .value || .metric` to `.metric` only.
 
 
 # Human Approved Bugs:

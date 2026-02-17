@@ -1,5 +1,11 @@
 import SwiftUI
 
+enum ContainerDisplayMode {
+    case full          // Pending section: show pending + completed + skipped
+    case completedOnly // Completed section: only completed children
+    case skippedOnly   // Skipped section: only skipped children
+}
+
 /// Expandable row for Container-type activities showing children and partial completion
 struct ContainerRowView: View {
     let activity: Activity
@@ -10,9 +16,11 @@ struct ContainerRowView: View {
     let allActivities: [Activity]
     let onCompleteChild: (Activity, TimeSlot?) -> Void
     let onSkipChild: (Activity, String, TimeSlot?) -> Void
+    var onUnskipChild: ((Activity, TimeSlot?) -> Void)? = nil
 
     /// When set, only show children applicable to this time slot
     var slotFilter: TimeSlot? = nil
+    var displayMode: ContainerDisplayMode = .full
 
     @State private var isExpanded = false
     @State private var showSkipSheet = false
@@ -296,47 +304,51 @@ struct ContainerRowView: View {
             // Expanded children
             if isExpanded {
                 VStack(spacing: 4) {
-                    // Pending children
-                    ForEach(pendingChildren) { child in
-                        HStack {
-                            Rectangle()
-                                .fill(isChildCarriedForward(child)
-                                      ? Color.red.opacity(0.5)
-                                      : Color(hex: activity.hexColor).opacity(0.3))
-                                .frame(width: 2)
-                                .padding(.leading, 20)
+                    // Pending children — only in full mode
+                    if displayMode == .full {
+                        ForEach(pendingChildren) { child in
+                            HStack {
+                                Rectangle()
+                                    .fill(isChildCarriedForward(child)
+                                          ? Color.red.opacity(0.5)
+                                          : Color(hex: activity.hexColor).opacity(0.3))
+                                    .frame(width: 2)
+                                    .padding(.leading, 20)
 
-                            childRow(child)
-                                .overlay(alignment: .topTrailing) {
-                                    if let dueDate = scheduleEngine.carriedForwardDate(for: child, on: today, logs: allLogs),
-                                       !isChildCompleted(child), !isChildFullySkipped(child) {
-                                        Text("⏳ Due \(dueDate.shortWeekday)")
-                                            .font(.system(size: 8, weight: .semibold, design: .rounded))
-                                            .foregroundStyle(.red)
-                                            .padding(.horizontal, 5)
-                                            .padding(.vertical, 1)
-                                            .background(Color.red.opacity(0.12))
-                                            .clipShape(Capsule())
-                                            .offset(y: -2)
+                                childRow(child)
+                                    .overlay(alignment: .topTrailing) {
+                                        if let dueDate = scheduleEngine.carriedForwardDate(for: child, on: today, logs: allLogs),
+                                           !isChildCompleted(child), !isChildFullySkipped(child) {
+                                            Text("⏳ Due \(dueDate.shortWeekday)")
+                                                .font(.system(size: 8, weight: .semibold, design: .rounded))
+                                                .foregroundStyle(.red)
+                                                .padding(.horizontal, 5)
+                                                .padding(.vertical, 1)
+                                                .background(Color.red.opacity(0.12))
+                                                .clipShape(Capsule())
+                                                .offset(y: -2)
+                                        }
                                     }
-                                }
+                            }
                         }
                     }
                     
-                    // Completed children
-                    ForEach(completedChildren) { child in
-                        HStack {
-                            Rectangle()
-                                .fill(Color.green.opacity(0.3))
-                                .frame(width: 2)
-                                .padding(.leading, 20)
+                    // Completed children — in full + completedOnly modes
+                    if displayMode == .full || displayMode == .completedOnly {
+                        ForEach(completedChildren) { child in
+                            HStack {
+                                Rectangle()
+                                    .fill(Color.green.opacity(0.3))
+                                    .frame(width: 2)
+                                    .padding(.leading, 20)
 
-                            childRow(child)
+                                childRow(child)
+                            }
                         }
                     }
-                    
-                    // Skipped children
-                    if !skippedChildren.isEmpty {
+
+                    // Skipped children — in full + skippedOnly modes
+                    if (displayMode == .full || displayMode == .skippedOnly) && !skippedChildren.isEmpty {
                         HStack {
                             Rectangle()
                                 .fill(Color.orange.opacity(0.3))
@@ -344,13 +356,15 @@ struct ContainerRowView: View {
                                 .padding(.leading, 20)
                             
                             VStack(alignment: .leading, spacing: 4) {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "forward.fill")
-                                        .font(.caption2)
-                                        .foregroundStyle(.orange)
-                                    Text("Skipped (\(skippedChildren.count))")
-                                        .font(.caption)
-                                        .foregroundStyle(.orange)
+                                if displayMode == .full {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "forward.fill")
+                                            .font(.caption2)
+                                            .foregroundStyle(.orange)
+                                        Text("Skipped (\(skippedChildren.count))")
+                                            .font(.caption)
+                                            .foregroundStyle(.orange)
+                                    }
                                 }
                                 
                                 ForEach(skippedChildren) { child in
@@ -374,6 +388,22 @@ struct ContainerRowView: View {
                                                 .foregroundStyle(.orange)
                                                 .clipShape(Capsule())
                                         }
+                                        
+                                        // Unskip button
+                                        if let unskip = onUnskipChild {
+                                            Button {
+                                                if child.isMultiSession, let slot = slotFilter {
+                                                    unskip(child, slot)
+                                                } else {
+                                                    unskip(child, nil)
+                                                }
+                                            } label: {
+                                                Image(systemName: "arrow.uturn.backward.circle")
+                                                    .font(.system(size: 14))
+                                                    .foregroundStyle(.orange)
+                                            }
+                                            .buttonStyle(.plain)
+                                        }
                                     }
                                     .padding(.vertical, 4)
                                     .padding(.horizontal, 10)
@@ -383,8 +413,8 @@ struct ContainerRowView: View {
                         }
                     }
 
-                    // "Mark All Done" shortcut — only if there are still pending children
-                    if !pendingChildren.isEmpty {
+                    // "Mark All Done" shortcut — only in full mode with pending children
+                    if displayMode == .full && !pendingChildren.isEmpty {
                         Button {
                             for child in todayChildren.filter({ !isChildCompleted($0) && !isChildFullySkipped($0) && $0.type != .container }) {
                                 if child.isMultiSession {

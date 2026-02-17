@@ -71,21 +71,48 @@ struct DashboardView: View {
 
     private var completed: [Activity] {
         todayActivities.filter { activity in
+            if activity.type == .container {
+                // Include container if ANY child has a completed session
+                return containerApplicableChildren(activity).contains { child in
+                    if child.isMultiSession {
+                        return child.timeSlots.contains(where: { isSessionCompleted(child, slot: $0) })
+                    }
+                    return isFullyCompleted(child)
+                }
+            }
             if activity.isMultiSession {
-                // Include if ANY session is completed (not requiring all)
-                return activity.timeSlots.contains { isSessionCompleted(activity, slot: $0) }
+                return activity.timeSlots.contains(where: { isSessionCompleted(activity, slot: $0) })
             }
             return isFullyCompleted(activity)
         }
     }
 
+    /// All container children applicable today: scheduled + carry-forward
+    private func containerApplicableChildren(_ container: Activity) -> [Activity] {
+        let allChildren = container.historicalChildren(on: today, from: allActivities)
+        let scheduled = allChildren.filter { scheduleEngine.shouldShow($0, on: today) }
+        let scheduledIDs = Set(scheduled.map { $0.id })
+        let carryForward = allChildren.filter { child in
+            !scheduledIDs.contains(child.id)
+            && !child.isArchived
+            && scheduleEngine.carriedForwardDate(for: child, on: today, logs: allLogs) != nil
+        }
+        return scheduled + carryForward
+    }
+
     private var skippedActivities: [Activity] {
         todayActivities.filter { activity in
-            if activity.isMultiSession {
-                // Include if ANY session is skipped (and not completed for that slot)
-                return activity.timeSlots.contains { slot in
-                    isSessionSkipped(activity, slot: slot) && !isSessionCompleted(activity, slot: slot)
+            if activity.type == .container {
+                // Include container if ANY child has a skipped session (and not completed)
+                return containerApplicableChildren(activity).contains { child in
+                    if child.isMultiSession {
+                        return child.timeSlots.contains(where: { isSessionSkipped(child, slot: $0) && !isSessionCompleted(child, slot: $0) })
+                    }
+                    return isSkipped(child) && !isFullyCompleted(child)
                 }
+            }
+            if activity.isMultiSession {
+                return activity.timeSlots.contains(where: { isSessionSkipped(activity, slot: $0) && !isSessionCompleted(activity, slot: $0) })
             }
             return isSkipped(activity) && !isFullyCompleted(activity)
         }
@@ -99,11 +126,34 @@ struct DashboardView: View {
             // No-target cumulatives have no completion concept — exclude from progress
             if activity.type == .cumulative && (activity.targetValue == nil || activity.targetValue == 0) { continue }
             if activity.type == .container {
-                let children = activity.historicalChildren(on: today, from: allActivities)
-                    .filter { scheduleEngine.shouldShow($0, on: today) }
-                let count = Double(max(children.count, 1))
-                total += count
-                done += Double(children.filter { isFullyCompleted($0) }.count)
+                let children = containerApplicableChildren(activity)
+                var childTotal = 0.0
+                var childDone = 0.0
+                var childSkipped = 0.0
+                for child in children {
+                    if child.isMultiSession {
+                        let slots = child.timeSlots
+                        for slot in slots {
+                            if isSessionCompleted(child, slot: slot) {
+                                childDone += 1.0
+                                childTotal += 1.0
+                            } else if isSessionSkipped(child, slot: slot) {
+                                childSkipped += 1.0
+                            } else {
+                                childTotal += 1.0
+                            }
+                        }
+                    } else if isSkipped(child) && !isFullyCompleted(child) {
+                        childSkipped += 1.0
+                    } else {
+                        childTotal += 1.0
+                        if isFullyCompleted(child) { childDone += 1.0 }
+                    }
+                }
+                // All children skipped → count as fully skipped container
+                if childTotal <= 0 && childSkipped > 0 { skippedCount += 1; continue }
+                total += childTotal
+                done += childDone
             } else if activity.isMultiSession {
                 // Per-slot: deduct skipped sessions from denominator
                 var slotsDone = 0.0
@@ -141,25 +191,40 @@ struct DashboardView: View {
         for activity in pendingTimed {
             if activity.type == .container {
                 // Expand container to each slot where it has pending children
-                let children = activity.historicalChildren(on: today, from: allActivities)
-                    .filter { scheduleEngine.shouldShow($0, on: today) }
-                for slot in [TimeSlot.morning, .afternoon, .evening] {
+                let children = containerApplicableChildren(activity)
+                for slot in [TimeSlot.allDay, .morning, .afternoon, .evening] {
                     let hasPendingChildInSlot = children.contains { child in
                         let inSlot: Bool
                         if child.isMultiSession {
-                            inSlot = child.timeSlots.contains(slot)
+                            // For carry-forward children, only count overdue slots
+                            if let cfSlots = scheduleEngine.carriedForwardSlots(for: child, on: today, logs: allLogs) {
+                                inSlot = cfSlots.slots.contains(slot)
+                            } else {
+                                inSlot = child.timeSlots.contains(slot)
+                            }
                         } else {
                             inSlot = (child.timeWindow?.slot ?? .morning) == slot
                         }
-                        // Only count if child is not completed/skipped
-                        return inSlot && !isFullyCompleted(child) && !isSkipped(child)
+                        // Only count if child has a pending session in this slot
+                        guard inSlot else { return false }
+                        if child.isMultiSession {
+                            return !isSessionCompleted(child, slot: slot) && !isSessionSkipped(child, slot: slot)
+                        }
+                        return !isFullyCompleted(child) && !isSkipped(child)
                     }
                     if hasPendingChildInSlot {
                         slotMap[slot, default: []].append(activity)
                     }
                 }
             } else if activity.isMultiSession {
-                for slot in activity.timeSlots {
+                // For carry-forward, only show overdue slots
+                let slotsToCheck: [TimeSlot]
+                if let cfSlots = scheduleEngine.carriedForwardSlots(for: activity, on: today, logs: allLogs) {
+                    slotsToCheck = cfSlots.slots
+                } else {
+                    slotsToCheck = activity.timeSlots
+                }
+                for slot in slotsToCheck {
                     if !isSessionCompleted(activity, slot: slot)
                         && !isSessionSkipped(activity, slot: slot) {
                         slotMap[slot, default: []].append(activity)
@@ -170,7 +235,7 @@ struct DashboardView: View {
                 slotMap[slot, default: []].append(activity)
             }
         }
-        return [TimeSlot.morning, .afternoon, .evening].compactMap { slot in
+        return [TimeSlot.allDay, .morning, .afternoon, .evening].compactMap { slot in
             guard let acts = slotMap[slot], !acts.isEmpty else { return nil }
             return (slot, acts)
         }
@@ -431,16 +496,21 @@ struct DashboardView: View {
     private var completedSection: some View {
         if !completed.isEmpty {
             DisclosureGroup(isExpanded: $completedExpanded) {
-                ForEach(completed) { activity in
-                    if activity.isMultiSession {
-                        // Per-slot rows for multi-session activities
-                        ForEach(activity.timeSlots, id: \.rawValue) { slot in
-                            if isSessionCompleted(activity, slot: slot) {
-                                activityView(for: activity, inSlot: slot)
-                            }
-                        }
-                    } else {
-                        activityView(for: activity)
+                ForEach(groupedCompletedBySlot, id: \.slot) { group in
+                    // Slot header within completed
+                    HStack(spacing: 4) {
+                        Image(systemName: group.slot.icon)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.secondary.opacity(0.6))
+                        Text(group.slot.displayName.uppercased())
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .foregroundStyle(.secondary.opacity(0.6))
+                        Spacer()
+                    }
+                    .padding(.top, 4)
+
+                    ForEach(group.items, id: \.id) { item in
+                        activityView(for: item.activity, inSlot: item.slot, containerDisplayMode: .completedOnly)
                     }
                 }
             } label: {
@@ -465,9 +535,51 @@ struct DashboardView: View {
         }
     }
 
+    /// Completed items grouped by time bucket
+    private var groupedCompletedBySlot: [(slot: TimeSlot, items: [(id: String, activity: Activity, slot: TimeSlot?)])] {
+        var slotMap: [TimeSlot: [(id: String, activity: Activity, slot: TimeSlot?)]] = [:]
+        for activity in completed {
+            if activity.isMultiSession {
+                for slot in activity.timeSlots where isSessionCompleted(activity, slot: slot) {
+                    slotMap[slot, default: []].append(("\(activity.id)-\(slot.rawValue)", activity, slot))
+                }
+            } else if activity.type == .container {
+                // Containers go into each slot where they have completed children
+                let children = containerApplicableChildren(activity)
+                for slot in [TimeSlot.allDay, .morning, .afternoon, .evening] {
+                    let hasCompletedChild = children.contains { child in
+                        if child.isMultiSession {
+                            return child.timeSlots.contains(slot) && isSessionCompleted(child, slot: slot)
+                        }
+                        return (child.timeWindow?.slot ?? .morning) == slot && isFullyCompleted(child)
+                    }
+                    if hasCompletedChild {
+                        slotMap[slot, default: []].append(("\(activity.id)-\(slot.rawValue)", activity, slot))
+                    }
+                }
+            } else {
+                let slot = activity.timeWindow?.slot ?? .morning
+                slotMap[slot, default: []].append((activity.id.uuidString, activity, nil))
+            }
+        }
+        return [TimeSlot.allDay, .morning, .afternoon, .evening].compactMap { slot in
+            guard let items = slotMap[slot], !items.isEmpty else { return nil }
+            return (slot, items)
+        }
+    }
+
     /// Total completed items including individual multi-session slots
     private var completedItemCount: Int {
         completed.reduce(0) { count, activity in
+            if activity.type == .container {
+                // Count individual completed sessions/children
+                return count + containerApplicableChildren(activity).reduce(0) { childCount, child in
+                    if child.isMultiSession {
+                        return childCount + child.timeSlots.filter { isSessionCompleted(child, slot: $0) }.count
+                    }
+                    return childCount + (isFullyCompleted(child) ? 1 : 0)
+                }
+            }
             if activity.isMultiSession {
                 return count + activity.timeSlots.filter { isSessionCompleted(activity, slot: $0) }.count
             }
@@ -479,17 +591,30 @@ struct DashboardView: View {
     private var skippedSection: some View {
         if !skippedActivities.isEmpty {
             DisclosureGroup {
-                ForEach(skippedActivities) { activity in
-                    if activity.isMultiSession {
-                        // Per-slot skipped rows for multi-session
-                        ForEach(skippedSlots(for: activity), id: \.rawValue) { slot in
-                            skippedRow(activity: activity, slotLabel: slot.displayName) {
-                                unskipSession(activity, slot: slot)
+                ForEach(groupedSkippedBySlot, id: \.slot) { group in
+                    // Slot header within skipped
+                    HStack(spacing: 4) {
+                        Image(systemName: group.slot.icon)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.secondary.opacity(0.6))
+                        Text(group.slot.displayName.uppercased())
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .foregroundStyle(.secondary.opacity(0.6))
+                        Spacer()
+                    }
+                    .padding(.top, 4)
+
+                    ForEach(group.items, id: \.id) { item in
+                        if item.activity.type == .container {
+                            activityView(for: item.activity, inSlot: item.slot, containerDisplayMode: .skippedOnly)
+                        } else {
+                            skippedRow(activity: item.activity, slotLabel: item.activity.isMultiSession ? item.displaySlot : nil) {
+                                if let slot = item.slot {
+                                    unskipSession(item.activity, slot: slot)
+                                } else {
+                                    unskipActivity(item.activity)
+                                }
                             }
-                        }
-                    } else {
-                        skippedRow(activity: activity, slotLabel: nil) {
-                            unskipActivity(activity)
                         }
                     }
                 }
@@ -506,6 +631,38 @@ struct DashboardView: View {
                 }
             }
             .tint(.secondary)
+        }
+    }
+
+    private var groupedSkippedBySlot: [(slot: TimeSlot, items: [(id: String, activity: Activity, slot: TimeSlot?, displaySlot: String?)])] {
+        var slotMap: [TimeSlot: [(id: String, activity: Activity, slot: TimeSlot?, displaySlot: String?)]] = [:]
+        for activity in skippedActivities {
+            if activity.isMultiSession {
+                for slot in skippedSlots(for: activity) {
+                    slotMap[slot, default: []].append(("\(activity.id)-\(slot.rawValue)", activity, slot, slot.displayName))
+                }
+            } else if activity.type == .container {
+                // Containers go into each slot where they have skipped children
+                let children = containerApplicableChildren(activity)
+                for slot in [TimeSlot.allDay, .morning, .afternoon, .evening] {
+                    let hasSkippedChild = children.contains { child in
+                        if child.isMultiSession {
+                            return child.timeSlots.contains(slot) && isSessionSkipped(child, slot: slot) && !isSessionCompleted(child, slot: slot)
+                        }
+                        return (child.timeWindow?.slot ?? .morning) == slot && isSkipped(child) && !isFullyCompleted(child)
+                    }
+                    if hasSkippedChild {
+                        slotMap[slot, default: []].append(("\(activity.id)-\(slot.rawValue)", activity, slot, slot.displayName))
+                    }
+                }
+            } else {
+                let slot = activity.timeWindow?.slot ?? .morning
+                slotMap[slot, default: []].append((activity.id.uuidString, activity, nil, nil))
+            }
+        }
+        return [TimeSlot.allDay, .morning, .afternoon, .evening].compactMap { slot in
+            guard let items = slotMap[slot], !items.isEmpty else { return nil }
+            return (slot, items)
         }
     }
 
@@ -574,6 +731,14 @@ struct DashboardView: View {
     /// Total skipped items including individual multi-session slots
     private var skippedItemCount: Int {
         skippedActivities.reduce(0) { count, activity in
+            if activity.type == .container {
+                return count + containerApplicableChildren(activity).reduce(0) { childCount, child in
+                    if child.isMultiSession {
+                        return childCount + child.timeSlots.filter { isSessionSkipped(child, slot: $0) && !isSessionCompleted(child, slot: $0) }.count
+                    }
+                    return childCount + (isSkipped(child) && !isFullyCompleted(child) ? 1 : 0)
+                }
+            }
             if activity.isMultiSession {
                 return count + skippedSlots(for: activity).count
             }
@@ -599,7 +764,7 @@ struct DashboardView: View {
 
     /// Slot-aware rendering for time bucket sections
     @ViewBuilder
-    private func activityView(for activity: Activity, inSlot slot: TimeSlot?) -> some View {
+    private func activityView(for activity: Activity, inSlot slot: TimeSlot?, containerDisplayMode: ContainerDisplayMode = .full) -> some View {
         Group {
             switch activity.type {
             case .checkbox, .metric:
@@ -658,7 +823,15 @@ struct DashboardView: View {
                     allActivities: allActivities,
                     onCompleteChild: { child, childSlot in completeCheckbox(child, slot: childSlot) },
                     onSkipChild: { child, reason, childSlot in skipActivity(child, reason: reason, slot: childSlot) },
-                    slotFilter: slot
+                    onUnskipChild: { child, childSlot in
+                        if let childSlot {
+                            unskipSession(child, slot: childSlot)
+                        } else {
+                            unskipActivity(child)
+                        }
+                    },
+                    slotFilter: slot,
+                    displayMode: containerDisplayMode
                 )
             }
         }
@@ -697,7 +870,7 @@ struct DashboardView: View {
             guard let target = activity.targetValue, target > 0 else { return false }
             return cumulativeValue(for: activity) >= target
         case .container:
-            let applicable = activity.historicalChildren(on: today, from: allActivities).filter { scheduleEngine.shouldShow($0, on: today) }
+            let applicable = containerApplicableChildren(activity)
             guard !applicable.isEmpty else { return false }
             return applicable.allSatisfy { isFullyCompleted($0) }
         }
@@ -705,12 +878,17 @@ struct DashboardView: View {
 
     private func isSkipped(_ activity: Activity) -> Bool {
         if activity.type == .container {
-            let applicable = activity.historicalChildren(on: today, from: allActivities).filter { scheduleEngine.shouldShow($0, on: today) }
+            let applicable = containerApplicableChildren(activity)
             guard !applicable.isEmpty else { return false }
             // Container is "skipped" when all non-completed children are skipped
             let nonCompleted = applicable.filter { !isFullyCompleted($0) }
             return !nonCompleted.isEmpty && nonCompleted.allSatisfy { child in
-                todayLogs.contains { $0.activity?.id == child.id && $0.status == .skipped }
+                if child.isMultiSession {
+                    // Multi-session child: all non-completed sessions must be skipped
+                    let nonCompletedSlots = child.timeSlots.filter { !isSessionCompleted(child, slot: $0) }
+                    return !nonCompletedSlots.isEmpty && nonCompletedSlots.allSatisfy { isSessionSkipped(child, slot: $0) }
+                }
+                return todayLogs.contains { $0.activity?.id == child.id && $0.status == .skipped }
             }
         }
         if activity.isMultiSession {
@@ -981,7 +1159,7 @@ struct DashboardView: View {
 
     private func unskipActivity(_ activity: Activity) {
         if activity.type == .container {
-            let applicable = activity.historicalChildren(on: today, from: allActivities).filter { scheduleEngine.shouldShow($0, on: today) }
+            let applicable = containerApplicableChildren(activity)
             for child in applicable {
                 if let skipLog = todayLogs.first(where: {
                     $0.activity?.id == child.id && $0.status == .skipped
@@ -1008,7 +1186,7 @@ struct DashboardView: View {
     private func skipReason(for activity: Activity) -> String? {
         if activity.type == .container {
             // Return the first child's skip reason
-            let applicable = activity.historicalChildren(on: today, from: allActivities).filter { scheduleEngine.shouldShow($0, on: today) }
+            let applicable = containerApplicableChildren(activity)
             return applicable.compactMap { child in
                 todayLogs.first(where: { $0.activity?.id == child.id && $0.status == .skipped })?.skipReason
             }.first
