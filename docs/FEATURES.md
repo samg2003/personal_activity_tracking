@@ -1,5 +1,6 @@
 # List of features: (do not look into this!)
 - metrics display of photo to able to see scrollable time lapse
+- more so a bug, but in activity analytics view the chart with daily weekly monthly is not generalized for all activities, and also doesnt aggregate anything. 
 - notification system revamp. Sleep time (no notifications then), morning afternoon and evening set automatically. 30 mins before sleep notification. Morning notification. etc.
 - Crazy alarm system
 - Strength training, Cardio, and Posture Tracking system

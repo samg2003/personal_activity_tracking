@@ -291,6 +291,18 @@ struct ActivityAnalyticsView: View {
                     )
                 }
 
+                // Photo Lapse — only for photo metrics
+                if activity.type == .metric && activity.metricKind == .photo {
+                    VStack(alignment: .leading, spacing: 8) {
+                        sectionHeader("Photo Progress", icon: "timelapse")
+                        PhotoLapseView(
+                            activityID: activity.id,
+                            activityColor: activity.hexColor,
+                            photoSlots: activity.photoSlots
+                        )
+                    }
+                }
+
                 // Log History
                 VStack(alignment: .leading, spacing: 8) {
                     sectionHeader("History", icon: "list.bullet")
