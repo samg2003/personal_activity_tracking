@@ -379,6 +379,22 @@ daily-activity-tracker/
 
 ---
 
+### ADR-18: Activity / Reminder Entity Separation
+
+**Decision**: Separated reminders from activities in the creation flow. A top-level entity picker (Activity vs Reminder) determines which form is shown.
+
+**Rationale**: Reminders are inherently simple — checkbox-type, no categories, no value/cumulative tracking, no time slots or HealthKit. Mixing them into the full activity creation flow was confusing and required users to navigate irrelevant options. Separating them simplifies both flows.
+
+**Key behaviors**:
+- **Entity picker**: Segmented control at form top (Activity / Reminder), default is Activity
+- **Reminder form**: Only name, icon/color, and sticky-vs-date — everything else hidden
+- **Activity form**: Full creation flow, but schedule section only shows recurring options (Daily/Weekly/Monthly)
+- **Data model unchanged**: Reminders are still `Activity` objects with `.checkbox` type and `.sticky`/`.adhoc` schedule — the separation is purely at the UI layer
+- **Edit detection**: Loading a sticky/adhoc activity auto-detects as reminder mode
+- **Reminders section**: Always visible in ActivitiesListView with "+" add button, sorted by `createdDate` descending
+
+---
+
 ## Phased Implementation Strategy
 
 | Phase                | Scope                                                                           | Deliverable                                          |

@@ -13,6 +13,7 @@ struct ActivitiesListView: View {
     @State private var deleteTarget: Activity?
     @State private var showDeleteAlert = false
     @State private var showAddSheet = false
+    @State private var showAddReminderSheet = false
     @State private var expandedContainers: Set<UUID> = []
     @State private var removeTarget: Activity?
     @State private var showRemoveDialog = false
@@ -109,6 +110,9 @@ struct ActivitiesListView: View {
                 }
                 .sheet(isPresented: $showAddSheet) {
                     AddActivityView()
+                }
+                .sheet(isPresented: $showAddReminderSheet) {
+                    AddActivityView(presetReminder: true)
                 }
                 .alert("Delete Activity", isPresented: $showDeleteAlert) {
                     deleteAlertButtons
@@ -247,11 +251,14 @@ struct ActivitiesListView: View {
         }
     }
 
+    @State private var remindersExpanded = false
+
     @ViewBuilder
     private var oneTimeTasksSection: some View {
-        if !activeOneTimeTasks.isEmpty {
-            Section {
-                ForEach(activeOneTimeTasks.sorted(by: { $0.sortOrder < $1.sortOrder })) { activity in
+        let tasks = activeOneTimeTasks.sorted(by: { $0.createdDate > $1.createdDate })
+        Section {
+            DisclosureGroup(isExpanded: $remindersExpanded) {
+                ForEach(tasks) { activity in
                     HStack(spacing: 10) {
                         Image(systemName: activity.icon)
                             .font(.system(size: 14))
@@ -260,9 +267,16 @@ struct ActivitiesListView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(activity.name)
                                 .font(.subheadline.weight(.medium))
-                            Text(activity.schedule.type == .sticky ? "Reminder" : "Reminder (specific date)")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
+                            if activity.schedule.type == .adhoc,
+                               let date = activity.schedule.specificDate {
+                                Text(date, style: .date)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                Text("Sticky")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                         Spacer()
                     }
@@ -300,12 +314,23 @@ struct ActivitiesListView: View {
                         }
                     }
                 }
-            } header: {
-                HStack(spacing: 6) {
-                    Image(systemName: "bell")
-                        .font(.caption)
-                    Text("Reminders")
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
+            } label: {
+                HStack {
+                    HStack(spacing: 6) {
+                        Image(systemName: "bell")
+                            .font(.caption)
+                        Text("Reminders (\(tasks.count))")
+                            .font(.caption.weight(.medium))
+                    }
+                    .foregroundStyle(.secondary)
+                    Spacer()
+                    Button {
+                        showAddReminderSheet = true
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 16))
+                            .foregroundStyle(.blue)
+                    }
                 }
             }
         }
@@ -860,6 +885,10 @@ struct ActivitiesListView: View {
             category: category,
             sortOrder: nextSort
         )
+        // Smart unit default for types that use units
+        if type == .value || type == .cumulative || type == .metric {
+            activity.unit = ActivityAppearance.suggestUnit(for: name)
+        }
         modelContext.insert(activity)
     }
 
@@ -874,6 +903,10 @@ struct ActivitiesListView: View {
             schedule: .daily,
             sortOrder: nextSort
         )
+        // Smart unit default for types that use units
+        if type == .value || type == .cumulative || type == .metric {
+            child.unit = ActivityAppearance.suggestUnit(for: name)
+        }
         child.parent = parent
         child.category = parent.category
         modelContext.insert(child)
