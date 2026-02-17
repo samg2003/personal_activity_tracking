@@ -309,7 +309,7 @@ struct ContainerRowView: View {
                             childRow(child)
                                 .overlay(alignment: .topTrailing) {
                                     if let dueDate = scheduleEngine.carriedForwardDate(for: child, on: today, logs: allLogs),
-                                       !isChildCompleted(child), !isChildSkipped(child) {
+                                       !isChildCompleted(child), !isChildFullySkipped(child) {
                                         Text("⏳ Due \(dueDate.shortWeekday)")
                                             .font(.system(size: 8, weight: .semibold, design: .rounded))
                                             .foregroundStyle(.red)
@@ -415,7 +415,6 @@ struct ContainerRowView: View {
         }
     }
 
-    @ViewBuilder
     private func childRow(_ child: Activity) -> some View {
         let completed: Bool
         let skipped: Bool
@@ -427,7 +426,7 @@ struct ContainerRowView: View {
             skipped = isChildFullySkipped(child)
         }
 
-        ActivityRowView(
+        return ActivityRowView(
             activity: child,
             isCompleted: completed,
             isSkipped: skipped,
