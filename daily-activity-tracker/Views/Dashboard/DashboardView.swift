@@ -40,6 +40,17 @@ struct DashboardView: View {
 
     private var today: Date { selectedDate }
 
+    private var activityStatus: ActivityStatusService {
+        ActivityStatusService(
+            date: today,
+            todayLogs: todayLogs,
+            allLogs: allLogs,
+            allActivities: allActivities,
+            vacationDays: vacationDays,
+            scheduleEngine: scheduleEngine
+        )
+    }
+
     private var todayActivities: [Activity] {
         scheduleEngine.activitiesForToday(from: allActivities, on: today, vacationDays: vacationDays, logs: allLogs)
     }
@@ -89,15 +100,7 @@ struct DashboardView: View {
 
     /// All container children applicable today: scheduled + carry-forward
     private func containerApplicableChildren(_ container: Activity) -> [Activity] {
-        let allChildren = container.historicalChildren(on: today, from: allActivities)
-        let scheduled = allChildren.filter { scheduleEngine.shouldShow($0, on: today) }
-        let scheduledIDs = Set(scheduled.map { $0.id })
-        let carryForward = allChildren.filter { child in
-            !scheduledIDs.contains(child.id)
-            && !child.isArchived
-            && scheduleEngine.carriedForwardDate(for: child, on: today, logs: allLogs) != nil
-        }
-        return scheduled + carryForward
+        scheduleEngine.applicableChildren(for: container, on: today, allActivities: allActivities, logs: allLogs)
     }
 
     private var skippedActivities: [Activity] {
@@ -119,71 +122,7 @@ struct DashboardView: View {
     }
 
     private var completionFraction: Double {
-        var total = 0.0
-        var done = 0.0
-        var skippedCount = 0
-        for activity in todayActivities {
-            // No-target cumulatives have no completion concept — exclude from progress
-            if activity.type == .cumulative && (activity.targetValue == nil || activity.targetValue == 0) { continue }
-            if activity.type == .container {
-                let children = containerApplicableChildren(activity)
-                var childTotal = 0.0
-                var childDone = 0.0
-                var childSkipped = 0.0
-                for child in children {
-                    if child.isMultiSession {
-                        let slots = child.timeSlots
-                        for slot in slots {
-                            if isSessionCompleted(child, slot: slot) {
-                                childDone += 1.0
-                                childTotal += 1.0
-                            } else if isSessionSkipped(child, slot: slot) {
-                                childSkipped += 1.0
-                            } else {
-                                childTotal += 1.0
-                            }
-                        }
-                    } else if isSkipped(child) && !isFullyCompleted(child) {
-                        childSkipped += 1.0
-                    } else {
-                        childTotal += 1.0
-                        if isFullyCompleted(child) { childDone += 1.0 }
-                    }
-                }
-                // All children skipped → count as fully skipped container
-                if childTotal <= 0 && childSkipped > 0 { skippedCount += 1; continue }
-                total += childTotal
-                done += childDone
-            } else if activity.isMultiSession {
-                // Per-slot: deduct skipped sessions from denominator
-                var slotsDone = 0.0
-                var slotsSkipped = 0.0
-                for slot in activity.timeSlots {
-                    if isSessionCompleted(activity, slot: slot) {
-                        slotsDone += 1.0
-                    } else if isSessionSkipped(activity, slot: slot) {
-                        slotsSkipped += 1.0
-                    }
-                }
-                let sessions = Double(activity.timeSlots.count)
-                if slotsSkipped == sessions && slotsDone == 0 { skippedCount += 1; continue }
-                total += sessions - slotsSkipped
-                done += min(slotsDone, sessions - slotsSkipped)
-            } else {
-                if isSkipped(activity) { skippedCount += 1; continue }
-                if activity.type == .cumulative, let target = activity.targetValue, target > 0 {
-                    total += 1.0
-                    done += min(cumulativeValue(for: activity) / target, 1.0)
-                } else {
-                    total += 1.0
-                    if isFullyCompleted(activity) { done += 1.0 }
-                }
-            }
-        }
-        // All activities skipped or excluded → 0% (not 100%)
-        if total <= 0 && skippedCount > 0 { return 0.0 }
-        guard total > 0 else { return 1.0 }
-        return done / total
+        activityStatus.completionFraction(for: todayActivities)
     }
 
     private var groupedBySlot: [(slot: TimeSlot, activities: [Activity])] {
@@ -723,9 +662,7 @@ struct DashboardView: View {
 
     /// Skipped slots for a multi-session activity (sessions that are skipped and not completed)
     private func skippedSlots(for activity: Activity) -> [TimeSlot] {
-        activity.timeSlots.filter { slot in
-            isSessionSkipped(activity, slot: slot) && !isSessionCompleted(activity, slot: slot)
-        }
+        activityStatus.skippedSlots(for: activity)
     }
 
     /// Total skipped items including individual multi-session slots
@@ -854,65 +791,24 @@ struct DashboardView: View {
         scheduleEngine.carriedForwardDate(for: activity, on: today, logs: allLogs)
     }
 
-    // MARK: - Completion Logic
+    // MARK: - Completion Logic (delegates to ActivityStatusService)
 
     private func isFullyCompleted(_ activity: Activity) -> Bool {
-        // Multi-session: ALL sessions must have a completion log (uniform for all types)
-        if activity.isMultiSession {
-            return activity.timeSlots.allSatisfy { slot in
-                isSessionCompleted(activity, slot: slot)
-            }
-        }
-        switch activity.type {
-        case .checkbox, .metric, .value:
-            return todayLogs.contains { $0.activity?.id == activity.id && $0.status == .completed }
-        case .cumulative:
-            guard let target = activity.targetValue, target > 0 else { return false }
-            return cumulativeValue(for: activity) >= target
-        case .container:
-            let applicable = containerApplicableChildren(activity)
-            guard !applicable.isEmpty else { return false }
-            return applicable.allSatisfy { isFullyCompleted($0) }
-        }
+        activityStatus.isFullyCompleted(activity)
     }
 
     private func isSkipped(_ activity: Activity) -> Bool {
-        if activity.type == .container {
-            let applicable = containerApplicableChildren(activity)
-            guard !applicable.isEmpty else { return false }
-            // Container is "skipped" when all non-completed children are skipped
-            let nonCompleted = applicable.filter { !isFullyCompleted($0) }
-            return !nonCompleted.isEmpty && nonCompleted.allSatisfy { child in
-                if child.isMultiSession {
-                    // Multi-session child: all non-completed sessions must be skipped
-                    let nonCompletedSlots = child.timeSlots.filter { !isSessionCompleted(child, slot: $0) }
-                    return !nonCompletedSlots.isEmpty && nonCompletedSlots.allSatisfy { isSessionSkipped(child, slot: $0) }
-                }
-                return todayLogs.contains { $0.activity?.id == child.id && $0.status == .skipped }
-            }
-        }
-        if activity.isMultiSession {
-            // "Skipped" when all non-completed sessions are skipped
-            let nonCompleted = activity.timeSlots.filter { !isSessionCompleted(activity, slot: $0) }
-            return !nonCompleted.isEmpty && nonCompleted.allSatisfy { slot in
-                isSessionSkipped(activity, slot: slot)
-            }
-        }
-        return todayLogs.contains { $0.activity?.id == activity.id && $0.status == .skipped }
+        activityStatus.isSkipped(activity)
     }
 
     // MARK: - Session-Level Checks (multi-session)
 
     private func isSessionCompleted(_ activity: Activity, slot: TimeSlot) -> Bool {
-        todayLogs.contains {
-            $0.activity?.id == activity.id && $0.status == .completed && $0.timeSlot == slot
-        }
+        activityStatus.isSessionCompleted(activity, slot: slot)
     }
 
     private func isSessionSkipped(_ activity: Activity, slot: TimeSlot) -> Bool {
-        todayLogs.contains {
-            $0.activity?.id == activity.id && $0.status == .skipped && $0.timeSlot == slot
-        }
+        activityStatus.isSessionSkipped(activity, slot: slot)
     }
 
     /// Checks whether a photo prompt should be triggered (only for photo-metric activities)
@@ -1184,16 +1080,7 @@ struct DashboardView: View {
     }
 
     private func skipReason(for activity: Activity) -> String? {
-        if activity.type == .container {
-            // Return the first child's skip reason
-            let applicable = containerApplicableChildren(activity)
-            return applicable.compactMap { child in
-                todayLogs.first(where: { $0.activity?.id == child.id && $0.status == .skipped })?.skipReason
-            }.first
-        }
-        return todayLogs.first(where: {
-            $0.activity?.id == activity.id && $0.status == .skipped
-        })?.skipReason
+        activityStatus.skipReason(for: activity)
     }
 
     private func showUndo(_ message: String, action: @escaping () -> Void) {
@@ -1205,19 +1092,11 @@ struct DashboardView: View {
     // MARK: - Value Queries
 
     private func latestValue(for activity: Activity, slot: TimeSlot? = nil) -> Double? {
-        if let slot, activity.isMultiSession {
-            return todayLogs.first(where: {
-                $0.activity?.id == activity.id && $0.status == .completed && $0.timeSlot == slot
-            })?.value
-        }
-        return todayLogs.first(where: { $0.activity?.id == activity.id && $0.status == .completed })?.value
+        activityStatus.latestValue(for: activity, slot: slot)
     }
 
     private func cumulativeValue(for activity: Activity) -> Double {
-        let values = todayLogs
-            .filter { $0.activity?.id == activity.id && $0.status == .completed }
-            .compactMap(\.value)
-        return activity.aggregateDayValue(from: values)
+        activityStatus.cumulativeValue(for: activity)
     }
 
     private func shouldAutoCollapse(_ slot: TimeSlot) -> Bool {

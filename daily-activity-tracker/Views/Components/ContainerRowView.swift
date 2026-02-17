@@ -25,36 +25,29 @@ struct ContainerRowView: View {
     @State private var isExpanded = false
     @State private var showSkipSheet = false
 
+    private var activityStatus: ActivityStatusService {
+        ActivityStatusService(
+            date: today,
+            todayLogs: todayLogs,
+            allLogs: allLogs,
+            allActivities: allActivities,
+            vacationDays: [],
+            scheduleEngine: scheduleEngine
+        )
+    }
 
 
     /// Children that should appear today, including carry-forward from missed days
     private var todayChildren: [Activity] {
-        let allChildren = activity.historicalChildren(on: today, from: allActivities)
-        // Normally scheduled children
-        var base = allChildren.filter { scheduleEngine.shouldShow($0, on: today) }
+        let base = scheduleEngine.applicableChildren(for: activity, on: today, allActivities: allActivities, logs: allLogs)
 
-        // Add carry-forward children (missed from previous scheduled days)
-        let baseIDs = Set(base.map { $0.id })
-        let carryForward = allChildren.filter { child in
-            !baseIDs.contains(child.id)
-            && !child.isArchived
-            && scheduleEngine.carriedForwardDate(for: child, on: today, logs: allLogs) != nil
-        }
-        base.append(contentsOf: carryForward)
-
-        let filtered: [Activity]
-        if let slot = slotFilter {
-            filtered = base.filter { child in
-                if child.isMultiSession {
-                    return child.timeSlots.contains(slot)
-                }
-                return (child.timeWindow?.slot ?? .morning) == slot
+        guard let slot = slotFilter else { return base }
+        return base.filter { child in
+            if child.isMultiSession {
+                return child.timeSlots.contains(slot)
             }
-        } else {
-            filtered = base
+            return (child.timeWindow?.slot ?? .morning) == slot
         }
-
-        return filtered.sorted { $0.sortOrder < $1.sortOrder }
     }
 
     private func isChildCarriedForward(_ child: Activity) -> Bool {
@@ -119,25 +112,16 @@ struct ContainerRowView: View {
 
     /// Whether a specific session of a child is completed
     private func isChildSessionCompleted(_ child: Activity, slot: TimeSlot) -> Bool {
-        todayLogs.contains { $0.activity?.id == child.id && $0.status == .completed && $0.timeSlot == slot }
+        activityStatus.isSessionCompleted(child, slot: slot)
     }
 
     /// Whether a specific session of a child is skipped
     private func isChildSessionSkipped(_ child: Activity, slot: TimeSlot) -> Bool {
-        todayLogs.contains { $0.activity?.id == child.id && $0.status == .skipped && $0.timeSlot == slot }
+        activityStatus.isSessionSkipped(child, slot: slot)
     }
 
     private func isChildFullySkipped(_ child: Activity) -> Bool {
-        let childLogs = todayLogs.filter { $0.activity?.id == child.id }
-        if child.isMultiSession {
-            let nonCompleted = child.timeSlots.filter { slot in
-                !childLogs.contains(where: { $0.status == .completed && $0.timeSlot == slot })
-            }
-            return !nonCompleted.isEmpty && nonCompleted.allSatisfy { slot in
-                childLogs.contains(where: { $0.status == .skipped && $0.timeSlot == slot })
-            }
-        }
-        return childLogs.contains { $0.status == .skipped }
+        activityStatus.isSkipped(child)
     }
 
     /// Count of completed sessions (not just fully-completed children)

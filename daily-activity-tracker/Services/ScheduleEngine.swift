@@ -7,6 +7,7 @@ protocol ScheduleEngineProtocol {
     func activitiesForToday(from activities: [Activity], on date: Date, vacationDays: [VacationDay], logs: [ActivityLog]) -> [Activity]
     func carriedForwardDate(for activity: Activity, on date: Date, logs: [ActivityLog]) -> Date?
     func carriedForwardSlots(for activity: Activity, on date: Date, logs: [ActivityLog]) -> (date: Date, slots: [TimeSlot])?
+    func applicableChildren(for container: Activity, on date: Date, allActivities: [Activity], logs: [ActivityLog]) -> [Activity]
     func completionStatus(on date: Date, activities: [Activity], allActivities: [Activity], logs: [ActivityLog], vacationDays: [VacationDay]) -> DayCompletionStatus
     func isContainerCompleted(_ container: Activity, on day: Date, allActivities: [Activity], logs: [ActivityLog]) -> Bool
     func completionRate(for activity: Activity, days: Int, logs: [ActivityLog], vacationDays: [VacationDay], allActivities: [Activity]) -> Double
@@ -113,6 +114,26 @@ final class ScheduleEngine: ScheduleEngineProtocol {
         return nil
     }
 
+    // MARK: - Container Applicable Children
+
+    /// All children of a container that should appear on `date`: normally scheduled + carry-forward.
+    /// This is the single source of truth for "which children does this container have today?"
+    func applicableChildren(for container: Activity, on date: Date, allActivities: [Activity], logs: [ActivityLog]) -> [Activity] {
+        let allChildren = container.historicalChildren(on: date, from: allActivities)
+        let scheduled = allChildren.filter { child in
+            if date < child.createdDate.startOfDay { return false }
+            if let stopped = child.stoppedAt, date > stopped { return false }
+            return child.scheduleActive(on: date).isScheduled(on: date)
+        }
+        let scheduledIDs = Set(scheduled.map { $0.id })
+        let carryForward = allChildren.filter { child in
+            !scheduledIDs.contains(child.id)
+            && !child.isArchived
+            && carriedForwardDate(for: child, on: date, logs: logs) != nil
+        }
+        return (scheduled + carryForward).sorted { $0.sortOrder < $1.sortOrder }
+    }
+
     // MARK: - Activities for Today
 
     /// Legacy method without logs (no carry-forward)
@@ -190,9 +211,7 @@ extension ScheduleEngine {
             let actLogs = dayLogs.filter { $0.activity?.id == activity.id }
 
             if activity.type == .container {
-                // Use allActivities so container children resolve properly
-                let children = activity.historicalChildren(on: date, from: allActivities)
-                    .filter { shouldShow($0, on: date) }
+                let children = applicableChildren(for: activity, on: date, allActivities: allActivities, logs: logs)
                 for child in children {
                     processActivitySlots(child, on: date, logs: dayLogs, total: &total, done: &done, skippedCount: &skippedCount)
                 }
@@ -260,14 +279,16 @@ extension ScheduleEngine {
 
 extension ScheduleEngine {
 
-    /// Whether all children of a container are completed on a given day
+    /// Whether all applicable children of a container are completed on a given day
     func isContainerCompleted(_ container: Activity, on day: Date, allActivities: [Activity], logs: [ActivityLog]) -> Bool {
-        let children = container.historicalChildren(on: day, from: allActivities)
+        let children = applicableChildren(for: container, on: day, allActivities: allActivities, logs: logs)
         guard !children.isEmpty else { return false }
         return children.allSatisfy { child in
-            let completed = logs.filter {
-                $0.activity?.id == child.id && $0.status == .completed && $0.date.isSameDay(as: day)
-            }.count
+            let childLogs = logs.filter { $0.activity?.id == child.id && $0.date.isSameDay(as: day) }
+            // Skipped children don't block completion
+            let isSkipped = childLogs.contains { $0.status == .skipped } && !childLogs.contains { $0.status == .completed }
+            if isSkipped { return true }
+            let completed = childLogs.filter { $0.status == .completed }.count
             return completed >= child.sessionsPerDay(on: day)
         }
     }
@@ -358,12 +379,7 @@ extension ScheduleEngine {
             let schedule = container.scheduleActive(on: day)
             guard schedule.isScheduled(on: day) else { continue }
 
-            let children = container.historicalChildren(on: day, from: allActivities)
-            let scheduledChildren = children.filter { child in
-                if day < child.createdDate.startOfDay { return false }
-                if let stopped = child.stoppedAt, day > stopped { return false }
-                return child.scheduleActive(on: day).isScheduled(on: day)
-            }
+            let scheduledChildren = applicableChildren(for: container, on: day, allActivities: allActivities, logs: logs)
             guard !scheduledChildren.isEmpty else { continue }
 
             // Per-child fractional scoring, excluding skipped items
@@ -573,17 +589,12 @@ extension ScheduleEngine {
 
     /// Whether all scheduled children of a container are fully skipped (no completions) on a given day
     private func isContainerDayFullySkipped(_ container: Activity, on day: Date, allActivities: [Activity], logs: [ActivityLog]) -> Bool {
-        let children = container.historicalChildren(on: day, from: allActivities)
-        let scheduledChildren = children.filter { child in
-            if day < child.createdDate.startOfDay { return false }
-            if let stopped = child.stoppedAt, day > stopped { return false }
-            return child.scheduleActive(on: day).isScheduled(on: day)
-        }
-        guard !scheduledChildren.isEmpty else { return false }
-        let allSkipped = scheduledChildren.allSatisfy { child in
+        let children = applicableChildren(for: container, on: day, allActivities: allActivities, logs: logs)
+        guard !children.isEmpty else { return false }
+        let allSkipped = children.allSatisfy { child in
             logs.contains { $0.activity?.id == child.id && $0.status == .skipped && $0.date.isSameDay(as: day) }
         }
-        let anyCompleted = scheduledChildren.contains { child in
+        let anyCompleted = children.contains { child in
             logs.contains { $0.activity?.id == child.id && $0.status == .completed && $0.date.isSameDay(as: day) }
         }
         return allSkipped && !anyCompleted
