@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Horizontal scrollable date picker for browsing past days
+/// Horizontal scrollable date picker for browsing past days.
+/// Starts with 14 days visible and dynamically loads more when the user taps the left-arrow.
 struct DatePickerBar: View {
     @Binding var selectedDate: Date
     var vacationDays: [VacationDay] = []
@@ -8,12 +9,13 @@ struct DatePickerBar: View {
     var allActivities: [Activity] = []
     var scheduleEngine: ScheduleEngineProtocol = ScheduleEngine()
 
-    private let visibleDays = 14
+    @State private var daysToShow = 14
+    private let pageSize = 14
 
     private var dates: [Date] {
         let calendar = Calendar.current
         let today = Date().startOfDay
-        return (0..<visibleDays).compactMap {
+        return (0..<daysToShow).compactMap {
             calendar.date(byAdding: .day, value: -$0, to: today)
         }.reversed()
     }
@@ -22,7 +24,6 @@ struct DatePickerBar: View {
         vacationDays.contains { $0.date.isSameDay(as: date) }
     }
 
-    /// Compute completion fraction for a given date (0…1, or -1 if no activities)
     /// Completion status for a date — delegates to centralized ScheduleEngine logic.
     private func completionStatus(_ date: Date) -> (rate: Double, allSkipped: Bool) {
         let status = scheduleEngine.completionStatus(on: date, activities: allActivities, allActivities: allActivities, logs: allLogs, vacationDays: vacationDays)
@@ -44,6 +45,9 @@ struct DatePickerBar: View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
+                    // Load-more button at the leading edge
+                    loadMoreButton(proxy: proxy)
+
                     ForEach(dates, id: \.timeIntervalSince1970) { date in
                         dateChip(date)
                             .id(date.startOfDay)
@@ -55,11 +59,40 @@ struct DatePickerBar: View {
                 proxy.scrollTo(selectedDate.startOfDay, anchor: .trailing)
             }
             .onChange(of: selectedDate) { _, newDate in
+                // Expand range if the selected date is outside current window
+                let calendar = Calendar.current
+                if let earliest = dates.first,
+                   newDate.startOfDay < earliest.startOfDay {
+                    let daysBack = calendar.dateComponents([.day], from: newDate.startOfDay, to: Date().startOfDay).day ?? 0
+                    daysToShow = max(daysToShow, daysBack + pageSize)
+                }
                 withAnimation {
                     proxy.scrollTo(newDate.startOfDay, anchor: .center)
                 }
             }
         }
+    }
+
+    /// Chevron button at the left edge that loads more past dates
+    private func loadMoreButton(proxy: ScrollViewProxy) -> some View {
+        Button {
+            let oldEarliest = dates.first
+            withAnimation(.easeInOut(duration: 0.2)) {
+                daysToShow += pageSize
+            }
+            // Keep scroll position stable by scrolling to previous earliest
+            if let anchor = oldEarliest {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    proxy.scrollTo(anchor.startOfDay, anchor: .leading)
+                }
+            }
+        } label: {
+            Image(systemName: "chevron.left.circle.fill")
+                .font(.system(size: 20))
+                .foregroundStyle(.secondary)
+                .frame(width: 32, height: 52)
+        }
+        .buttonStyle(.plain)
     }
 
     private func dateChip(_ date: Date) -> some View {
@@ -109,4 +142,3 @@ struct DatePickerBar: View {
         return formatter.string(from: date).prefix(3).uppercased()
     }
 }
-
