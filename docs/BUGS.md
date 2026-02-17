@@ -116,6 +116,14 @@
     - [81] `longestStreak` same issue
   - AI Reply: Fixed all 5 — container child checks now count completed logs vs `child.sessionsPerDay(on:)`. Streak logic replaced `completedDates` Set with new `isActivityDayCompleted` helper that compares completed log count against `sessionsPerDay(on:)`. Non-container `completionRate` and `completionStatus` were already correct.
 
+- [82-87] **Multi-session skip, streak pass-through, carry-forward, and sticky bugs.** [AI found]
+  - 6 more bugs from deeper audit of multi-session skip/carry-forward logic:
+    - [82] `completionStatus` container child skip: partial skip (1/3 skipped, 2/3 completed) treated entire child as skipped — 2 completions lost
+    - [83-84] `currentStreak`/`longestStreak` skip pass-through: `skippedDates` Set let partially-done days pass through as "excused"
+    - [85] `containerStreak` skip: coarse `skippedDates` Set from any child skip let partially-done container days pass through
+    - [86] `carriedForwardDate`: ANY completion/skip dismissed carry-forward, even if only 1/3 sessions done (weekly multi-session)
+    - [87] `shouldShow` sticky: ANY completion hid sticky activity, even if only 1/3 sessions done
+  - AI Reply: Fixed all 6 — (82) container child skip now checks `childCompleted == 0` before skipping. (83-84) Streak skip replaced with `isActivityDayFullySkipped` (skip && no completions). (85) Container streak replaced with `isContainerDayFullySkipped` (all children skipped, none completed). (86) Carry-forward now counts completions vs `sessionsPerDay`. (87) Sticky counts completed vs `sessionsPerDay`.
 
 - [46] **Export/Import loses `aggregationModeRaw`** [AI found]
   - AI Reply: Fixed — added `aggregationModeRaw` to `ActivityDTO`: field, both initializers, custom decoder, export mapping, and import mapping. Older export files without this field gracefully decode as `nil` (defaults to `.sum`). No breaking changes.
