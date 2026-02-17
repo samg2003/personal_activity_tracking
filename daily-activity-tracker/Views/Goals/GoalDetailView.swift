@@ -293,40 +293,80 @@ struct GoalDetailView: View {
         }
     }
 
-    /// Photo metric: miniaturized first → latest side-by-side comparison
+    /// Photo metric: separate progression row per photo slot
     @ViewBuilder
     private func photoMetricDisplay(activity: Activity) -> some View {
+        let slots = activity.photoSlots
         let allPhotos = MediaService.shared.allPhotos(for: activity.id)
 
         if allPhotos.isEmpty {
             Text("No photos logged yet")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        } else if slots.count <= 1 {
+            // Single slot: flat progression
+            let selected = selectTimeSpacedPhotos(from: allPhotos, maxCount: 4)
+            photoProgressionRow(photos: selected, totalCount: allPhotos.count)
         } else {
-            VStack(spacing: 6) {
-                HStack(alignment: .center, spacing: 8) {
-                    // First photo
-                    miniPhoto(filename: allPhotos.first, label: "First")
+            // Multiple slots: one row per slot
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(slots, id: \.self) { slot in
+                    let sanitized = MediaService.sanitize(slot)
+                    let slotPhotos = allPhotos.filter { MediaService.slotName(from: $0) == sanitized }
 
-                    if allPhotos.count > 1 {
-                        Image(systemName: "arrow.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
+                    if !slotPhotos.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(slot)
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.secondary)
 
-                        // Latest photo
-                        miniPhoto(filename: allPhotos.last, label: "Latest")
+                            let selected = selectTimeSpacedPhotos(from: slotPhotos, maxCount: 4)
+                            photoProgressionRow(photos: selected, totalCount: slotPhotos.count)
+                        }
                     }
                 }
-
-                Text("\(allPhotos.count) photo\(allPhotos.count == 1 ? "" : "s")")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.tertiary)
             }
         }
     }
 
     @ViewBuilder
-    private func miniPhoto(filename: String?, label: String) -> some View {
+    private func photoProgressionRow(photos: [String], totalCount: Int) -> some View {
+        VStack(spacing: 4) {
+            HStack(alignment: .center, spacing: 4) {
+                ForEach(Array(photos.enumerated()), id: \.offset) { index, filename in
+                    if index > 0 {
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    miniPhoto(filename: filename, label: nil)
+                }
+            }
+
+            Text("\(totalCount) photo\(totalCount == 1 ? "" : "s")")
+                .font(.system(size: 9))
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    /// Pick up to `maxCount` photos equally spaced by index, always including first and last
+    private func selectTimeSpacedPhotos(from photos: [String], maxCount: Int) -> [String] {
+        guard !photos.isEmpty else { return [] }
+        guard photos.count <= maxCount else {
+            // Equally spaced: always include first and last
+            var indices: [Int] = [0]
+            let step = Double(photos.count - 1) / Double(maxCount - 1)
+            for i in 1..<(maxCount - 1) {
+                indices.append(Int(round(Double(i) * step)))
+            }
+            indices.append(photos.count - 1)
+            return indices.map { photos[$0] }
+        }
+        return photos
+    }
+
+    @ViewBuilder
+    private func miniPhoto(filename: String?, label: String?) -> some View {
         VStack(spacing: 3) {
             if let filename, let image = MediaService.shared.loadPhoto(filename: filename) {
                 Image(uiImage: image)
@@ -341,9 +381,11 @@ struct GoalDetailView: View {
                     .frame(width: 60, height: 80)
             }
 
-            Text(label)
-                .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(.secondary)
+            if let label {
+                Text(label)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
 
             if let filename, let date = MediaService.dateFromFilename(filename) {
                 Text(date, format: .dateTime.month(.abbreviated).day())

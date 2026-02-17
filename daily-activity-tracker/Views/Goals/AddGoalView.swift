@@ -46,9 +46,12 @@ struct AddGoalView: View {
     var body: some View {
         NavigationStack {
             Form {
-                basicSection
+                titleSection
                 activitiesSection
-                linkedItemsSection
+                linkedActivitiesSection
+                linkedMetricsSection
+                deadlineSection
+                appearanceSection
             }
             .navigationTitle(goalToEdit == nil ? "New Goal" : "Edit Goal")
             .navigationBarTitleDisplayMode(.inline)
@@ -74,10 +77,23 @@ struct AddGoalView: View {
 
     // MARK: - Sections
 
-    private var basicSection: some View {
+    private var titleSection: some View {
         Section("Goal") {
             TextField("Title (e.g., \"Get Fit\")", text: $title)
+        }
+    }
 
+    private var deadlineSection: some View {
+        Section("Deadline") {
+            Toggle("Set Deadline", isOn: $hasDeadline)
+            if hasDeadline {
+                DatePicker("Deadline", selection: $deadline, displayedComponents: .date)
+            }
+        }
+    }
+
+    private var appearanceSection: some View {
+        Section("Appearance") {
             // Icon picker
             VStack(alignment: .leading, spacing: 8) {
                 Text("Icon")
@@ -126,12 +142,6 @@ struct AddGoalView: View {
                         .buttonStyle(.plain)
                     }
                 }
-            }
-
-            // Deadline
-            Toggle("Set Deadline", isOn: $hasDeadline)
-            if hasDeadline {
-                DatePicker("Deadline", selection: $deadline, displayedComponents: .date)
             }
         }
     }
@@ -194,14 +204,44 @@ struct AddGoalView: View {
     }
 
     @ViewBuilder
-    private var linkedItemsSection: some View {
-        if !linkedItems.isEmpty {
-            Section("Linked (\(linkedItems.count))") {
-                ForEach($linkedItems) { $item in
-                    linkedItemRow(item: $item)
+    private var linkedActivitiesSection: some View {
+        let activities = linkedItems.enumerated().filter { index, item in
+            let act = linkableActivities.first { $0.id == item.activityID }
+            return item.role == .activity || act?.type == .container
+        }.map { $0 }
+
+        if !activities.isEmpty {
+            Section("Linked Activities (\(activities.count))") {
+                ForEach(activities, id: \.offset) { offset, _ in
+                    linkedItemRow(item: $linkedItems[offset])
                 }
                 .onDelete { indexSet in
-                    linkedItems.remove(atOffsets: indexSet)
+                    let indicesToRemove = indexSet.map { activities[$0].offset }
+                    for idx in indicesToRemove.sorted().reversed() {
+                        linkedItems.remove(at: idx)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var linkedMetricsSection: some View {
+        let metrics = linkedItems.enumerated().filter { index, item in
+            let act = linkableActivities.first { $0.id == item.activityID }
+            return item.role == .metric && act?.type != .container
+        }.map { $0 }
+
+        if !metrics.isEmpty {
+            Section("Linked Metrics (\(metrics.count))") {
+                ForEach(metrics, id: \.offset) { offset, _ in
+                    linkedItemRow(item: $linkedItems[offset])
+                }
+                .onDelete { indexSet in
+                    let indicesToRemove = indexSet.map { metrics[$0].offset }
+                    for idx in indicesToRemove.sorted().reversed() {
+                        linkedItems.remove(at: idx)
+                    }
                 }
             }
         }
