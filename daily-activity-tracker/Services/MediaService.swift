@@ -99,6 +99,54 @@ final class MediaService {
         return String(parts[2])
     }
 
+    /// Parse the date from a photo filename
+    static func dateFromFilename(_ filename: String) -> Date? {
+        guard let lastComponent = filename.split(separator: "/").last else { return nil }
+        let base = lastComponent.replacingOccurrences(of: ".jpg", with: "")
+        let parts = base.split(separator: "_", maxSplits: 2)
+        guard parts.count >= 2 else { return nil }
+        let dateTimeStr = "\(parts[0])_\(parts[1])"
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd_HHmmss"
+        return fmt.date(from: dateTimeStr)
+    }
+
+    /// Rename a photo's date portion on disk. Returns the new relative filename or nil on failure.
+    /// Only changes the date (yyyy-MM-dd), preserving the original time and slot suffix.
+    func renamePhotoDate(_ filename: String, to newDate: Date) -> String? {
+        guard let lastComponent = filename.split(separator: "/").last,
+              let dirComponent = filename.split(separator: "/").first else { return nil }
+
+        let base = lastComponent.replacingOccurrences(of: ".jpg", with: "")
+        let parts = base.split(separator: "_", maxSplits: 2)
+        guard parts.count >= 2 else { return nil }
+
+        let originalTime = parts[1]  // Preserve original HHmmss
+
+        let dateFmt = DateFormatter()
+        dateFmt.dateFormat = "yyyy-MM-dd"
+        let newDatePart = dateFmt.string(from: newDate)
+
+        // Rebuild: newDate_originalTime_slot.jpg or newDate_originalTime.jpg
+        let slotSuffix = parts.count >= 3 ? "_\(parts[2])" : ""
+        let newFilename = "\(newDatePart)_\(originalTime)\(slotSuffix).jpg"
+        let newRelative = "\(dirComponent)/\(newFilename)"
+
+        // Avoid no-op rename
+        if filename == newRelative { return filename }
+
+        let oldURL = photosDirectory.appendingPathComponent(filename)
+        let newURL = photosDirectory.appendingPathComponent(newRelative)
+
+        guard fileManager.fileExists(atPath: oldURL.path) else { return nil }
+        do {
+            try fileManager.moveItem(at: oldURL, to: newURL)
+            return newRelative
+        } catch {
+            return nil
+        }
+    }
+
     /// Returns all activity UUIDs that have at least one photo
     func allActivityIDsWithPhotos() -> [UUID] {
         guard let contents = try? fileManager.contentsOfDirectory(

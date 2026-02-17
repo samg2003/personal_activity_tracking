@@ -253,7 +253,11 @@ struct ActivityPhotosGridView: View {
         .navigationTitle(activityName)
         .navigationBarTitleDisplayMode(.inline)
         .fullScreenCover(item: $previewPhoto) { filename in
-            PhotoPreviewView(filename: filename)
+            PhotoPreviewView(filename: filename) { newName in
+                if let idx = photos.firstIndex(of: filename) {
+                    photos[idx] = newName
+                }
+            }
         }
         .onAppear { photos = filenames }
     }
@@ -445,7 +449,11 @@ struct SlotPhotosView: View {
             Text("This action cannot be undone.")
         }
         .fullScreenCover(item: $previewPhoto) { filename in
-            PhotoPreviewView(filename: filename)
+            PhotoPreviewView(filename: filename) { newName in
+                if let idx = photos.firstIndex(of: filename) {
+                    photos[idx] = newName
+                }
+            }
         }
         .onAppear { photos = filenames }
     }
@@ -501,13 +509,18 @@ extension String: @retroactive Identifiable {
 
 struct PhotoPreviewView: View {
     let filename: String
+    var onRename: ((String) -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
+
+    @State private var showDatePicker = false
+    @State private var selectedDate: Date = Date()
+    @State private var currentFilename: String = ""
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            if let image = MediaService.shared.loadPhoto(filename: filename) {
+            if let image = MediaService.shared.loadPhoto(filename: currentFilename) {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFit()
@@ -524,7 +537,53 @@ struct PhotoPreviewView: View {
                     Spacer()
                 }
                 Spacer()
+
+                // Date editor bar at bottom
+                Button {
+                    showDatePicker.toggle()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "calendar")
+                            .font(.caption)
+                        Text(selectedDate, format: .dateTime.month(.abbreviated).day().year())
+                            .font(.subheadline.weight(.medium))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(.ultraThinMaterial)
+                    .clipShape(Capsule())
+                }
+                .padding(.bottom, 16)
             }
+        }
+        .sheet(isPresented: $showDatePicker) {
+            NavigationStack {
+                DatePicker("Photo Date", selection: $selectedDate, displayedComponents: .date)
+                    .datePickerStyle(.graphical)
+                    .padding()
+                    .navigationTitle("Change Date")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Save") {
+                                if let newName = MediaService.shared.renamePhotoDate(currentFilename, to: selectedDate) {
+                                    currentFilename = newName
+                                    onRename?(newName)
+                                }
+                                showDatePicker = false
+                            }
+                        }
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Cancel") { showDatePicker = false }
+                        }
+                    }
+            }
+            .presentationDetents([.medium])
+        }
+        .onAppear {
+            currentFilename = filename
+            selectedDate = MediaService.dateFromFilename(filename) ?? Date()
         }
     }
 }
