@@ -47,9 +47,11 @@ final class LapseVideoService {
 
     /// Generate a time-lapse video from photos. Returns the file URL on completion.
     /// Cached on disk — survives app restarts. Only regenerates when photo count changes.
+    /// `progress` is called on main thread with (currentFrame, totalFrames).
     func generateVideo(
         photos: [String],
         cacheKey: String,
+        progress: ((Int, Int) -> Void)? = nil,
         completion: @escaping (URL?) -> Void
     ) {
         let filename = "\(cacheKey).mp4"
@@ -73,7 +75,7 @@ final class LapseVideoService {
 
         queue.async { [weak self] in
             guard let self else { return }
-            let url = self.buildVideo(from: photos, outputURL: fileURL)
+            let url = self.buildVideo(from: photos, outputURL: fileURL, progress: progress)
             DispatchQueue.main.async {
                 if let url {
                     self.cache[cacheKey] = url
@@ -145,7 +147,7 @@ final class LapseVideoService {
 
     // MARK: - Video Builder
 
-    private func buildVideo(from photos: [String], outputURL: URL) -> URL? {
+    private func buildVideo(from photos: [String], outputURL: URL, progress: ((Int, Int) -> Void)? = nil) -> URL? {
         guard !photos.isEmpty else { return nil }
 
         // Determine video size from the first image only, then release it
@@ -185,6 +187,7 @@ final class LapseVideoService {
         writer.startSession(atSourceTime: CMTime.zero)
 
         let frameCMTime = CMTimeMake(value: Int64(frameDuration * 600), timescale: 600)
+        let total = photos.count
 
         // Stream one image at a time — never hold more than one in memory
         for index in 0..<photos.count {
@@ -198,7 +201,14 @@ final class LapseVideoService {
                 guard let image = MediaService.shared.loadPhoto(filename: photos[index]),
                       let buffer = pixelBuffer(from: image, size: videoSize) else { return }
                 adaptor.append(buffer, withPresentationTime: presentationTime)
-                // image and buffer released at end of autoreleasepool
+
+                // Report progress on main thread
+                if let progress {
+                    let current = index + 1
+                    DispatchQueue.main.async {
+                        progress(current, total)
+                    }
+                }
             }
         }
 

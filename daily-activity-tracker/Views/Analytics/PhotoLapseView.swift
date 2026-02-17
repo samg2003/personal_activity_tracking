@@ -65,6 +65,7 @@ private struct SlotVideoSection: View {
 
     @State private var player: AVPlayer?
     @State private var isGenerating = true
+    @State private var generatingProgress: (current: Int, total: Int)?
     @State private var currentTime: Double = 0
     @State private var isPlaying = false
     @State private var timeObserver: Any?
@@ -92,9 +93,15 @@ private struct SlotVideoSection: View {
                     VStack(spacing: 8) {
                         ProgressView()
                             .tint(.white)
-                        Text("Building time-lapse…")
-                            .font(.caption2)
-                            .foregroundStyle(.white.opacity(0.6))
+                        if let p = generatingProgress {
+                            Text("Building time-lapse… \(p.current)/\(p.total)")
+                                .font(.caption2.monospacedDigit())
+                                .foregroundStyle(.white.opacity(0.6))
+                        } else {
+                            Text("Preparing…")
+                                .font(.caption2)
+                                .foregroundStyle(.white.opacity(0.6))
+                        }
                     }
                 } else if let player {
                     VideoPlayerView(player: player)
@@ -117,13 +124,21 @@ private struct SlotVideoSection: View {
                         }
                     )
 
-                    // Date + play + counter
+                    // Date + delta + play + counter
                     HStack {
                         if currentIndex < photos.count,
                            let date = MediaService.dateFromFilename(photos[currentIndex]) {
-                            Text(date, format: .dateTime.month(.abbreviated).day().year())
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(.secondary)
+                            let delta = dayDelta(at: currentIndex)
+                            HStack(spacing: 4) {
+                                Text(date, format: .dateTime.month(.abbreviated).day().year())
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(.secondary)
+                                if let delta {
+                                    Text(delta)
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(accentColor.opacity(0.8))
+                                }
+                            }
                         }
 
                         Spacer()
@@ -152,7 +167,13 @@ private struct SlotVideoSection: View {
     }
 
     private func generateVideo() {
-        LapseVideoService.shared.generateVideo(photos: photos, cacheKey: cacheKey) { url in
+        LapseVideoService.shared.generateVideo(
+            photos: photos,
+            cacheKey: cacheKey,
+            progress: { current, total in
+                generatingProgress = (current, total)
+            }
+        ) { url in
             guard let url else {
                 isGenerating = false
                 return
@@ -167,7 +188,6 @@ private struct SlotVideoSection: View {
                 if !isSeeking {
                     currentTime = time.seconds
                 }
-                // Update playing state
                 isPlaying = avPlayer.rate > 0
             }
 
@@ -175,6 +195,16 @@ private struct SlotVideoSection: View {
             player = avPlayer
             isGenerating = false
         }
+    }
+
+    /// Calculate day delta label between current frame and the previous one
+    private func dayDelta(at index: Int) -> String? {
+        guard index > 0,
+              let currentDate = MediaService.dateFromFilename(photos[index]),
+              let prevDate = MediaService.dateFromFilename(photos[index - 1]) else { return nil }
+        let days = Calendar.current.dateComponents([.day], from: prevDate, to: currentDate).day ?? 0
+        guard days != 0 else { return nil }
+        return "+\(days)d"
     }
 
     @State private var isSeeking = false
