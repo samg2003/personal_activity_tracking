@@ -412,7 +412,16 @@ struct DashboardView: View {
         if !completed.isEmpty {
             DisclosureGroup(isExpanded: $completedExpanded) {
                 ForEach(completed) { activity in
-                    activityView(for: activity)
+                    if activity.isMultiSession {
+                        // Per-slot rows for multi-session activities
+                        ForEach(activity.timeSlots, id: \.rawValue) { slot in
+                            if isSessionCompleted(activity, slot: slot) {
+                                activityView(for: activity, inSlot: slot)
+                            }
+                        }
+                    } else {
+                        activityView(for: activity)
+                    }
                 }
             } label: {
                 HStack {
@@ -421,7 +430,7 @@ struct DashboardView: View {
                     Text("COMPLETED")
                         .font(.system(size: 13, weight: .bold, design: .rounded))
                         .foregroundStyle(.secondary)
-                    Text("(\(completed.count))")
+                    Text("(\(completedItemCount))")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                     if allDone {
@@ -436,55 +445,33 @@ struct DashboardView: View {
         }
     }
 
+    /// Total completed items including individual multi-session slots
+    private var completedItemCount: Int {
+        completed.reduce(0) { count, activity in
+            if activity.isMultiSession {
+                return count + activity.timeSlots.filter { isSessionCompleted(activity, slot: $0) }.count
+            }
+            return count + 1
+        }
+    }
+
     @ViewBuilder
     private var skippedSection: some View {
         if !skippedActivities.isEmpty {
             DisclosureGroup {
                 ForEach(skippedActivities) { activity in
-                    HStack(spacing: 10) {
-                        Image(systemName: "forward.fill")
-                            .font(.system(size: 14))
-                            .foregroundStyle(.orange)
-
-                        Image(systemName: activity.icon)
-                            .font(.system(size: 14))
-                            .foregroundStyle(Color(hex: activity.hexColor).opacity(0.5))
-                            .frame(width: 24)
-
-                        Text(activity.name)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .strikethrough(true, color: .secondary)
-
-                        if let reason = skipReason(for: activity) {
-                            Text(reason)
-                                .font(.caption2)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(.orange.opacity(0.15))
-                                .foregroundStyle(.orange)
-                                .clipShape(Capsule())
+                    if activity.isMultiSession {
+                        // Per-slot skipped rows for multi-session
+                        ForEach(skippedSlots(for: activity), id: \.rawValue) { slot in
+                            skippedRow(activity: activity, slotLabel: slot.displayName) {
+                                unskipSession(activity, slot: slot)
+                            }
                         }
-
-                        Spacer()
-
-                        Button {
+                    } else {
+                        skippedRow(activity: activity, slotLabel: nil) {
                             unskipActivity(activity)
-                        } label: {
-                            Text(activity.type == .container || activity.isMultiSession ? "Unskip All" : "Unskip")
-                                .font(.caption.bold())
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 4)
-                                .background(Color.orange.opacity(0.15))
-                                .foregroundStyle(.orange)
-                                .clipShape(Capsule())
                         }
-                        .buttonStyle(.plain)
                     }
-                    .padding(.vertical, 6)
-                    .padding(.horizontal, 14)
-                    .background(Color(.secondarySystemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
             } label: {
                 HStack {
@@ -493,13 +480,93 @@ struct DashboardView: View {
                     Text("SKIPPED")
                         .font(.system(size: 13, weight: .bold, design: .rounded))
                         .foregroundStyle(.secondary)
-                    Text("(\(skippedActivities.count))")
+                    Text("(\(skippedItemCount))")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
             }
             .tint(.secondary)
         }
+    }
+
+    @ViewBuilder
+    private func skippedRow(activity: Activity, slotLabel: String?, onUnskip: @escaping () -> Void) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "forward.fill")
+                .font(.system(size: 14))
+                .foregroundStyle(.orange)
+
+            Image(systemName: activity.icon)
+                .font(.system(size: 14))
+                .foregroundStyle(Color(hex: activity.hexColor).opacity(0.5))
+                .frame(width: 24)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(activity.name)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .strikethrough(true, color: .secondary)
+                if let slot = slotLabel {
+                    Text(slot)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+
+            if let reason = skipReason(for: activity) {
+                Text(reason)
+                    .font(.caption2)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(.orange.opacity(0.15))
+                    .foregroundStyle(.orange)
+                    .clipShape(Capsule())
+            }
+
+            Spacer()
+
+            Button {
+                onUnskip()
+            } label: {
+                Text("Unskip")
+                    .font(.caption.bold())
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(Color.orange.opacity(0.15))
+                    .foregroundStyle(.orange)
+                    .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 14)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    /// Skipped slots for a multi-session activity (sessions that are skipped and not completed)
+    private func skippedSlots(for activity: Activity) -> [TimeSlot] {
+        activity.timeSlots.filter { slot in
+            isSessionSkipped(activity, slot: slot) && !isSessionCompleted(activity, slot: slot)
+        }
+    }
+
+    /// Total skipped items including individual multi-session slots
+    private var skippedItemCount: Int {
+        skippedActivities.reduce(0) { count, activity in
+            if activity.isMultiSession {
+                return count + skippedSlots(for: activity).count
+            }
+            return count + 1
+        }
+    }
+
+    /// Unskip a single session of a multi-session activity
+    private func unskipSession(_ activity: Activity, slot: TimeSlot) {
+        guard let skipLog = todayLogs.first(where: {
+            $0.activity?.id == activity.id && $0.status == .skipped && $0.timeSlot == slot
+        }) else { return }
+        modelContext.delete(skipLog)
     }
 
     // MARK: - Type-Dispatched Row

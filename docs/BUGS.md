@@ -256,6 +256,14 @@
   - AI Reply: Fixed — now averages all values for the day via `compactMap(\.value)` + `reduce(0, +) / count`.
 - [94] DashboardView `createVacationSkipLogs` creates one skip log for multi-session activities instead of per-slot. [AI found]
   - AI Reply: Fixed — multi-session activities now get per-slot skip logs with `timeSlotRaw` set, matching `isSkipped` per-slot checking.
+- [95] `completionStatus` treats partially-skipped multi-session as fully skipped — `actSkipped` uses `.contains` for ANY skip, ignoring completed sessions. [AI found]
+  - AI Reply: Fixed — multi-session activities now use per-slot counting. Skipped sessions deducted from denominator; only fully-skipped activities (all slots skipped, 0 completed) count as skipped.
+- [96] `completionStatus` container children: multi-session child partial skips not deducted from denominator. [AI found]
+  - AI Reply: Fixed — container children now use per-slot counting for multi-session, deducting skipped sessions from total.
+- [97] `completionRate` same partial-skip bug as [95] for multi-day analytics rate. [AI found]
+  - AI Reply: Fixed — `completionRate` now uses per-slot counting for multi-session activities, deducting skipped sessions from `totalExpected`.
+- [98] Completed/Skipped sections show multi-session activities as single items without per-session granularity. [User reported]
+  - AI Reply: Fixed — completed section expands multi-session into per-slot rows (each showing slot label, individually toggleable). Skipped section shows per-slot rows with individual unskip buttons via new `unskipSession` helper. Counts reflect individual sessions.
 
 
 # Human Approved Bugs:
