@@ -217,28 +217,20 @@ struct PhotoRevealOverlay: View {
                     imageB: rightImage,
                     accentColor: accentColor,
                     labelA: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(dateLabel(for: leftIndex))
-                                .font(.caption2.bold())
-                            Text("\(leftIndex + 1) of \(photos.count)")
-                                .font(.system(size: 9))
-                        }
-                        .padding(6)
-                        .background(.black.opacity(0.6))
-                        .foregroundStyle(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        Text("\(leftIndex + 1) of \(photos.count)")
+                            .font(.caption2.bold())
+                            .padding(6)
+                            .background(.black.opacity(0.6))
+                            .foregroundStyle(.white)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
                     },
                     labelB: {
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text(dateLabel(for: rightIndex))
-                                .font(.caption2.bold())
-                            Text("\(rightIndex + 1) of \(photos.count)")
-                                .font(.system(size: 9))
-                        }
-                        .padding(6)
-                        .background(.black.opacity(0.6))
-                        .foregroundStyle(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        Text("\(rightIndex + 1) of \(photos.count)")
+                            .font(.caption2.bold())
+                            .padding(6)
+                            .background(.black.opacity(0.6))
+                            .foregroundStyle(.white)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
                     }
                 )
             }
@@ -251,7 +243,7 @@ struct PhotoRevealOverlay: View {
             NavigationStack {
                 PhotoCalendarView(
                     selectedDate: $pickerDate,
-                    photoDates: Set(photos.compactMap { photoDate(for: photos.firstIndex(of: $0) ?? 0) }),
+                    photoDates: Set(photos.indices.compactMap { photoDate(for: $0) }),
                     accentColor: UIColor(accentColor)
                 )
                 .padding()
@@ -273,7 +265,7 @@ struct PhotoRevealOverlay: View {
                     }
                 }
             }
-            .presentationDetents([.medium, .large])
+            .presentationDetents([.large])
         }
     }
 
@@ -359,10 +351,15 @@ struct PhotoCalendarView: UIViewRepresentable {
     let photoDates: Set<Date>
     let accentColor: UIColor
 
-    /// Normalize dates to midnight for reliable comparison
+    /// Normalize dates to year/month/day-only components for reliable Set lookup.
+    /// Using the plain initializer (not Calendar.dateComponents) ensures
+    /// the `calendar` property is nil, matching the keys built in the delegate.
     private var normalizedPhotoDates: Set<DateComponents> {
         let cal = Calendar.current
-        return Set(photoDates.map { cal.dateComponents([.year, .month, .day], from: $0) })
+        return Set(photoDates.map { date in
+            let comps = cal.dateComponents([.year, .month, .day], from: date)
+            return DateComponents(year: comps.year, month: comps.month, day: comps.day)
+        })
     }
 
     func makeUIView(context: Context) -> UICalendarView {
