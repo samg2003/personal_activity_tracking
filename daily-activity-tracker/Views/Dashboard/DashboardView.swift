@@ -267,7 +267,13 @@ struct DashboardView: View {
             .sheet(item: $logSheetActivity) { activity in
                 CumulativeLogSheet(activity: activity, date: today)
             }
-            .sheet(item: $photoPromptActivity) { activity in
+            .sheet(item: $photoPromptActivity, onDismiss: {
+                // If camera was dismissed without capturing any photos, remove the empty log
+                if let log = photoPromptLog, log.allPhotoFiles.isEmpty {
+                    modelContext.delete(log)
+                }
+                photoPromptLog = nil
+            }) { activity in
                 NavigationStack {
                     CameraView(
                         activityID: activity.id,
@@ -283,19 +289,10 @@ struct DashboardView: View {
                         }
                         if let log = photoPromptLog {
                             log.photoFilenames = filenames
-                            // Legacy compat: set photoFilename to first captured slot
                             log.photoFilename = filenames.values.first
                         }
+                        // Clear prompt state (onDismiss will skip delete since photos exist)
                         photoPromptActivity = nil
-                        photoPromptLog = nil
-                    }
-                    .toolbar {
-                        ToolbarItem(placement: .topBarLeading) {
-                            Button("Skip Photo") {
-                                photoPromptActivity = nil
-                                photoPromptLog = nil
-                            }
-                        }
                     }
                 }
             }

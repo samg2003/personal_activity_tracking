@@ -14,6 +14,7 @@ struct CameraView: View {
     @State private var ghostImage: UIImage?
     @State private var showGhost = true
     @State private var ghostOpacity: Double = 0.5
+    @State private var showOpacitySlider = false
 
     @State private var capturedImage: UIImage?
 
@@ -90,34 +91,66 @@ struct CameraView: View {
                     .allowsHitTesting(false)
             }
 
-            // Vertical ghost opacity slider on right edge
+            // Ghost opacity slider — left edge, collapsed by default
             if camera.state == .running, showGhost, ghostImage != nil {
-                VStack(spacing: 8) {
-                    Image(systemName: "eye.slash")
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.7))
+                HStack(spacing: 0) {
+                    if showOpacitySlider {
+                        VStack(spacing: 8) {
+                            Image(systemName: "eye.slash")
+                                .font(.caption2)
+                                .foregroundStyle(.white.opacity(0.7))
 
-                    // Rotated slider: top = low opacity, bottom = high opacity
-                    Slider(value: $ghostOpacity, in: 0.05...0.8)
-                        .tint(.yellow)
-                        .frame(width: 160)
-                        .rotationEffect(.degrees(-90))
-                        .frame(width: 30, height: 160)
+                            Slider(value: $ghostOpacity, in: 0.05...0.8)
+                                .tint(.yellow)
+                                .frame(width: 160)
+                                .rotationEffect(.degrees(-90))
+                                .frame(width: 30, height: 160)
 
-                    Image(systemName: "eye.fill")
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.7))
+                            Image(systemName: "eye.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.white.opacity(0.7))
 
-                    Text("\(Int(ghostOpacity * 100))%")
-                        .font(.system(size: 10, weight: .medium).monospacedDigit())
-                        .foregroundStyle(.white.opacity(0.8))
+                            Text("\(Int(ghostOpacity * 100))%")
+                                .font(.system(size: 10, weight: .medium).monospacedDigit())
+                                .foregroundStyle(.white.opacity(0.8))
+                        }
+                        .padding(.vertical, 12)
+                        .padding(.horizontal, 6)
+                        .background(.black.opacity(0.35))
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                        .transition(.move(edge: .leading).combined(with: .opacity))
+                    } else {
+                        // Collapsed: just an icon button
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                showOpacitySlider = true
+                            }
+                        } label: {
+                            VStack(spacing: 4) {
+                                Image(systemName: "circle.lefthalf.filled")
+                                    .font(.body.weight(.semibold))
+                                Text("\(Int(ghostOpacity * 100))%")
+                                    .font(.system(size: 9, weight: .medium).monospacedDigit())
+                            }
+                            .foregroundStyle(.white)
+                            .padding(8)
+                            .background(.black.opacity(0.4))
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                        }
+                    }
+
+                    Spacer()
                 }
-                .padding(.vertical, 12)
-                .padding(.horizontal, 6)
-                .background(.black.opacity(0.35))
-                .clipShape(RoundedRectangle(cornerRadius: 14))
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
-                .padding(.trailing, 8)
+                .padding(.leading, 8)
+                .frame(maxHeight: .infinity, alignment: .center)
+                .onTapGesture {
+                    // Tap anywhere outside the slider to collapse
+                    if showOpacitySlider {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            showOpacitySlider = false
+                        }
+                    }
+                }
             }
 
             // Controls
@@ -167,10 +200,10 @@ struct CameraView: View {
                 // Bottom controls
                 if camera.state == .running {
                     VStack(spacing: 16) {
-                        // Skip slot button (multi-slot only, and must have at least 1 captured)
+                        // Skip slot button (multi-slot only)
                         if isMultiSlot {
                             Button {
-                                advanceToNextSlot()
+                                skipCurrentSlot()
                             } label: {
                                 Text("Skip \(currentSlot)")
                                     .font(.subheadline)
@@ -394,6 +427,22 @@ struct CameraView: View {
         } else {
             // All slots done (or skipped)
             finishCapture()
+        }
+    }
+
+    /// Skip only moves to next sub-photo; on last slot, finishes only if at least one photo was captured
+    private func skipCurrentSlot() {
+        capturedImage = nil
+        if currentSlotIndex < slots.count - 1 {
+            currentSlotIndex += 1
+            loadGhostForCurrentSlot()
+        } else {
+            // Last slot skipped — only complete if we have at least one photo
+            if capturedSlots.isEmpty {
+                dismiss()  // No photos at all, just close
+            } else {
+                finishCapture()
+            }
         }
     }
 
