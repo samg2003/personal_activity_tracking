@@ -161,10 +161,12 @@ extension ScheduleEngine {
                         $0.activity?.id == child.id && $0.status == .skipped
                     }
                     if childSkipped { skippedCount += 1; continue }
-                    total += 1
-                    if dayLogs.contains(where: { $0.activity?.id == child.id && $0.status == .completed }) {
-                        done += 1
-                    }
+                    let sessions = Double(child.sessionsPerDay(on: date))
+                    total += sessions
+                    let completedCount = Double(dayLogs.filter {
+                        $0.activity?.id == child.id && $0.status == .completed
+                    }.count)
+                    done += min(completedCount, sessions)
                 }
             } else if activity.type == .cumulative && (activity.targetValue == nil || activity.targetValue == 0) {
                 if actSkipped { skippedCount += 1 }
@@ -202,9 +204,10 @@ extension ScheduleEngine {
         let children = container.historicalChildren(on: day, from: allActivities)
         guard !children.isEmpty else { return false }
         return children.allSatisfy { child in
-            logs.contains {
+            let completed = logs.filter {
                 $0.activity?.id == child.id && $0.status == .completed && $0.date.isSameDay(as: day)
-            }
+            }.count
+            return completed >= child.sessionsPerDay(on: day)
         }
     }
 }
@@ -296,7 +299,10 @@ extension ScheduleEngine {
 
             totalDays += 1
             let allDone = scheduledChildren.allSatisfy { child in
-                logs.contains { $0.activity?.id == child.id && $0.status == .completed && $0.date.isSameDay(as: day) }
+                let completed = logs.filter {
+                    $0.activity?.id == child.id && $0.status == .completed && $0.date.isSameDay(as: day)
+                }.count
+                return completed >= child.sessionsPerDay(on: day)
             }
             if allDone { completedDays += 1 }
         }
@@ -325,12 +331,11 @@ extension ScheduleEngine {
         }
 
         let activityLogs = logs.filter { $0.activity?.id == activity.id }
-        let completedDates = Set(activityLogs.filter { $0.status == .completed }.map { $0.date.startOfDay })
         let skippedDates = Set(activityLogs.filter { $0.status == .skipped }.map { $0.date.startOfDay })
 
         var streak = 0
         var day = Date().startOfDay
-        if !completedDates.contains(day) {
+        if !isActivityDayCompleted(activityLogs: activityLogs, activity: activity, day: day) {
             guard let prev = calendar.date(byAdding: .day, value: -1, to: day) else { return 0 }
             day = prev
         }
@@ -342,7 +347,7 @@ extension ScheduleEngine {
             let schedule = activity.scheduleActive(on: day)
             if !schedule.isScheduled(on: day) {
                 // not scheduled — pass through
-            } else if completedDates.contains(day) {
+            } else if isActivityDayCompleted(activityLogs: activityLogs, activity: activity, day: day) {
                 streak += 1
             } else if vacationSet.contains(day) {
                 // vacation — pass through
@@ -373,7 +378,6 @@ extension ScheduleEngine {
         }
 
         let activityLogs = logs.filter { $0.activity?.id == activity.id }
-        let completedDates = Set(activityLogs.filter { $0.status == .completed }.map { $0.date.startOfDay })
         let skippedDates = Set(activityLogs.filter { $0.status == .skipped }.map { $0.date.startOfDay })
         guard let earliest = activity.createdAt ?? activityLogs.map(\.date).min() else { return 0 }
 
@@ -388,7 +392,7 @@ extension ScheduleEngine {
             let schedule = activity.scheduleActive(on: day)
             if !schedule.isScheduled(on: day) || vacationSet.contains(day) {
                 // not scheduled or vacation — pass through
-            } else if completedDates.contains(day) {
+            } else if isActivityDayCompleted(activityLogs: activityLogs, activity: activity, day: day) {
                 current += 1
                 maxStreak = max(maxStreak, current)
             } else if skippedDates.contains(day) {
@@ -473,5 +477,11 @@ extension ScheduleEngine {
             }
             return maxStreak
         }
+    }
+
+    /// Whether all sessions for a non-container activity are completed on a given day
+    private func isActivityDayCompleted(activityLogs: [ActivityLog], activity: Activity, day: Date) -> Bool {
+        let completed = activityLogs.filter { $0.status == .completed && $0.date.startOfDay == day }.count
+        return completed >= activity.sessionsPerDay(on: day)
     }
 }

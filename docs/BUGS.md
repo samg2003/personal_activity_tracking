@@ -1,5 +1,26 @@
 # Backlog
 
+- [77] **Multi-session: `isContainerCompleted` ignores session count.** [AI found]
+  - `isContainerCompleted` checks `logs.contains(.completed)` per child — passes if child has 1 of 3 sessions done.
+  - **Impact**: Container shown as complete in streaks/analytics when multi-session children are only partially done.
+
+- [78] **Multi-session: `containerCompletionRate` same bug as [77].** [AI found]
+  - `allSatisfy` in `containerCompletionRate` uses same ANY-completion check.
+  - **Impact**: Inflated container completion rates for containers with multi-session children.
+
+- [79] **Multi-session: `completionStatus` container children counts `total += 1` ignoring sessions.** [AI found]
+  - When computing day completion status for container children, each child adds 1 to total regardless of session count. A 3-session child should add 3.
+  - **Impact**: Progress bar understates required work for multi-session container children.
+
+- [80] **Multi-session: `currentStreak` uses `completedDates` Set — collapses sessions.** [AI found]
+  - `Set<Date>` collapses all completion logs to 1 per day. Completing 1 of 3 sessions counts the day as fully completed for streak purposes.
+  - **Impact**: Inflated current streak for multi-session activities.
+
+- [81] **Multi-session: `longestStreak` same bug as [80].** [AI found]
+  - Same `completedDates` Set pattern.
+  - **Impact**: Inflated longest streak for multi-session activities.
+
+
 - [63] **Dead code: `Item.swift` still in project.** [AI found]
   - File contains only a comment saying "This file is no longer used. Delete from Xcode project." (3 lines). Should be removed from the project and filesystem.
   - **Impact**: Low — cosmetic, but clutters project navigator and confuses new contributors.
@@ -85,6 +106,16 @@
   - **Impact**: Low-Medium — reduces risk of snapshot creation inconsistencies.
 
 # Promoted for human review 
+
+- [77-81] **Multi-session bugs: activities repeated multiple times per day (morning/afternoon/evening) incorrectly counted.** [AI found]
+  - 5 bugs in `ScheduleEngine.swift` where multi-session activities were treated as single-session:
+    - [77] `isContainerCompleted` passed if child had 1 of N sessions done
+    - [78] `containerCompletionRate` same pattern
+    - [79] `completionStatus` container children counted `total += 1` instead of `total += sessions`
+    - [80] `currentStreak` used `Set<Date>` which collapsed all sessions to 1 per day
+    - [81] `longestStreak` same issue
+  - AI Reply: Fixed all 5 — container child checks now count completed logs vs `child.sessionsPerDay(on:)`. Streak logic replaced `completedDates` Set with new `isActivityDayCompleted` helper that compares completed log count against `sessionsPerDay(on:)`. Non-container `completionRate` and `completionStatus` were already correct.
+
 
 - [46] **Export/Import loses `aggregationModeRaw`** [AI found]
   - AI Reply: Fixed — added `aggregationModeRaw` to `ActivityDTO`: field, both initializers, custom decoder, export mapping, and import mapping. Older export files without this field gracefully decode as `nil` (defaults to `.sum`). No breaking changes.
