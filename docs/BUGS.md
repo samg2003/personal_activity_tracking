@@ -3,6 +3,10 @@
 - 
 # Promoted for human review 
 
+- [89] **App crash when tapping photo metric tracking type.** [User reported]
+  - `Info.plist` was missing `NSCameraUsageDescription`. iOS kills any app that accesses AVCaptureDevice without this key — no prompt, instant crash.
+  - AI Reply: Fixed — added `NSCameraUsageDescription` to `Info.plist` with appropriate usage description string. The `CameraView` code itself was correctly requesting permissions via `AVCaptureDevice.requestAccess(for: .video)`, it just needed the plist entry for iOS to allow the prompt.
+
 - [77-81] **Multi-session bugs: activities repeated multiple times per day (morning/afternoon/evening) incorrectly counted.** [AI found]
   - 5 bugs in `ScheduleEngine.swift` where multi-session activities were treated as single-session:
     - [77] `isContainerCompleted` passed if child had 1 of N sessions done
