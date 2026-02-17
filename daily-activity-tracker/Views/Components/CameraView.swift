@@ -12,32 +12,56 @@ struct CameraView: View {
     @State private var camera = CameraModel()
     @State private var ghostImage: UIImage?
     @State private var showGhost = true
+    @State private var ghostOpacity: Double = 0.5
     @State private var capturedImage: UIImage?
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            // Camera preview
-            CameraPreviewView(session: camera.session)
-                .ignoresSafeArea()
+            switch camera.state {
+            case .idle, .starting:
+                // Show spinner while camera initialises
+                ProgressView()
+                    .tint(.white)
+                    .scaleEffect(1.5)
 
-            // Ghost overlay
-            if showGhost, let ghost = ghostImage {
-                Image(uiImage: ghost)
-                    .resizable()
-                    .scaledToFill()
-                    .opacity(0.3)
+            case .running:
+                // Live camera preview
+                CameraPreviewView(session: camera.session, isFrontCamera: camera.isFrontCamera)
+                    .ignoresSafeArea()
+
+            case .denied:
+                permissionDeniedView
+
+            case .unavailable:
+                cameraUnavailableView
+            }
+
+            // Ghost overlay — match camera preview's aspect-fill crop exactly
+            // When front camera, mirror the ghost to match the mirrored preview
+            if camera.state == .running, showGhost, let ghost = ghostImage {
+                GeometryReader { geo in
+                    Image(uiImage: ghost)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .clipped()
+                        .scaleEffect(x: camera.isFrontCamera ? -1 : 1, y: 1)
+                }
+                .opacity(ghostOpacity)
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+            }
+
+            // Grid lines (only when camera is running)
+            if camera.state == .running {
+                GridOverlay()
                     .ignoresSafeArea()
                     .allowsHitTesting(false)
             }
 
-            // Grid lines
-            GridOverlay()
-                .ignoresSafeArea()
-                .allowsHitTesting(false)
-
-            // Controls
+            // Controls — always visible so user can dismiss
             VStack {
                 // Top bar
                 HStack {
@@ -66,26 +90,71 @@ struct CameraView: View {
                 }
                 .background(.ultraThinMaterial.opacity(0.3))
 
+                // Ghost opacity slider (between top bar and capture button)
+                if showGhost, ghostImage != nil, camera.state == .running {
+                    HStack(spacing: 10) {
+                        Image(systemName: "circle.lefthalf.filled")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.6))
+                        Slider(value: $ghostOpacity, in: 0.1...0.8)
+                            .tint(.yellow)
+                        Text("\(Int(ghostOpacity * 100))%")
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.white.opacity(0.6))
+                            .frame(width: 32)
+                    }
+                    .padding(.horizontal, 32)
+                    .padding(.vertical, 6)
+                    .background(.ultraThinMaterial.opacity(0.3))
+                    .clipShape(Capsule())
+                    .padding(.horizontal, 24)
+                }
+
                 Spacer()
 
-                // Capture button
-                Button {
-                    camera.capturePhoto { image in
-                        Task { @MainActor in
-                            capturedImage = image
+                // Bottom controls (only when camera is running)
+                if camera.state == .running {
+                    HStack {
+                        // Spacer for symmetry
+                        Color.clear.frame(width: 44, height: 44)
+
+                        Spacer()
+
+                        // Capture button
+                        Button {
+                            camera.capturePhoto { image in
+                                Task { @MainActor in
+                                    capturedImage = image
+                                }
+                            }
+                        } label: {
+                            ZStack {
+                                Circle()
+                                    .stroke(.white, lineWidth: 4)
+                                    .frame(width: 72, height: 72)
+                                Circle()
+                                    .fill(.white)
+                                    .frame(width: 60, height: 60)
+                            }
+                        }
+
+                        Spacer()
+
+                        // Flip camera button
+                        Button {
+                            camera.flipCamera()
+                        } label: {
+                            Image(systemName: "camera.rotate.fill")
+                                .font(.title2)
+                                .foregroundStyle(.white)
+                                .frame(width: 44, height: 44)
+                                .background(.white.opacity(0.15))
+                                .clipShape(Circle())
                         }
                     }
-                } label: {
-                    ZStack {
-                        Circle()
-                            .stroke(.white, lineWidth: 4)
-                            .frame(width: 72, height: 72)
-                        Circle()
-                            .fill(.white)
-                            .frame(width: 60, height: 60)
-                    }
+                    .padding(.horizontal, 32)
+                    .padding(.bottom, 40)
                 }
-                .padding(.bottom, 40)
             }
 
             // Captured image review
@@ -101,6 +170,60 @@ struct CameraView: View {
             camera.stop()
         }
     }
+
+    // MARK: - Permission Denied
+
+    private var permissionDeniedView: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "camera.fill")
+                .font(.system(size: 48))
+                .foregroundStyle(.gray)
+
+            Text("Camera Access Required")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(.white)
+
+            Text("Enable camera access in Settings to take progress photos.")
+                .font(.subheadline)
+                .foregroundStyle(.gray)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 40)
+
+            Button {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+            } label: {
+                Text("Open Settings")
+                    .font(.subheadline.weight(.medium))
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 10)
+                    .background(.white.opacity(0.15))
+                    .clipShape(Capsule())
+                    .foregroundStyle(.white)
+            }
+        }
+    }
+
+    // MARK: - Camera Unavailable (e.g. Simulator)
+
+    private var cameraUnavailableView: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "camera.badge.exclamationmark.fill")
+                .font(.system(size: 48))
+                .foregroundStyle(.gray)
+
+            Text("Camera Unavailable")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(.white)
+
+            Text("No camera was found on this device.")
+                .font(.subheadline)
+                .foregroundStyle(.gray)
+        }
+    }
+
+    // MARK: - Captured Image Review
 
     @ViewBuilder
     private func capturedImageReview(_ image: UIImage) -> some View {
@@ -170,6 +293,14 @@ struct GridOverlay: View {
 
 // MARK: - Camera Model (AVFoundation)
 
+enum CameraState: Equatable {
+    case idle       // Not yet checked permissions
+    case starting   // Permission granted, session starting
+    case running    // Session is running, preview visible
+    case denied     // User denied camera permission
+    case unavailable // No camera on device (e.g. simulator)
+}
+
 /// Manages AVCaptureSession lifecycle. Uses nonisolated(unsafe) for
 /// non-Sendable AVFoundation types that are only used on known queues.
 @Observable
@@ -177,25 +308,50 @@ final class CameraModel: NSObject {
     nonisolated(unsafe) let session = AVCaptureSession()
     nonisolated(unsafe) private let output = AVCapturePhotoOutput()
     nonisolated(unsafe) private var completion: ((UIImage) -> Void)?
+    var state: CameraState = .idle
+    var isFrontCamera = false
 
     func checkPermissions() {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized:
+            state = .starting
             setupSession()
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
-                if granted {
-                    DispatchQueue.main.async { self?.setupSession() }
+                DispatchQueue.main.async {
+                    if granted {
+                        self?.state = .starting
+                        self?.setupSession()
+                    } else {
+                        self?.state = .denied
+                    }
                 }
             }
-        default:
-            break
+        case .denied, .restricted:
+            state = .denied
+        @unknown default:
+            state = .denied
         }
     }
 
     private func setupSession() {
-        guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front) else { return }
-        guard let input = try? AVCaptureDeviceInput(device: device) else { return }
+        guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else {
+            // Try front camera as fallback
+            guard let frontDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front) else {
+                state = .unavailable
+                return
+            }
+            configureSession(with: frontDevice)
+            return
+        }
+        configureSession(with: device)
+    }
+
+    private func configureSession(with device: AVCaptureDevice) {
+        guard let input = try? AVCaptureDeviceInput(device: device) else {
+            state = .unavailable
+            return
+        }
 
         session.beginConfiguration()
         session.sessionPreset = .photo
@@ -205,6 +361,9 @@ final class CameraModel: NSObject {
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             self?.session.startRunning()
+            DispatchQueue.main.async {
+                self?.state = .running
+            }
         }
     }
 
@@ -214,6 +373,23 @@ final class CameraModel: NSObject {
                 self?.session.stopRunning()
             }
         }
+    }
+
+    func flipCamera() {
+        let newPosition: AVCaptureDevice.Position = isFrontCamera ? .back : .front
+        guard let newDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: newPosition),
+              let newInput = try? AVCaptureDeviceInput(device: newDevice) else { return }
+
+        session.beginConfiguration()
+        // Remove existing camera input
+        if let currentInput = session.inputs.first as? AVCaptureDeviceInput {
+            session.removeInput(currentInput)
+        }
+        if session.canAddInput(newInput) {
+            session.addInput(newInput)
+            isFrontCamera.toggle()
+        }
+        session.commitConfiguration()
     }
 
     func capturePhoto(completion: @escaping (UIImage) -> Void) {
@@ -227,33 +403,49 @@ extension CameraModel: AVCapturePhotoCaptureDelegate {
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         guard let data = photo.fileDataRepresentation(),
               let image = UIImage(data: data) else { return }
+
+        // Front camera: flip horizontally so stored photo is true orientation
+        let finalImage: UIImage
+        if isFrontCamera, let cgImage = image.cgImage {
+            finalImage = UIImage(
+                cgImage: cgImage,
+                scale: image.scale,
+                orientation: .leftMirrored
+            )
+        } else {
+            finalImage = image
+        }
+
         DispatchQueue.main.async { [weak self] in
-            self?.completion?(image)
+            self?.completion?(finalImage)
         }
     }
 }
 
 // MARK: - Camera Preview (UIViewRepresentable)
 
+/// Uses a custom UIView subclass to keep the preview layer frame in sync via layoutSubviews
 struct CameraPreviewView: UIViewRepresentable {
     let session: AVCaptureSession
+    var isFrontCamera: Bool
 
-    func makeUIView(context: Context) -> UIView {
-        let view = UIView(frame: .zero)
-        let previewLayer = AVCaptureVideoPreviewLayer(session: session)
-        previewLayer.videoGravity = .resizeAspectFill
-        view.layer.addSublayer(previewLayer)
-        context.coordinator.previewLayer = previewLayer
+    func makeUIView(context: Context) -> PreviewUIView {
+        let view = PreviewUIView()
+        view.previewLayer.session = session
+        view.previewLayer.videoGravity = .resizeAspectFill
         return view
     }
 
-    func updateUIView(_ uiView: UIView, context: Context) {
-        context.coordinator.previewLayer?.frame = uiView.bounds
+    func updateUIView(_ uiView: PreviewUIView, context: Context) {
+        // Layout handled by PreviewUIView via layerClass
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator() }
+    /// UIView subclass that keeps its AVCaptureVideoPreviewLayer sized to bounds
+    class PreviewUIView: UIView {
+        override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
 
-    class Coordinator {
-        var previewLayer: AVCaptureVideoPreviewLayer?
+        var previewLayer: AVCaptureVideoPreviewLayer {
+            layer as! AVCaptureVideoPreviewLayer
+        }
     }
 }

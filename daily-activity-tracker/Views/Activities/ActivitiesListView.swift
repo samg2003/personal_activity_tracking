@@ -891,6 +891,7 @@ struct ActivitiesListView: View {
         }
         if type == .metric {
             activity.carryForward = true
+            activity.metricKind = ActivityAppearance.suggestMetricKind(for: name) ?? .value
         }
         modelContext.insert(activity)
     }
@@ -912,6 +913,7 @@ struct ActivitiesListView: View {
         }
         if type == .metric {
             child.carryForward = true
+            child.metricKind = ActivityAppearance.suggestMetricKind(for: name) ?? .value
         }
         child.parent = parent
         child.category = parent.category

@@ -52,7 +52,6 @@ struct AddActivityView: View {
     @State private var categoryAutoSet = true
     @State private var unitAutoSet = true
     @State private var metricKindAutoSet = true
-    @State private var settingMetricKindFromSuggestion = false
     @State private var settingCategoryFromSuggestion = false
     @State private var settingUnitFromSuggestion = false
     @State private var showAdvancedOptions = false
@@ -418,11 +417,9 @@ struct AddActivityView: View {
                     }
                     // Smart metric kind autofill (only when type is .metric)
                     if metricKindAutoSet && selectedType == .metric {
-                        settingMetricKindFromSuggestion = true
                         if let suggestedKind = ActivityAppearance.suggestMetricKind(for: newName) {
                             selectedMetricKind = suggestedKind
                         }
-                        settingMetricKindFromSuggestion = false
                     }
                 }
         }
@@ -456,11 +453,9 @@ struct AddActivityView: View {
                 }
                 // Re-fire metric kind suggestion when switching to .metric
                 if metricKindAutoSet && newType == .metric {
-                    settingMetricKindFromSuggestion = true
                     if let suggestedKind = ActivityAppearance.suggestMetricKind(for: name) {
                         selectedMetricKind = suggestedKind
                     }
-                    settingMetricKindFromSuggestion = false
                 }
                 // Metrics default to carry forward
                 carryForward = (newType == .metric)
@@ -506,7 +501,6 @@ struct AddActivityView: View {
                     }
                 }
                 .onChange(of: selectedMetricKind) { _, newKind in
-                    if !settingMetricKindFromSuggestion { metricKindAutoSet = false }
                     guard appearanceAutoSet else { return }
                     let suggestion = ActivityAppearance.suggest(
                         for: name, type: selectedType, metricKind: newKind
