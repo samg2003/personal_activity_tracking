@@ -268,11 +268,36 @@ struct DashboardView: View {
                 CumulativeLogSheet(activity: activity, date: today)
             }
             .sheet(item: $photoPromptActivity, onDismiss: {
-                // If camera was dismissed without capturing any photos, remove the empty log
-                if let log = photoPromptLog, log.allPhotoFiles.isEmpty {
-                    modelContext.delete(log)
+                guard let log = photoPromptLog else { return }
+                defer { photoPromptLog = nil }
+
+                // If the log already has photos, nothing to clean up
+                guard log.allPhotoFiles.isEmpty else { return }
+
+                // Check if photos exist on disk for this activity from today
+                if let activity = log.activity {
+                    let dateStr = Self.todayDatePrefix(for: log.date)
+                    let existingToday = MediaService.shared.allPhotos(for: activity.id)
+                        .filter { $0.contains(dateStr) }
+
+                    if !existingToday.isEmpty {
+                        // Re-attach existing filenames to the log so it stays completed
+                        var mapping: [String: String] = [:]
+                        for filename in existingToday {
+                            if let slot = MediaService.slotName(from: filename) {
+                                mapping[slot] = filename
+                            } else {
+                                mapping["Photo"] = filename
+                            }
+                        }
+                        log.photoFilenames = mapping
+                        log.photoFilename = mapping.values.first
+                        return
+                    }
                 }
-                photoPromptLog = nil
+
+                // No photos at all — remove the empty log
+                modelContext.delete(log)
             }) { activity in
                 NavigationStack {
                     CameraView(
@@ -807,6 +832,13 @@ struct DashboardView: View {
     /// Date to use when creating a log — original carry-forward date if applicable, otherwise today
     private func effectiveLogDate(for activity: Activity) -> Date {
         carriedForwardOriginalDate(activity) ?? today
+    }
+
+    /// Date prefix for matching photo filenames (e.g. "2026-02-17")
+    private static func todayDatePrefix(for date: Date) -> String {
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd"
+        return fmt.string(from: date)
     }
 
     /// Find logs for an activity on its effective date (handles carry-forwarded items)
