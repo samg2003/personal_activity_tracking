@@ -13,6 +13,7 @@ struct AddGoalView: View {
     @State private var hexColor = "#FF3B30"
     @State private var deadline: Date = Calendar.current.date(byAdding: .month, value: 3, to: Date())!
     @State private var hasDeadline = false
+    @State private var userPickedIcon = false
 
     // Activity linking with roles
     @State private var linkedItems: [LinkedItem] = []
@@ -61,6 +62,13 @@ struct AddGoalView: View {
                 }
             }
             .onAppear { loadGoalIfEditing() }
+            .onChange(of: title) { _, newTitle in
+                guard goalToEdit == nil, !userPickedIcon else { return }
+                if let suggestion = ActivityAppearance.suggestForGoal(name: newTitle) {
+                    icon = suggestion.icon
+                    hexColor = suggestion.color
+                }
+            }
         }
     }
 
@@ -79,6 +87,7 @@ struct AddGoalView: View {
                     ForEach(iconOptions, id: \.self) { ic in
                         Button {
                             icon = ic
+                            userPickedIcon = true
                         } label: {
                             Image(systemName: ic)
                                 .font(.system(size: 16))
