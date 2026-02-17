@@ -276,6 +276,7 @@ daily-activity-tracker/
 │   │   │   ├── ActivityAnalyticsView.swift
 │   │   │   ├── BarChartView.swift
 │   │   │   ├── InsightSummaryCard.swift
+│   │   │   ├── PhotoComparisonCard.swift
 │   │   │   ├── HeatmapView.swift
 │   │   │   └── ValueChartView.swift
 │   │   ├── Browser/
@@ -426,11 +427,11 @@ daily-activity-tracker/
 
 ## Phased Implementation Strategy
 
-| Phase                | Scope                                                                           | Deliverable                                          |
-| -------------------- | ------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| **P0: Foundation**   | Models, ScheduleEngine, Dashboard (Checkbox only)                               | Working today-view with tap-to-complete              |
-| **P1: Rich Types**   | Value, Cumulative, Container hierarchy, partial scoring                         | All activity types functional                        |
-| **P2: Photos**       | MediaService, CameraView (ghost, multi-slot), PhotoTimeline, PhotoBank          | Photo capture with sequential multi-slot support     |
-| **P3: Analytics**    | InsightSummaryCard, Heatmap, ValueChart, streaks, behind schedule, biggest wins | Activity-focused analytics and habit insights        |
-| **P4: Integrations** | HealthKit, Notifications, EventKit                                              | External system connections                          |
-| **P5: Polish**       | Past-day browser, vacation mode, haptics, undo                                  | Full UX refinement including editing, deleting, etc. |
+| Phase                | Scope                                                                                                                           | Deliverable                                          |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| **P0: Foundation**   | Models, ScheduleEngine, Dashboard (Checkbox only)                                                                               | Working today-view with tap-to-complete              |
+| **P1: Rich Types**   | Value, Cumulative, Container hierarchy, partial scoring                                                                         | All activity types functional                        |
+| **P2: Photos**       | MediaService, CameraView (ghost, multi-slot), PhotoTimeline, PhotoBank                                                          | Photo capture with sequential multi-slot support     |
+| **P3: Analytics**    | InsightSummaryCard, Heatmap, ValueChart, PhotoComparisonCard, streaks, behind schedule, biggest wins, photo progress, deep dive | Activity-focused analytics and habit insights        |
+| **P4: Integrations** | HealthKit, Notifications, EventKit                                                                                              | External system connections                          |
+| **P5: Polish**       | Past-day browser, vacation mode, haptics, undo                                                                                  | Full UX refinement including editing, deleting, etc. |

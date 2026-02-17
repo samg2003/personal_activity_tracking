@@ -1,5 +1,4 @@
 # List of features: (do not look into this!)
-- make slider in camera uppside down
 - metrics display of photo to able to see scrollable time lapse
 - notification system revamp. Sleep time (no notifications then), morning afternoon and evening set automatically. 30 mins before sleep notification. Morning notification. etc.
 - Crazy alarm system

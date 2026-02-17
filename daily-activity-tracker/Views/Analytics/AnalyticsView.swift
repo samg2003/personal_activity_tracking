@@ -24,6 +24,46 @@ struct AnalyticsView: View {
         }
     }
 
+    private var photoActivities: [Activity] {
+        allActivities.filter {
+            $0.type == .metric && $0.metricKind == .photo
+            && !MediaService.shared.allPhotos(for: $0.id).isEmpty
+        }
+    }
+
+    // MARK: - Deep Dive Groups
+
+    private var deepDiveGroups: [(label: String, icon: String, activities: [Activity])] {
+        let eligible = allActivities.filter {
+            $0.parent == nil
+            && $0.type != .container
+            && $0.schedule.type != .sticky && $0.schedule.type != .adhoc
+        }
+
+        // Sort by recency of last log (most recent first)
+        let sortedByRecency: (Activity, Activity) -> Bool = { a, b in
+            let aDate = allLogs.first(where: { $0.activity?.id == a.id })?.date ?? .distantPast
+            let bDate = allLogs.first(where: { $0.activity?.id == b.id })?.date ?? .distantPast
+            return aDate > bDate
+        }
+
+        var groups: [(label: String, icon: String, activities: [Activity])] = []
+
+        let checkboxes = eligible.filter { $0.type == .checkbox }.sorted(by: sortedByRecency)
+        if !checkboxes.isEmpty { groups.append(("Checkbox", "checkmark.circle", checkboxes)) }
+
+        let values = eligible.filter { $0.type == .value }.sorted(by: sortedByRecency)
+        if !values.isEmpty { groups.append(("Value", "number", values)) }
+
+        let cumulatives = eligible.filter { $0.type == .cumulative }.sorted(by: sortedByRecency)
+        if !cumulatives.isEmpty { groups.append(("Cumulative", "chart.bar.fill", cumulatives)) }
+
+        let metrics = eligible.filter { $0.type == .metric }.sorted(by: sortedByRecency)
+        if !metrics.isEmpty { groups.append(("Metric", "chart.line.uptrend.xyaxis", metrics)) }
+
+        return groups
+    }
+
     // MARK: - Streak Leaderboard
 
     private var sortedStreaks: [(activity: Activity, streak: Int)] {
@@ -221,6 +261,61 @@ struct AnalyticsView: View {
                             }
                         }
                     }
+
+                    // 7. Photo Progress
+                    if !photoActivities.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            sectionHeader("Photo Progress", icon: "person.2.crop.square.stack")
+                            ForEach(photoActivities) { activity in
+                                NavigationLink {
+                                    ActivityAnalyticsView(
+                                        activity: activity,
+                                        allLogs: allLogs,
+                                        vacationDays: vacationDays,
+                                        allActivities: allActivities
+                                    )
+                                } label: {
+                                    PhotoComparisonCard(activity: activity)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+
+                    // 8. Deep Dive
+                    if !deepDiveGroups.isEmpty {
+                        VStack(alignment: .leading, spacing: 12) {
+                            sectionHeader("Deep Dive", icon: "magnifyingglass")
+
+                            ForEach(deepDiveGroups, id: \.label) { group in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: group.icon)
+                                            .font(.system(size: 11))
+                                            .foregroundStyle(.secondary)
+                                        Text(group.label)
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .padding(.top, 4)
+
+                                    ForEach(group.activities) { activity in
+                                        NavigationLink {
+                                            ActivityAnalyticsView(
+                                                activity: activity,
+                                                allLogs: allLogs,
+                                                vacationDays: vacationDays,
+                                                allActivities: allActivities
+                                            )
+                                        } label: {
+                                            deepDiveRow(activity)
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 .padding()
             }
@@ -328,6 +423,46 @@ struct AnalyticsView: View {
             Text(delta)
                 .font(.system(.caption, design: .rounded, weight: .bold))
                 .foregroundStyle(.green)
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 12)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func deepDiveRow(_ activity: Activity) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: activity.icon)
+                .font(.system(size: 14))
+                .foregroundStyle(Color(hex: activity.hexColor))
+                .frame(width: 24)
+
+            Text(activity.name)
+                .font(.subheadline)
+                .lineLimit(1)
+
+            if activity.isStopped {
+                Text("Paused")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(.orange.opacity(0.12))
+                    .clipShape(Capsule())
+            }
+
+            Spacer()
+
+            // Last logged date
+            if let lastLog = allLogs.first(where: { $0.activity?.id == activity.id }) {
+                Text(lastLog.date, format: .dateTime.month(.abbreviated).day().year())
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+            }
+
+            Image(systemName: "chevron.right")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
         }
         .padding(.vertical, 8)
         .padding(.horizontal, 12)
