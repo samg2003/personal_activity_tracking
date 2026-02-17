@@ -16,20 +16,34 @@ struct ActivitiesListView: View {
     @State private var removeTarget: Activity?
     @State private var showRemoveDialog = false
 
+    // Group into Container state
+    @State private var selectedForGroup: Set<UUID> = []
+    @State private var pendingGroupIds: Set<UUID> = []  // snapshot before dialog
+    @State private var showGroupNameAlert = false
+    @State private var groupContainerName = ""
+    @State private var groupTargetCategory: Category?
+    @State private var showGroupCategoryPicker = false
+
+    // Batch category assignment state
+    @State private var showBatchCategoryPicker = false
+    @State private var pendingBatchIds: Set<UUID> = []  // snapshot before dialog
+
     // Inline quick-add state
     @State private var inlineText = ""
     @State private var inlineIsContainer = false
+    @State private var inlineType: ActivityType = .checkbox
     @State private var inlineContainerText: [UUID: String] = [:]
+    @State private var inlineContainerType: [UUID: ActivityType] = [:]
     @FocusState private var inlineFocusedSection: UUID?
     @FocusState private var inlineFocusedContainer: UUID?
 
     // Top-level activities only (not children of containers)
     private var topLevelActivities: [Activity] {
-        allActivities.filter { $0.parent == nil && !$0.isArchived }
+        allActivities.filter { $0.parent == nil && !$0.isStopped }
     }
 
-    private var archivedActivities: [Activity] {
-        allActivities.filter { $0.isArchived }
+    private var pausedActivities: [Activity] {
+        allActivities.filter { $0.isStopped }
     }
 
     private var filteredActivities: [Activity] {
@@ -62,138 +76,223 @@ struct ActivitiesListView: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                ForEach(groupedByCategory, id: \.category?.id) { group in
-                    Section {
-                        ForEach(group.activities) { activity in
-                            if activity.type == .container {
-                                containerSection(activity)
-                            } else {
-                                standaloneActivityRow(activity)
-                            }
-                        }
+            activitiesList
+                .sheet(item: $editingActivity) { activity in
+                    AddActivityView(activityToEdit: activity)
+                }
+                .sheet(isPresented: $showAddSheet) {
+                    AddActivityView()
+                }
+                .alert("Delete Activity", isPresented: $showDeleteAlert) {
+                    deleteAlertButtons
+                } message: {
+                    deleteAlertMessage
+                }
+                .alert("Group into Container", isPresented: $showGroupNameAlert) {
+                    TextField("Container name", text: $groupContainerName)
+                    Button("Create") {
+                        groupSelectedActivities()
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("Selected activities will become children of the new container.")
+                }
+        }
+    }
 
-                        // Inline quick-add at bottom of section
-                        inlineAddRow(category: group.category)
-                    } header: {
-                        categoryHeader(group.category)
+    // Core list + toolbar + search, kept separate to reduce type-checker pressure
+    private var activitiesList: some View {
+        List(selection: $selectedForGroup) {
+            mainListContent
+            emptyStateSection
+            pausedSection
+        }
+        .listStyle(.insetGrouped)
+        .searchable(text: $searchText, prompt: "Search activities")
+        .navigationTitle("Activities")
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                EditButton()
+            }
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                if !selectedForGroup.isEmpty {
+                    Button {
+                        pendingBatchIds = selectedForGroup
+                        showBatchCategoryPicker = true
+                    } label: {
+                        Label("Category", systemImage: "tag")
+                    }
+                    Button {
+                        pendingGroupIds = selectedForGroup
+                        startGroupFlow()
+                    } label: {
+                        Label("Group (\(selectedForGroup.count))", systemImage: "folder.badge.plus")
                     }
                 }
-
-                // If no groups exist, still show a quick-add row
-                if groupedByCategory.isEmpty {
-                    Section {
-                        inlineAddRow(category: nil)
-                    } header: {
-                        Text("GET STARTED")
-                            .font(.system(size: 12, weight: .bold, design: .rounded))
-                    }
-                }
-
-                // Archived section
-                if !archivedActivities.isEmpty {
-                    Section {
-                        DisclosureGroup {
-                            ForEach(archivedActivities) { activity in
-                                HStack(spacing: 10) {
-                                    Image(systemName: activity.icon)
-                                        .font(.system(size: 14))
-                                        .foregroundStyle(.secondary)
-                                        .frame(width: 24)
-
-                                    Text(activity.name)
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
-                                        .strikethrough()
-
-                                    Spacer()
-
-                                    Button {
-                                        activity.isArchived = false
-                                    } label: {
-                                        Text("Restore")
-                                            .font(.caption)
-                                            .foregroundStyle(.blue)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                                .contextMenu {
-                                    Button {
-                                        activity.isArchived = false
-                                    } label: {
-                                        Label("Unarchive", systemImage: "tray.and.arrow.up")
-                                    }
-
-                                    Button(role: .destructive) {
-                                        initiateDelete(activity)
-                                    } label: {
-                                        Label("Delete Permanently", systemImage: "trash")
-                                    }
-                                }
-                            }
-                        } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: "archivebox")
-                                    .font(.caption)
-                                Text("Archived (\(archivedActivities.count))")
-                                    .font(.caption.weight(.medium))
-                            }
-                            .foregroundStyle(.secondary)
-                        }
-                    }
+                Button { showAddSheet = true } label: {
+                    Image(systemName: "plus")
                 }
             }
-            .listStyle(.insetGrouped)
-            .searchable(text: $searchText, prompt: "Search activities")
-            .navigationTitle("Activities")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { showAddSheet = true } label: {
-                        Image(systemName: "plus")
-                    }
+        }
+        .confirmationDialog(
+            "Remove from Container",
+            isPresented: $showRemoveDialog,
+            titleVisibility: .visible
+        ) {
+            Button("Make Standalone") {
+                if let child = removeTarget {
+                    makeStandalone(child)
                 }
             }
-            .sheet(item: $editingActivity) { activity in
-                AddActivityView(activityToEdit: activity)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will remove the activity from its container and place it as a standalone activity.")
+        }
+        .confirmationDialog(
+            "Activities span multiple categories",
+            isPresented: $showGroupCategoryPicker,
+            titleVisibility: .visible
+        ) {
+            ForEach(categories) { cat in
+                Button(cat.name) {
+                    groupTargetCategory = cat
+                    groupContainerName = ""
+                    showGroupNameAlert = true
+                }
             }
-            .sheet(isPresented: $showAddSheet) {
-                AddActivityView()
+            Button("No Category") {
+                groupTargetCategory = nil
+                groupContainerName = ""
+                showGroupNameAlert = true
             }
-            .alert("Delete Activity", isPresented: $showDeleteAlert) {
-                deleteAlertButtons
-            } message: {
-                deleteAlertMessage
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Pick the category for the new container. All grouped activities will move to this category.")
+        }
+        .confirmationDialog(
+            "Set Category",
+            isPresented: $showBatchCategoryPicker,
+            titleVisibility: .visible
+        ) {
+            ForEach(categories) { cat in
+                Button(cat.name) {
+                    batchSetCategory(cat)
+                }
             }
-            .confirmationDialog(
-                "Remove from Container",
-                isPresented: $showRemoveDialog,
-                titleVisibility: .visible
-            ) {
-                Button("Future Only") {
-                    if let child = removeTarget {
-                        // Snapshot old parent, then archive
-                        let snap = ActivityConfigSnapshot(
-                            activity: child,
-                            effectiveFrom: child.configSnapshots
-                                .compactMap { $0.effectiveUntil }
-                                .max()
-                                .map { Calendar.current.date(byAdding: .day, value: 1, to: $0) ?? $0 }
-                                ?? child.createdDate,
-                            effectiveUntil: Calendar.current.date(byAdding: .day, value: -1, to: Date().startOfDay) ?? Date().startOfDay
-                        )
-                        modelContext.insert(snap)
-                        child.parent = nil
-                        child.isArchived = true
+            Button("No Category") {
+                batchSetCategory(nil)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Apply this category to all selected activities.")
+        }
+    }
+
+    // Simple standalone extraction — just detach from parent
+    private func makeStandalone(_ activity: Activity) {
+        let nextSort = (allActivities.filter { $0.parent == nil && !$0.isStopped }.map(\.sortOrder).max() ?? 0) + 1
+        activity.parent = nil
+        activity.sortOrder = nextSort
+    }
+
+    // MARK: - Extracted List Sections
+
+    @ViewBuilder
+    private var mainListContent: some View {
+        ForEach(groupedByCategory, id: \.category?.id) { group in
+            Section {
+                ForEach(group.activities) { activity in
+                    if activity.type == .container {
+                        containerSection(activity)
+                    } else {
+                        standaloneActivityRow(activity)
                     }
                 }
-                Button("Remove Everywhere", role: .destructive) {
-                    if let child = removeTarget {
-                        modelContext.delete(child)
-                    }
+                .onMove { indices, newOffset in
+                    moveActivities(in: group.category, from: indices, to: newOffset)
                 }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("\"Future Only\" archives the activity (past data preserved). \"Remove Everywhere\" deletes it and all logs.")
+                inlineAddRow(category: group.category)
+            } header: {
+                categoryHeader(group.category)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var emptyStateSection: some View {
+        if groupedByCategory.isEmpty {
+            Section {
+                inlineAddRow(category: nil)
+            } header: {
+                Text("GET STARTED")
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var pausedSection: some View {
+        if !pausedActivities.isEmpty {
+            Section {
+                DisclosureGroup {
+                    ForEach(pausedActivities) { activity in
+                        pausedActivityRow(activity)
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "pause.circle")
+                            .font(.caption)
+                        Text("Paused (\(pausedActivities.count))")
+                            .font(.caption.weight(.medium))
+                    }
+                    .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func pausedActivityRow(_ activity: Activity) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: activity.icon)
+                .font(.system(size: 14))
+                .foregroundStyle(.secondary)
+                .frame(width: 24)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(activity.name)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                if let pid = activity.pausedParentId,
+                   let parentName = allActivities.first(where: { $0.id == pid })?.name {
+                    Text("from \(parentName)")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+
+            Spacer()
+
+            Button {
+                resumeActivity(activity)
+            } label: {
+                Text("Resume")
+                    .font(.caption)
+                    .foregroundStyle(.blue)
+            }
+            .buttonStyle(.plain)
+        }
+        .contextMenu {
+            Button {
+                resumeActivity(activity)
+            } label: {
+                Label("Resume", systemImage: "play.fill")
+            }
+
+            Button(role: .destructive) {
+                initiateDelete(activity)
+            } label: {
+                Label("Delete Permanently", systemImage: "trash")
             }
         }
     }
@@ -274,9 +373,17 @@ struct ActivitiesListView: View {
             Divider()
 
             Button {
-                container.isArchived = true
+                dissolveContainer(container)
             } label: {
-                Label("Archive", systemImage: "archivebox")
+                Label("Dissolve Container", systemImage: "arrow.up.right.and.arrow.down.left")
+            }
+
+            Divider()
+
+            Button {
+                pauseActivity(container)
+            } label: {
+                Label("Pause", systemImage: "pause.fill")
             }
 
             Button(role: .destructive) {
@@ -291,6 +398,9 @@ struct ActivitiesListView: View {
             let children = container.children.sorted { $0.sortOrder < $1.sortOrder }
             ForEach(children) { child in
                 childActivityRow(child, containerColor: Color(hex: container.hexColor))
+            }
+            .onMove { indices, newOffset in
+                moveChildren(in: container, from: indices, to: newOffset)
             }
 
             // Inline quick-add for sub-activities
@@ -357,32 +467,33 @@ struct ActivitiesListView: View {
             }
 
             Button {
-                removeTarget = child
-                showRemoveDialog = true
+                makeStandalone(child)
             } label: {
-                Label("Remove from Container", systemImage: "arrow.up.right.square")
+                Label("Make Standalone", systemImage: "arrow.up.right.square")
+            }
+
+            // Move to a different container
+            let otherContainers = allActivities.filter { $0.type == .container && !$0.isStopped && $0.id != child.parent?.id }
+            if !otherContainers.isEmpty {
+                Menu {
+                    ForEach(otherContainers) { container in
+                        Button {
+                            moveActivity(child, toContainer: container)
+                        } label: {
+                            Label(container.name, systemImage: container.icon)
+                        }
+                    }
+                } label: {
+                    Label("Move to Container", systemImage: "folder.badge.plus")
+                }
             }
 
             Divider()
 
-            if child.isStopped {
-                Button {
-                    child.stoppedAt = nil
-                } label: {
-                    Label("Resume Tracking", systemImage: "play.fill")
-                }
-            } else {
-                Button {
-                    child.stoppedAt = Date().startOfDay
-                } label: {
-                    Label("Stop Tracking", systemImage: "pause.fill")
-                }
-            }
-
             Button {
-                child.isArchived = true
+                pauseActivity(child)
             } label: {
-                Label("Archive", systemImage: "archivebox")
+                Label("Pause", systemImage: "pause.fill")
             }
 
             Button(role: .destructive) {
@@ -448,26 +559,37 @@ struct ActivitiesListView: View {
                 Label("Edit", systemImage: "pencil")
             }
 
-            Divider()
-
-            if activity.isStopped {
-                Button {
-                    activity.stoppedAt = nil
+            // Move to Container submenu
+            let containers = allActivities.filter { $0.type == .container && !$0.isStopped && $0.id != activity.id }
+            if !containers.isEmpty {
+                Menu {
+                    ForEach(containers) { container in
+                        Button {
+                            moveActivity(activity, toContainer: container)
+                        } label: {
+                            Label(container.name, systemImage: container.icon)
+                        }
+                    }
                 } label: {
-                    Label("Resume Tracking", systemImage: "play.fill")
-                }
-            } else {
-                Button {
-                    activity.stoppedAt = Date().startOfDay
-                } label: {
-                    Label("Stop Tracking", systemImage: "pause.fill")
+                    Label("Move to Container", systemImage: "folder.badge.plus")
                 }
             }
 
+            // Convert to Container
+            if activity.type != .container {
+                Button {
+                    convertToContainer(activity)
+                } label: {
+                    Label("Convert to Container", systemImage: "square.stack.3d.up")
+                }
+            }
+
+            Divider()
+
             Button {
-                activity.isArchived = true
+                pauseActivity(activity)
             } label: {
-                Label("Archive", systemImage: "archivebox")
+                Label("Pause", systemImage: "pause.fill")
             }
 
             Button(role: .destructive) {
@@ -484,34 +606,39 @@ struct ActivitiesListView: View {
     private func inlineAddRow(category: Category?) -> some View {
         let sectionID = category?.id ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
         HStack(spacing: 8) {
-            Image(systemName: inlineIsContainer ? "folder.badge.plus" : "plus.circle")
+            Image(systemName: inlineType == .container ? "folder.badge.plus" : "plus.circle")
                 .font(.system(size: 14))
                 .foregroundStyle(.tertiary)
 
-            TextField(inlineIsContainer ? "New container…" : "New activity…", text: $inlineText)
+            TextField(inlineType == .container ? "New container…" : "New activity…", text: $inlineText)
                 .font(.subheadline)
                 .textFieldStyle(.plain)
                 .focused($inlineFocusedSection, equals: sectionID)
                 .onSubmit {
                     let trimmed = inlineText.trimmingCharacters(in: .whitespaces)
                     guard !trimmed.isEmpty else { return }
-                    quickCreateActivity(name: trimmed, isContainer: inlineIsContainer, category: category)
+                    quickCreateActivity(name: trimmed, type: inlineType, category: category)
                     inlineText = ""
                 }
 
-            // Type toggle pill
-            Button {
-                inlineIsContainer.toggle()
+            // Type picker menu
+            Menu {
+                ForEach(ActivityType.allCases) { type in
+                    Button {
+                        inlineType = type
+                    } label: {
+                        Label(type.displayName, systemImage: type.systemImage)
+                    }
+                }
             } label: {
-                Text(inlineIsContainer ? "Container" : "Activity")
+                Text(inlineType.displayName)
                     .font(.caption2.weight(.medium))
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
-                    .background(inlineIsContainer ? Color.orange.opacity(0.15) : Color.blue.opacity(0.12))
-                    .foregroundStyle(inlineIsContainer ? .orange : .blue)
+                    .background(inlineTypeColor.opacity(0.12))
+                    .foregroundStyle(inlineTypeColor)
                     .clipShape(Capsule())
             }
-            .buttonStyle(.plain)
         }
         .padding(.vertical, 4)
     }
@@ -525,9 +652,25 @@ struct ActivitiesListView: View {
                 .padding(.leading, 8)
 
             HStack(spacing: 8) {
-                Image(systemName: "plus")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Color(hex: container.hexColor).opacity(0.5))
+                // Type picker for sub-activity (same as top-level, minus container)
+                Menu {
+                    ForEach([ActivityType.checkbox, .value, .cumulative, .metric], id: \.self) { type in
+                        Button {
+                            inlineContainerType[container.id] = type
+                        } label: {
+                            Label(type.rawValue.capitalized, systemImage: type == .checkbox ? "checkmark.square" : type == .value ? "number" : type == .cumulative ? "chart.bar" : "gauge.medium")
+                        }
+                    }
+                } label: {
+                    let currentType = inlineContainerType[container.id] ?? .checkbox
+                    Text(currentType.rawValue.capitalized)
+                        .font(.caption2)
+                        .fontWeight(.medium)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(Color(hex: container.hexColor).opacity(0.15))
+                        .clipShape(Capsule())
+                }
 
                 TextField("Add sub-activity…", text: Binding(
                     get: { inlineContainerText[container.id] ?? "" },
@@ -539,7 +682,8 @@ struct ActivitiesListView: View {
                 .onSubmit {
                     let trimmed = (inlineContainerText[container.id] ?? "").trimmingCharacters(in: .whitespaces)
                     guard !trimmed.isEmpty else { return }
-                    quickCreateChildActivity(name: trimmed, parent: container)
+                    let type = inlineContainerType[container.id] ?? .checkbox
+                    quickCreateChildActivity(name: trimmed, type: type, parent: container)
                     inlineContainerText[container.id] = ""
                 }
             }
@@ -550,9 +694,8 @@ struct ActivitiesListView: View {
 
     // MARK: - Quick Create Helpers
 
-    private func quickCreateActivity(name: String, isContainer: Bool, category: Category?) {
+    private func quickCreateActivity(name: String, type: ActivityType, category: Category?) {
         let nextSort = (allActivities.map(\.sortOrder).max() ?? 0) + 1
-        let type: ActivityType = isContainer ? .container : .checkbox
         let appearance = ActivityAppearance.suggest(for: name, type: type)
         let activity = Activity(
             name: name,
@@ -566,19 +709,31 @@ struct ActivitiesListView: View {
         modelContext.insert(activity)
     }
 
-    private func quickCreateChildActivity(name: String, parent: Activity) {
+    private func quickCreateChildActivity(name: String, type: ActivityType, parent: Activity) {
         let nextSort = (parent.children.map(\.sortOrder).max() ?? 0) + 1
-        let appearance = ActivityAppearance.suggest(for: name, type: .checkbox)
+        let appearance = ActivityAppearance.suggest(for: name, type: type)
         let child = Activity(
             name: name,
             icon: appearance.icon,
             hexColor: appearance.color,
-            type: .checkbox,
+            type: type,
             schedule: .daily,
             sortOrder: nextSort
         )
         child.parent = parent
+        child.category = parent.category
         modelContext.insert(child)
+    }
+
+    private func batchSetCategory(_ category: Category?) {
+        let selected = allActivities.filter { pendingBatchIds.contains($0.id) }
+        print("[BatchCategory] pendingBatchIds: \(pendingBatchIds.count), matched: \(selected.count) activities")
+        for activity in selected {
+            activity.category = category
+        }
+        try? modelContext.save()
+        pendingBatchIds.removeAll()
+        selectedForGroup.removeAll()
     }
 
     // MARK: - Info Tags
@@ -676,8 +831,8 @@ struct ActivitiesListView: View {
         }
 
         if let target = deleteTarget, hasExistingData(target) {
-            Button("Archive (Keep Data)") {
-                archiveActivity(target)
+            Button("Pause (Keep Data)") {
+                pauseActivity(target)
                 deleteTarget = nil
             }
         }
@@ -707,14 +862,30 @@ struct ActivitiesListView: View {
         !activity.logs.isEmpty || activity.children.contains(where: { !$0.logs.isEmpty })
     }
 
-    private func archiveActivity(_ activity: Activity) {
-        activity.isArchived = true
-        // Cascade archive to children so they don't appear as orphans
+    private func pauseActivity(_ activity: Activity) {
+        activity.stoppedAt = Date().startOfDay
+        // Remember parent so it can be restored on resume
+        activity.pausedParentId = activity.parent?.id
+        activity.parent = nil
+        // Cascade pause to children so they don't appear as orphans
         if activity.type == .container {
             for child in activity.children {
-                child.isArchived = true
+                child.stoppedAt = Date().startOfDay
+                child.pausedParentId = activity.id
+                child.parent = nil
             }
         }
+    }
+
+    private func resumeActivity(_ activity: Activity) {
+        activity.stoppedAt = nil
+        // Restore parent if the original container still exists
+        if let pid = activity.pausedParentId,
+           let parent = allActivities.first(where: { $0.id == pid && !$0.isStopped }) {
+            activity.parent = parent
+            activity.sortOrder = (parent.children.map(\.sortOrder).max() ?? 0) + 1
+        }
+        activity.pausedParentId = nil
     }
 
     private func hardDelete(_ activity: Activity) {
@@ -729,7 +900,166 @@ struct ActivitiesListView: View {
         }
     }
 
+    // MARK: - Move & Convert
+
+    private func moveActivity(_ activity: Activity, toContainer container: Activity) {
+        let nextSort = (container.children.map(\.sortOrder).max() ?? 0) + 1
+        activity.parent = container
+        activity.sortOrder = nextSort
+        if let containerCategory = container.category {
+            activity.category = containerCategory
+        }
+    }
+
+    private func convertToContainer(_ activity: Activity) {
+        // Snapshot pre-conversion config so historical analytics are preserved
+        let snapshot = ActivityConfigSnapshot(
+            activity: activity,
+            effectiveFrom: activity.createdDate,
+            effectiveUntil: Calendar.current.date(byAdding: .day, value: -1, to: Date().startOfDay) ?? Date().startOfDay
+        )
+        modelContext.insert(snapshot)
+        activity.type = .container
+        // Clear fields that don't apply to containers
+        activity.targetValue = nil
+        activity.healthKitTypeID = nil
+        activity.healthKitModeRaw = nil
+    }
+
+    private func dissolveContainer(_ container: Activity) {
+        // Reparent children to top-level
+        for child in container.children {
+            child.parent = nil
+        }
+        // Snapshot and convert back
+        let snapshot = ActivityConfigSnapshot(
+            activity: container,
+            effectiveFrom: container.createdDate,
+            effectiveUntil: Calendar.current.date(byAdding: .day, value: -1, to: Date().startOfDay) ?? Date().startOfDay
+        )
+        modelContext.insert(snapshot)
+        container.type = .checkbox
+    }
+
+    // MARK: - Reorder
+
+    private func moveActivities(in category: Category?, from source: IndexSet, to destination: Int) {
+        // Get the sorted activities for this category group
+        let activities: [Activity]
+        if let cat = category {
+            activities = filteredActivities
+                .filter { $0.category?.id == cat.id }
+                .sorted { $0.sortOrder < $1.sortOrder }
+        } else {
+            activities = filteredActivities
+                .filter { $0.category == nil }
+                .sorted { $0.sortOrder < $1.sortOrder }
+        }
+        var reordered = activities
+        reordered.move(fromOffsets: source, toOffset: destination)
+        for (index, activity) in reordered.enumerated() {
+            activity.sortOrder = index
+        }
+    }
+
+    private func moveChildren(in container: Activity, from source: IndexSet, to destination: Int) {
+        var children = container.children.sorted { $0.sortOrder < $1.sortOrder }
+        children.move(fromOffsets: source, toOffset: destination)
+        for (index, child) in children.enumerated() {
+            child.sortOrder = index
+        }
+    }
+
+    private func groupSelectedActivities() {
+        let trimmed = groupContainerName.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, !pendingGroupIds.isEmpty else { return }
+
+        // Only group standalone top-level activities (not containers or children)
+        let validSelected = allActivities.filter {
+            pendingGroupIds.contains($0.id)
+            && $0.parent == nil
+            && $0.type != .container
+            && !$0.isStopped
+        }
+        guard !validSelected.isEmpty else { return }
+
+        // Determine category — use groupTargetCategory if multi-cat was resolved, else inherit first
+        let uniqueCategories = Set(validSelected.compactMap { $0.category?.id })
+        let category: Category?
+        if let target = groupTargetCategory {
+            category = target
+        } else if uniqueCategories.count <= 1 {
+            category = validSelected.first?.category
+        } else {
+            // Should have been resolved by picker, but fallback to first
+            category = validSelected.first?.category
+        }
+
+        let nextSort = (allActivities.map(\.sortOrder).max() ?? 0) + 1
+        let appearance = ActivityAppearance.suggest(for: trimmed, type: .container)
+
+        let container = Activity(
+            name: trimmed,
+            icon: appearance.icon,
+            hexColor: appearance.color,
+            type: .container,
+            schedule: .daily,
+            category: category,
+            sortOrder: nextSort
+        )
+        modelContext.insert(container)
+
+        for (index, activity) in validSelected.enumerated() {
+            activity.parent = container
+            activity.category = category
+            activity.sortOrder = index
+        }
+
+        try? modelContext.save()
+        pendingGroupIds.removeAll()
+        selectedForGroup.removeAll()
+        groupTargetCategory = nil
+        expandedContainers.insert(container.id)
+    }
+
+    /// Validates selection for grouping and starts the flow
+    private func startGroupFlow() {
+        print("[GroupFlow] pendingGroupIds = \(pendingGroupIds)")
+        let validSelected = allActivities.filter {
+            pendingGroupIds.contains($0.id)
+            && $0.parent == nil
+            && $0.type != .container
+            && !$0.isStopped
+        }
+        print("[GroupFlow] validSelected = \(validSelected.map(\.name))")
+
+        guard !validSelected.isEmpty else { return }
+
+        let uniqueCategories = Set(validSelected.compactMap { $0.category?.id })
+        let hasUncategorized = validSelected.contains(where: { $0.category == nil })
+
+        if uniqueCategories.count > 1 || (uniqueCategories.count == 1 && hasUncategorized) {
+            // Multi-category — ask user to pick
+            showGroupCategoryPicker = true
+        } else {
+            // Same category — go straight to name prompt
+            groupTargetCategory = validSelected.first?.category
+            groupContainerName = ""
+            showGroupNameAlert = true
+        }
+    }
+
     // MARK: - Helpers
+
+    private var inlineTypeColor: Color {
+        switch inlineType {
+        case .checkbox: return .blue
+        case .value: return .green
+        case .cumulative: return .teal
+        case .container: return .orange
+        case .metric: return .purple
+        }
+    }
 
     private func scheduleLabel(_ schedule: Schedule) -> String {
         schedule.type.displayName

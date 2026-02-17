@@ -48,6 +48,7 @@ final class DataService {
         let healthKitTypeID: String?
         let healthKitModeRaw: String?
         let aggregationModeRaw: String?
+        var pausedParentId: UUID?
 
         init(id: UUID, name: String, icon: String, hexColor: String,
              typeRaw: String, scheduleData: Data?, timeWindowData: Data?,
@@ -57,7 +58,8 @@ final class DataService {
              createdAt: Date, categoryID: UUID?, parentID: UUID?,
              stoppedAt: Date? = nil,
              healthKitTypeID: String? = nil, healthKitModeRaw: String? = nil,
-             aggregationModeRaw: String? = nil) {
+             aggregationModeRaw: String? = nil,
+             pausedParentId: UUID? = nil) {
             self.id = id; self.name = name; self.icon = icon; self.hexColor = hexColor
             self.typeRaw = typeRaw; self.scheduleData = scheduleData
             self.timeWindowData = timeWindowData; self.timeSlotsData = timeSlotsData
@@ -68,6 +70,7 @@ final class DataService {
             self.stoppedAt = stoppedAt; self.healthKitTypeID = healthKitTypeID
             self.healthKitModeRaw = healthKitModeRaw
             self.aggregationModeRaw = aggregationModeRaw
+            self.pausedParentId = pausedParentId
         }
 
         init(from decoder: Decoder) throws {
@@ -92,6 +95,7 @@ final class DataService {
             healthKitTypeID = try c.decodeIfPresent(String.self, forKey: .healthKitTypeID)
             healthKitModeRaw = try c.decodeIfPresent(String.self, forKey: .healthKitModeRaw)
             aggregationModeRaw = try c.decodeIfPresent(String.self, forKey: .aggregationModeRaw)
+            pausedParentId = try c.decodeIfPresent(UUID.self, forKey: .pausedParentId)
             // Old fields silently ignored: allowsPhoto, allowsNotes, weight, reminderData
         }
     }
@@ -269,7 +273,8 @@ final class DataService {
                 stoppedAt: $0.stoppedAt,
                 healthKitTypeID: $0.healthKitTypeID,
                 healthKitModeRaw: $0.healthKitModeRaw,
-                aggregationModeRaw: $0.aggregationModeRaw
+                aggregationModeRaw: $0.aggregationModeRaw,
+                pausedParentId: $0.pausedParentId
             )
         }
         
@@ -401,7 +406,13 @@ final class DataService {
             act.sortOrder = dto.sortOrder
             act.isArchived = dto.isArchived
             act.createdAt = dto.createdAt
-            act.stoppedAt = dto.stoppedAt
+            // Backward compat: legacy exports have isArchived but no stoppedAt
+            if dto.isArchived && dto.stoppedAt == nil {
+                act.stoppedAt = dto.createdAt
+            } else {
+                act.stoppedAt = dto.stoppedAt
+            }
+            act.pausedParentId = dto.pausedParentId
             act.healthKitTypeID = dto.healthKitTypeID
             act.healthKitModeRaw = dto.healthKitModeRaw
             act.aggregationModeRaw = dto.aggregationModeRaw

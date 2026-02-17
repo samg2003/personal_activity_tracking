@@ -31,7 +31,7 @@ struct AddGoalView: View {
     ]
 
     private var linkableActivities: [Activity] {
-        allActivities.filter { !$0.isArchived }
+        allActivities.filter { !$0.isStopped }
     }
 
     private var metricCount: Int {

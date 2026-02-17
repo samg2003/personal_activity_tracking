@@ -18,14 +18,9 @@ protocol ScheduleEngineProtocol {
 final class ScheduleEngine: ScheduleEngineProtocol {
 
     func shouldShow(_ activity: Activity, on date: Date) -> Bool {
-        // Archived activities: only show on historical dates before they were stopped
-        if activity.isArchived {
-            guard let stopped = activity.stoppedAt,
-                  date.startOfDay <= stopped else { return false }
-        }
         // Don't show activities before they were created
         if date.startOfDay < activity.createdDate.startOfDay { return false }
-        // Stopped activities don't appear after their stop date
+        // Paused activities don't appear after their stop date
         if let stopped = activity.stoppedAt, date.startOfDay > stopped { return false }
 
         // Use version-appropriate schedule (snapshot for historical dates)
@@ -47,7 +42,7 @@ final class ScheduleEngine: ScheduleEngineProtocol {
     /// Checks if a metric activity has a missed scheduled occurrence that should carry forward to `date`.
     /// Returns true if the most recent scheduled day before `date` has no completed/skipped log.
     private func shouldCarryForward(_ activity: Activity, on date: Date, logs: [ActivityLog]) -> Bool {
-        guard !activity.isArchived else { return false }
+        guard !activity.isStopped else { return false }
         guard activity.type == .metric else { return false }
         let schedule = activity.scheduleActive(on: date)
         guard schedule.type == .weekly || schedule.type == .monthly else { return false }
@@ -128,7 +123,7 @@ final class ScheduleEngine: ScheduleEngineProtocol {
         let scheduledIDs = Set(scheduled.map { $0.id })
         let carryForward = allChildren.filter { child in
             !scheduledIDs.contains(child.id)
-            && !child.isArchived
+            && !child.isStopped
             && carriedForwardDate(for: child, on: date, logs: logs) != nil
         }
         return (scheduled + carryForward).sorted { $0.sortOrder < $1.sortOrder }

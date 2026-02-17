@@ -13,6 +13,14 @@ struct SettingsView: View {
     @State private var alertMessage = ""
     @State private var showAlert = false
 
+    // Category management
+    @Query(sort: \Category.sortOrder) private var categories: [Category]
+    @State private var editingCategory: Category?
+    @State private var showAddCategory = false
+    @State private var newCategoryName = ""
+    @State private var newCategoryIcon = "folder"
+    @State private var newCategoryColor = "#007AFF"
+
     // Notification state (synced with UserDefaults via NotificationService)
     @State private var morningEnabled = NotificationService.shared.morningConfig.enabled
     @State private var morningTime = Self.dateFrom(NotificationService.shared.morningConfig)
@@ -46,6 +54,8 @@ struct SettingsView: View {
                 } footer: {
                     Text("Get a daily nudge to check your activities.")
                 }
+
+                categoriesSection
 
                 Section("Data Management") {
                     Button {
@@ -234,6 +244,113 @@ struct SettingsView: View {
         )
 
         NotificationService.shared.rescheduleAll()
+    }
+}
+
+// MARK: - Category Management
+
+extension SettingsView {
+
+    private var categoriesSection: some View {
+        Section {
+            ForEach(categories) { category in
+                categoryRow(category)
+            }
+            .onDelete(perform: deleteCategories)
+
+            Button {
+                newCategoryName = ""
+                newCategoryIcon = "folder"
+                newCategoryColor = "#007AFF"
+                showAddCategory = true
+            } label: {
+                Label("Add Category", systemImage: "plus.circle")
+            }
+
+            Button {
+                restoreDefaultCategories()
+            } label: {
+                Label("Restore Defaults", systemImage: "arrow.counterclockwise")
+            }
+        } header: {
+            Text("Categories")
+        } footer: {
+            Text("Categories organise your activities into groups. Restore defaults re-creates any missing ones.")
+        }
+        .alert("Add Category", isPresented: $showAddCategory) {
+            TextField("Name", text: $newCategoryName)
+            Button("Add") { addCategory() }
+            Button("Cancel", role: .cancel) {}
+        }
+        .alert("Rename Category", isPresented: Binding(
+            get: { editingCategory != nil },
+            set: { if !$0 { editingCategory = nil } }
+        )) {
+            TextField("Name", text: Binding(
+                get: { editingCategory?.name ?? "" },
+                set: { editingCategory?.name = $0 }
+            ))
+            Button("Save") { editingCategory = nil }
+            Button("Cancel", role: .cancel) { editingCategory = nil }
+        }
+    }
+
+    @ViewBuilder
+    private func categoryRow(_ category: Category) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: category.icon)
+                .font(.system(size: 14))
+                .foregroundStyle(Color(hex: category.hexColor))
+                .frame(width: 24)
+
+            Text(category.name)
+                .font(.body)
+
+            Spacer()
+
+            // Show badge if it's a default category
+            if Category.defaults.contains(where: { $0.name == category.name }) {
+                Text("Default")
+                    .font(.caption2)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(Color.accentColor.opacity(0.12))
+                    .foregroundStyle(.secondary)
+                    .clipShape(Capsule())
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            editingCategory = category
+        }
+    }
+
+    private func deleteCategories(at offsets: IndexSet) {
+        for index in offsets {
+            modelContext.delete(categories[index])
+        }
+    }
+
+    private func addCategory() {
+        let trimmed = newCategoryName.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        let nextSort = (categories.map(\.sortOrder).max() ?? 0) + 1
+        let category = Category(name: trimmed, icon: newCategoryIcon, hexColor: newCategoryColor, sortOrder: nextSort)
+        modelContext.insert(category)
+    }
+
+    private func restoreDefaultCategories() {
+        let existingNames = Set(categories.map(\.name))
+        var restored = 0
+        for (i, def) in Category.defaults.enumerated() {
+            if !existingNames.contains(def.name) {
+                let cat = Category(name: def.name, icon: def.icon, hexColor: def.color, sortOrder: 1000 + i)
+                modelContext.insert(cat)
+                restored += 1
+            }
+        }
+        alertMessage = restored > 0 ? "Restored \(restored) default category(ies)." : "All defaults already exist."
+        showAlert = true
     }
 }
 

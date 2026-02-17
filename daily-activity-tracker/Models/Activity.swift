@@ -38,9 +38,12 @@ final class Activity {
     var metricKindRaw: String?  // Only when type == .metric
     var aggregationModeRaw: String?  // Only cumulative: "sum" (default) or "average"
     var sortOrder: Int = 0
+    /// @deprecated — Kept for SwiftData schema; use `isStopped` instead.
     var isArchived: Bool = false
     var createdAt: Date?
-    var stoppedAt: Date?  // Non-nil = stopped tracking on this date
+    var stoppedAt: Date?  // Non-nil = paused tracking from this date
+    /// Remembers the parent container's id when a child is paused, so it can be restored on resume
+    var pausedParentId: UUID?
 
     // HealthKit (future)
     var healthKitTypeID: String?

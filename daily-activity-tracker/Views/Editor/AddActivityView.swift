@@ -44,6 +44,7 @@ struct AddActivityView: View {
     
     // Tracks whether appearance was auto-set (reset on manual override)
     @State private var appearanceAutoSet = true
+    @State private var showAdvancedOptions = false
     
     // Edit scope dialog (Future Only vs All Changes)
     @State private var showEditScopeDialog = false
@@ -150,37 +151,56 @@ struct AddActivityView: View {
                 nameSection
                 typeSection
                 typeSpecificSection
-                categorySection
                 scheduleSection
+
+                // Category and Time of Day always visible
+                categorySection
                 if selectedType != .container {
                     timeWindowSection
                 }
-                parentSection
-                if selectedType != .container && selectedType != .metric {
-                    healthKitSection
+
+                // Advanced options only for remaining sections
+                let showAll = activityToEdit != nil || showAdvancedOptions
+                if showAll {
+                    parentSection
+                    if selectedType != .container && selectedType != .metric {
+                        healthKitSection
+                    }
+                    appearanceSection
                 }
-                appearanceSection
+                if activityToEdit == nil {
+                    Section {
+                        Button {
+                            withAnimation { showAdvancedOptions.toggle() }
+                        } label: {
+                            HStack {
+                                Label(
+                                    showAdvancedOptions ? "Less Options" : "More Options",
+                                    systemImage: showAdvancedOptions ? "chevron.up" : "chevron.down"
+                                )
+                                .font(.subheadline)
+                                Spacer()
+                            }
+                            .foregroundStyle(.secondary)
+                        }
+                    }
+                }
                 
                 if activityToEdit != nil {
                     Section {
                         if activityToEdit?.isStopped == true {
-                            Button("Resume Tracking") {
+                            Button("Resume Activity") {
                                 resumeTracking()
                             }
                             .foregroundStyle(.green)
                         } else {
-                            Button("Stop Tracking") {
-                                stopTracking()
+                            Button("Pause Activity", role: .destructive) {
+                                pauseTracking()
                             }
-                            .foregroundStyle(.orange)
-                        }
-
-                        Button("Archive Activity", role: .destructive) {
-                            archiveActivity()
                         }
                     } footer: {
                         if activityToEdit?.isStopped == true {
-                            Text("This activity is paused. Past records are preserved.")
+                            Text("This activity is paused. Past records are preserved. Tap Resume to reactivate.")
                         }
                     }
                 }
@@ -499,50 +519,72 @@ struct AddActivityView: View {
 
     private var timeWindowSection: some View {
         Section("Time of Day") {
-            if !isMultiSession {
-                Picker("When", selection: $selectedSlot) {
-                    ForEach([TimeSlot.allDay, .morning, .afternoon, .evening], id: \.self) { slot in
-                        Label(slot.displayName, systemImage: slot.icon).tag(slot)
-                    }
-                }
-                .pickerStyle(.segmented)
-            }
+            HStack(spacing: 8) {
+                ForEach([TimeSlot.allDay, .morning, .afternoon, .evening], id: \.self) { slot in
+                    let isSelected = slot == .allDay
+                        ? (!isMultiSession && selectedSlot == .allDay)
+                        : (isMultiSession ? selectedSlots.contains(slot) : selectedSlot == slot)
 
-            if selectedSlot != .allDay || isMultiSession {
-                Toggle("Repeat across time periods", isOn: $isMultiSession)
-                    .onChange(of: isMultiSession) { _, on in
-                        if on {
-                            // Default to morning + evening if nothing selected
-                            if selectedSlots.isEmpty {
-                                selectedSlots = [.morning, .evening]
-                            }
+                    Button {
+                        handleSlotTap(slot)
+                    } label: {
+                        VStack(spacing: 4) {
+                            Image(systemName: slot.icon)
+                                .font(.system(size: 14))
+                            Text(slot.displayName)
+                                .font(.caption2)
                         }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background(isSelected ? Color.accentColor.opacity(0.15) : Color(.systemGray6))
+                        .foregroundStyle(isSelected ? .primary : .secondary)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(isSelected ? Color.accentColor : .clear, lineWidth: 1.5)
+                        )
                     }
+                    .buttonStyle(.plain)
+                }
             }
 
             if isMultiSession {
-                ForEach([TimeSlot.morning, .afternoon, .evening], id: \.self) { slot in
-                    Button {
-                        if selectedSlots.contains(slot) {
-                            if selectedSlots.count > 1 { selectedSlots.remove(slot) }
-                        } else {
-                            selectedSlots.insert(slot)
-                        }
-                    } label: {
-                        HStack {
-                            Image(systemName: slot.icon)
-                                .foregroundStyle(selectedSlots.contains(slot) ? .primary : .secondary)
-                            Text(slot.displayName)
-                            Spacer()
-                            if selectedSlots.contains(slot) {
-                                Image(systemName: "checkmark")
-                                    .foregroundStyle(.blue)
-                            }
-                        }
-                    }
-                    .foregroundStyle(.primary)
-                }
+                Text("Activity repeats in \(selectedSlots.sorted().map(\.displayName).joined(separator: ", "))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
+        }
+    }
+
+    private func handleSlotTap(_ slot: TimeSlot) {
+        if slot == .allDay {
+            // All Day = clear multi-session, set to all day
+            isMultiSession = false
+            selectedSlot = .allDay
+            selectedSlots.removeAll()
+        } else if isMultiSession {
+            // Already in multi-session mode
+            if selectedSlots.contains(slot) {
+                selectedSlots.remove(slot)
+                if selectedSlots.count <= 1 {
+                    // Dropped to 1 or 0 — go back to single mode
+                    isMultiSession = false
+                    selectedSlot = selectedSlots.first ?? .allDay
+                    selectedSlots.removeAll()
+                }
+            } else {
+                selectedSlots.insert(slot)
+            }
+        } else if selectedSlot == slot {
+            // Tapping already-selected single slot — deselect → All Day
+            selectedSlot = .allDay
+        } else if selectedSlot != .allDay && selectedSlot != slot {
+            // Second specific slot selected — enter multi-session mode
+            isMultiSession = true
+            selectedSlots = [selectedSlot, slot]
+        } else {
+            // Selecting first specific slot from All Day
+            selectedSlot = slot
         }
     }
 
@@ -756,16 +798,11 @@ struct AddActivityView: View {
         dismiss()
     }
 
-    private func archiveActivity() {
-        if let activity = activityToEdit {
-            activity.isArchived = true
-            dismiss()
-        }
-    }
-
-    private func stopTracking() {
+    private func pauseTracking() {
         if let activity = activityToEdit {
             activity.stoppedAt = Date().startOfDay
+            activity.pausedParentId = activity.parent?.id
+            activity.parent = nil
             dismiss()
         }
     }

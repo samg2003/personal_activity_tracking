@@ -177,7 +177,7 @@ struct VacationModeSheet: View {
 
         for activity in scheduled {
             if activity.type == .container {
-                for child in activity.children where !child.isArchived {
+                for child in activity.children where !child.isStopped {
                     let alreadyHandled = dateLogs.contains {
                         $0.activity?.id == child.id && ($0.status == .completed || $0.status == .skipped)
                     }

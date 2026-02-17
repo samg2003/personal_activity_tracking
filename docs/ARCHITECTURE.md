@@ -85,9 +85,10 @@ erDiagram
         Enum aggregationModeRaw "sum|average (optional, cumulative only, default: sum)"
         String healthKitTypeID "optional"
         Enum healthKitMode "read|write|both (optional)"
-        Bool isArchived
+        Bool isArchived "deprecated — use stoppedAt"
         Date createdAt
-        Date stoppedAt "optional - stop tracking date"
+        Date stoppedAt "optional - paused tracking date"
+        UUID pausedParentId "optional - remembers container on pause"
     }
 
     ActivityLog {
@@ -347,6 +348,24 @@ daily-activity-tracker/
 ### ADR-15: ActivityStatusService for Daily Status Queries
 **Decision**: All daily activity status queries (`isFullyCompleted`, `isSkipped`, `isSessionCompleted`, `isSessionSkipped`, `completionFraction`, `skipReason`, `latestValue`, `cumulativeValue`, vacation check) are centralized in `ActivityStatusService`. Views create a lightweight struct instance and delegate status queries to it.
 **Rationale**: The same completion/skip logic was duplicated 3-4 times across DashboardView, ContainerRowView, ScheduleEngine, and GoalDetailView with subtly different semantics, causing recurring bugs (skip-in-progress-bar, carry-forward). `ActivityStatusService` is a value type (struct) that owns no state — it's constructed from the current date, logs, and activities, making it safe to recreate on every SwiftUI body evaluation. Container child resolution also centralized in `ScheduleEngine.applicableChildren(for:on:allActivities:logs:)`.
+
+### ADR-16: Activity Management UX Enhancements
+**Decision**: Added 6 interaction patterns to `ActivitiesListView`: (1) "Move to Container" context-menu submenu, (2) "Convert to Container" / "Dissolve Container" with config snapshots, (3) drag-and-drop reordering via `.onMove` + `EditButton`, (4) "Group into Container" multi-select, (5) type-picker-based inline quick-add, and streamlined `AddActivityView` with collapsible "More Options" for new activities.
+**Rationale**: Activity organization required navigating the full form for even simple operations like reparenting or reordering. Context-menu actions, drag-and-drop, and multi-select reduce common workflows from 4+ steps to 1.
+**Config snapshots**: Both Convert and Dissolve create `ActivityConfigSnapshot` records to preserve historical analytics when changing activity type.
+
+### ADR-17: Consolidate Archived + Stopped → Single "Paused" Concept
+
+**Status**: Accepted  
+**Decision**: Merged `isArchived` and `stoppedAt` into a unified concept using only `stoppedAt`. Activities with `stoppedAt != nil` are considered "paused."
+
+**Rationale**: The two-concept model was confusing — `isArchived` hid from UI completely while `stoppedAt` stopped scheduling. Users couldn't understand the difference. A single "Pause" action with `stoppedAt` date provides clear date-boundary semantics for analytics while removing activities from the active dashboard.
+
+**Key behaviors**:
+- **Pause**: Sets `stoppedAt = today`, stores `pausedParentId` (for children in containers), removes from parent
+- **Resume**: Clears `stoppedAt`, restores parent from `pausedParentId` if container still exists  
+- `isArchived` property kept in SwiftData schema for backward compatibility but deprecated
+- DataService import handles legacy `isArchived=true` by setting `stoppedAt` if not already set
 
 ---
 

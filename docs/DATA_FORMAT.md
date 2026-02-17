@@ -77,8 +77,11 @@ Defines the trackers themselves.
   // Encoded [TimeSlot] array for multi-session activities (Optional)
   "timeSlotsData": "BASE64-ENCODED-JSON-STRING",
   
-  // Optional: date when tracking was stopped
-  "stoppedAt": "2026-06-01T00:00:00Z"
+  // Optional: date when activity was paused
+  "stoppedAt": "2026-06-01T00:00:00Z",
+  
+  // Optional: remembers container parent when paused
+  "pausedParentId": "UUID-OF-FORMER-CONTAINER"
 }
 ```
 
