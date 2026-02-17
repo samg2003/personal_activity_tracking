@@ -429,38 +429,17 @@ struct GoalDetailView: View {
         let beforeCreated = date.startOfDay < activity.createdDate.startOfDay
         let afterStopped = activity.stoppedAt.map { date.startOfDay > $0 } ?? false
 
-        // Container: check if all children completed on that day
-        let completed: Bool
-        let isSkipped: Bool
-        if activity.type == .container {
-            let children = activity.historicalChildren(on: date, from: allActivities)
-            completed = !children.isEmpty && children.allSatisfy { child in
-                allLogs.contains {
-                    $0.activity?.id == child.id &&
-                    $0.status == .completed &&
-                    $0.date.isSameDay(as: date)
-                }
-            }
-            // All children skipped on this day
-            isSkipped = !children.isEmpty && !completed && children.allSatisfy { child in
-                allLogs.contains {
-                    $0.activity?.id == child.id &&
-                    $0.status == .skipped &&
-                    $0.date.isSameDay(as: date)
-                }
-            }
-        } else {
-            completed = allLogs.contains {
-                $0.activity?.id == activity.id &&
-                $0.status == .completed &&
-                $0.date.isSameDay(as: date)
-            }
-            isSkipped = allLogs.contains {
-                $0.activity?.id == activity.id &&
-                $0.status == .skipped &&
-                $0.date.isSameDay(as: date)
-            }
-        }
+        let dayLogs = allLogs.filter { $0.date.isSameDay(as: date) }
+        let svc = ActivityStatusService(
+            date: date,
+            todayLogs: dayLogs,
+            allLogs: allLogs,
+            allActivities: allActivities,
+            vacationDays: vacationDays,
+            scheduleEngine: scheduleEngine
+        )
+        let completed = svc.isFullyCompleted(activity)
+        let isSkipped = svc.isSkipped(activity)
 
         let color: Color
         if isVacation {
@@ -547,22 +526,7 @@ struct GoalDetailView: View {
     }
 
     private var overallScore: Double {
-        var totalWeighted = 0.0
-        var totalWeight = 0.0
-
-        for link in goal.activityLinks {
-            guard let activity = link.activity, activity.modelContext != nil else { continue }
-            let w = link.weight
-            let rate = scheduleEngine.completionRate(for: activity, days: 14, logs: allLogs, vacationDays: vacationDays, allActivities: allActivities)
-
-            if rate >= 0 {
-                totalWeighted += rate * w
-                totalWeight += w
-            }
-        }
-
-        guard totalWeight > 0 else { return 0 }
-        return totalWeighted / totalWeight
+        goal.consistencyScore(days: 14, logs: allLogs, vacationDays: vacationDays, allActivities: allActivities, scheduleEngine: scheduleEngine)
     }
 
 

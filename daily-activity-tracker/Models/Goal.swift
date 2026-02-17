@@ -106,6 +106,31 @@ final class Goal {
             .first?.value
     }
 
+    /// Weighted-average completion rate across contributing activities
+    func consistencyScore(
+        days: Int,
+        logs: [ActivityLog],
+        vacationDays: [VacationDay],
+        allActivities: [Activity],
+        scheduleEngine: ScheduleEngineProtocol
+    ) -> Double {
+        var totalWeighted = 0.0
+        var totalWeight = 0.0
+
+        for link in activityLinks {
+            guard let activity = link.activity, activity.modelContext != nil else { continue }
+            let w = link.weight
+            let rate = scheduleEngine.completionRate(for: activity, days: days, logs: logs, vacationDays: vacationDays, allActivities: allActivities)
+            if rate > 0 {
+                totalWeighted += rate * w
+                totalWeight += w
+            }
+        }
+
+        guard totalWeight > 0 else { return 0 }
+        return totalWeighted / totalWeight
+    }
+
     // MARK: - Init
 
     init(

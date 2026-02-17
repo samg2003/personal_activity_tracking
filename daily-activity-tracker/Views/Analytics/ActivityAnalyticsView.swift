@@ -197,7 +197,7 @@ struct ActivityAnalyticsView: View {
             return activity.aggregateDayValue(from: values)
 
         case .container:
-            let children = activity.historicalChildren(on: day, from: allActivities)
+            let children = scheduleEngine.applicableChildren(for: activity, on: day, allActivities: allActivities, logs: allLogs)
             guard !children.isEmpty else { return 0 }
             let completedSum = children.reduce(0.0) { sum, child in
                 let childLogs = allLogs.filter {

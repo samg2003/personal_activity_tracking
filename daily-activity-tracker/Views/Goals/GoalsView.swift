@@ -142,22 +142,7 @@ struct GoalsView: View {
 
     /// 14-day weighted completion score for contributing activities
     func consistencyScore(for goal: Goal) -> Double {
-        var totalWeighted = 0.0
-        var totalWeight = 0.0
-
-        for link in goal.activityLinks {
-            guard let activity = link.activity, activity.modelContext != nil else { continue }
-            let w = link.weight
-            let rate = scheduleEngine.completionRate(for: activity, days: 14, logs: allLogs, vacationDays: vacationDays, allActivities: allActivities)
-
-            if rate > 0 {
-                totalWeighted += rate * w
-                totalWeight += w
-            }
-        }
-
-        guard totalWeight > 0 else { return 0 }
-        return totalWeighted / totalWeight
+        goal.consistencyScore(days: 14, logs: allLogs, vacationDays: vacationDays, allActivities: allActivities, scheduleEngine: scheduleEngine)
     }
 }
 
