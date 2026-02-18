@@ -26,7 +26,7 @@ graph TB
     subgraph Services["Services"]
         WPM["WorkoutPlanManager\nplan CRUD · shell sync\nvolume analysis · day-type detection"]
         SSM["StrengthSessionManager\nset logging · auto-completion"]
-        CSM["CardioSessionManager\nHK sessions · live metrics\nauto-completion"]
+        CSM["CardioSessionManager\nGPS distance · HK sessions\nlive metrics · auto-completion"]
     end
 
     subgraph HK["HealthKit"]
@@ -68,11 +68,11 @@ Strength and cardio share plan structure (`WorkoutPlan`, `WorkoutPlanDay`, `Exer
 
 ### CardioSessionManager (cardio-only)
 
-- HK workout session — start/end `HKWorkoutSession` with correct `HKWorkoutActivityType`
-- Live metric queries — subscribe to `HKAnchoredObjectQuery` for real-time data
+- HK workout builder — create/save workout via `HKWorkoutBuilder` with correct `HKWorkoutActivityType`
+- Live metric queries — subscribe to `HKAnchoredObjectQuery` for real-time HR + distance
 - Phase timer management — HIIT rounds, Tempo phases, Interval reps
 - Auto-completion bridge — compare actual vs target, create `ActivityLog` on shell
-- Import from Health — query `HKWorkout` for Watch-started sessions
+- Session log creation — populate `CardioSessionLog` from accumulated live metrics
 
 ---
 

@@ -52,7 +52,7 @@ final class WorkoutPlan {
 // MARK: - Plan Day
 
 @Model
-final class WorkoutPlanDay {
+final class WorkoutPlanDay: Identifiable {
     var id: UUID = UUID()
     var weekday: Int = 1       // 1=Mon..7=Sun (ISO)
     var dayLabel: String = ""  // "Push", "Pull", "Legs", or user override

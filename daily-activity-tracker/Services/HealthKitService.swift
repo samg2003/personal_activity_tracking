@@ -127,4 +127,144 @@ final class HealthKitService: HealthKitServiceProtocol {
         ("Calories Burned", .activeEnergyBurned, .kilocalorie()),
         ("Walking Distance (km)", .distanceWalkingRunning, .meterUnit(with: .kilo)),
     ]
+
+    // MARK: - Workout Builder (Cardio Sessions)
+
+    /// Requests authorization for workout-related types (HR, distance, calories, etc.)
+    func requestWorkoutAuthorization() async throws {
+        guard isAvailable else { return }
+
+        var readTypes = Set<HKObjectType>()
+        var shareTypes = Set<HKSampleType>()
+
+        // Workout type
+        let workoutType = HKObjectType.workoutType()
+        readTypes.insert(workoutType)
+        shareTypes.insert(workoutType)
+
+        // Quantity types
+        let quantityIDs: [HKQuantityTypeIdentifier] = [
+            .heartRate, .distanceWalkingRunning, .distanceCycling,
+            .distanceSwimming, .activeEnergyBurned, .stepCount
+        ]
+        for id in quantityIDs {
+            if let qt = HKQuantityType.quantityType(forIdentifier: id) {
+                readTypes.insert(qt)
+            }
+        }
+
+        try await healthStore.requestAuthorization(toShare: shareTypes, read: readTypes)
+    }
+
+    /// Creates and begins an HKWorkoutBuilder for the given activity type.
+    func createWorkoutBuilder(activityType: HKWorkoutActivityType) -> HKWorkoutBuilder {
+        let config = HKWorkoutConfiguration()
+        config.activityType = activityType
+        let builder = HKWorkoutBuilder(healthStore: healthStore, configuration: config, device: .local())
+        return builder
+    }
+
+    /// Starts the workout builder's data collection.
+    func beginWorkoutBuilder(_ builder: HKWorkoutBuilder) async throws {
+        try await builder.beginCollection(at: Date())
+    }
+
+    /// Ends and saves the workout via builder.
+    func finishWorkoutBuilder(_ builder: HKWorkoutBuilder) async throws -> HKWorkout? {
+        try await builder.endCollection(at: Date())
+        let results = try await builder.finishWorkout()
+        return results
+    }
+
+    /// Starts an anchored query for live heart rate updates.
+    func startHeartRateQuery(from startDate: Date, handler: @escaping (Double) -> Void) -> HKQuery? {
+        guard isAvailable,
+              let hrType = HKQuantityType.quantityType(forIdentifier: .heartRate) else { return nil }
+
+        let predicate = HKQuery.predicateForSamples(withStart: startDate, end: nil, options: .strictStartDate)
+        let hrUnit = HKUnit.count().unitDivided(by: .minute())
+
+        let query = HKAnchoredObjectQuery(
+            type: hrType,
+            predicate: predicate,
+            anchor: nil,
+            limit: HKObjectQueryNoLimit
+        ) { _, samples, _, _, _ in
+            guard let quantitySamples = samples as? [HKQuantitySample],
+                  let latest = quantitySamples.last else { return }
+            let bpm = latest.quantity.doubleValue(for: hrUnit)
+            DispatchQueue.main.async { handler(bpm) }
+        }
+
+        query.updateHandler = { _, samples, _, _, _ in
+            guard let quantitySamples = samples as? [HKQuantitySample],
+                  let latest = quantitySamples.last else { return }
+            let bpm = latest.quantity.doubleValue(for: hrUnit)
+            DispatchQueue.main.async { handler(bpm) }
+        }
+
+        healthStore.execute(query)
+        return query
+    }
+
+    /// Starts an anchored query for live distance updates (cumulative).
+    func startDistanceQuery(type: HKQuantityTypeIdentifier, from startDate: Date, handler: @escaping (Double) -> Void) -> HKQuery? {
+        guard isAvailable,
+              let distType = HKQuantityType.quantityType(forIdentifier: type) else { return nil }
+
+        let predicate = HKQuery.predicateForSamples(withStart: startDate, end: nil, options: .strictStartDate)
+        let unit = HKUnit.meter()
+
+        let query = HKAnchoredObjectQuery(
+            type: distType,
+            predicate: predicate,
+            anchor: nil,
+            limit: HKObjectQueryNoLimit
+        ) { _, samples, _, _, _ in
+            let total = (samples as? [HKQuantitySample])?.reduce(0.0) {
+                $0 + $1.quantity.doubleValue(for: unit)
+            } ?? 0
+            DispatchQueue.main.async { handler(total) }
+        }
+
+        query.updateHandler = { _, samples, _, _, _ in
+            let added = (samples as? [HKQuantitySample])?.reduce(0.0) {
+                $0 + $1.quantity.doubleValue(for: unit)
+            } ?? 0
+            if added > 0 {
+                DispatchQueue.main.async { handler(added) }
+            }
+        }
+
+        healthStore.execute(query)
+        return query
+    }
+
+    /// Stops an active HK query.
+    func stopQuery(_ query: HKQuery) {
+        healthStore.stop(query)
+    }
+
+    /// Maps exercise name to HKWorkoutActivityType.
+    static func activityType(for exerciseName: String) -> HKWorkoutActivityType {
+        let name = exerciseName.lowercased()
+        if name.contains("run") { return .running }
+        if name.contains("swim") { return .swimming }
+        if name.contains("cycl") || name.contains("bike") { return .cycling }
+        if name.contains("row") { return .rowing }
+        if name.contains("walk") { return .walking }
+        if name.contains("hik") { return .hiking }
+        if name.contains("elliptical") { return .elliptical }
+        return .other
+    }
+
+    /// Maps HKWorkoutActivityType to the right distance quantity type.
+    static func distanceType(for activityType: HKWorkoutActivityType) -> HKQuantityTypeIdentifier {
+        switch activityType {
+        case .swimming: return .distanceSwimming
+        case .cycling: return .distanceCycling
+        default: return .distanceWalkingRunning
+        }
+    }
 }
+

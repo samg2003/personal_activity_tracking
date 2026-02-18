@@ -11,14 +11,21 @@ struct WorkoutTabView: View {
     @State private var showingNewPlan = false
     @State private var newPlanType: ExerciseType = .strength
 
-    // Session navigation
+    // Strength session navigation
     @State private var activeStrengthSession: StrengthSession?
     @State private var showStrengthSession = false
     @State private var showRecoveryAlert = false
     @State private var recoverySession: StrengthSession?
-
-    // Summary navigation (for recent sessions)
     @State private var selectedSummarySession: StrengthSession?
+
+    // Cardio session navigation
+    @State private var activeCardioSession: CardioSession?
+    @State private var showCardioSession = false
+    @State private var activeCardioPlanExercise: CardioPlanExercise?
+    @StateObject private var cardioManager = CardioSessionManager()
+    @State private var selectedCardioSummarySession: CardioSession?
+    @State private var showCardioExercisePicker = false
+    @State private var pendingCardioDay: WorkoutPlanDay?
 
     private var planManager: WorkoutPlanManager {
         WorkoutPlanManager(modelContext: modelContext)
@@ -75,12 +82,36 @@ struct WorkoutTabView: View {
                     StrengthSessionView(session: session)
                 }
             }
+            .navigationDestination(isPresented: $showCardioSession) {
+                if let session = activeCardioSession {
+                    CardioSessionView(
+                        session: session,
+                        sessionManager: cardioManager,
+                        cardioPlanExercise: activeCardioPlanExercise
+                    )
+                }
+            }
             .sheet(item: $selectedSummarySession) { session in
                 NavigationStack {
                     SessionSummaryView(session: session)
                 }
             }
+            .sheet(item: $selectedCardioSummarySession) { session in
+                NavigationStack {
+                    CardioSummaryView(
+                        session: session,
+                        sessionManager: cardioManager,
+                        cardioPlanExercise: nil
+                    )
+                }
+            }
+            .sheet(isPresented: $showCardioExercisePicker) {
+                if let day = pendingCardioDay {
+                    cardioExercisePickerSheet(day: day)
+                }
+            }
             .onAppear {
+                cardioManager.updateModelContext(modelContext)
                 checkForActiveSession()
             }
             .alert("Resume Workout?", isPresented: $showRecoveryAlert) {
@@ -228,12 +259,13 @@ struct WorkoutTabView: View {
                 }
             }
 
-            // Start button — wired for strength
+            // Start button
             Button {
                 if isStrength {
                     startStrengthSession(day: day)
+                } else {
+                    startCardioSession(day: day)
                 }
-                // Cardio will be wired in W3
             } label: {
                 Text(isStrength ? "Start Strength" : "Start Cardio")
                     .font(.subheadline.weight(.semibold))
@@ -243,8 +275,6 @@ struct WorkoutTabView: View {
                     .foregroundStyle(.white)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
             }
-            .disabled(!isStrength) // Cardio disabled until W3
-            .opacity(isStrength ? 1.0 : 0.6)
         }
         .padding()
         .background(Color(.systemGray6))
@@ -386,24 +416,28 @@ struct WorkoutTabView: View {
                     .buttonStyle(.plain)
                 }
 
-                // Cardio recent (read-only, no tap for now)
                 ForEach(Array(recentCardio.filter { $0.status == .completed }.prefix(3))) { session in
-                    HStack {
-                        Image(systemName: "figure.run")
-                            .font(.caption)
-                            .foregroundStyle(.green)
-                            .frame(width: 20)
-                        Text(session.dayLabel)
-                            .font(.body)
-                        Spacer()
-                        Text(session.date.formatted(.relative(presentation: .named)))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text(session.durationFormatted)
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.tertiary)
+                    Button {
+                        selectedCardioSummarySession = session
+                    } label: {
+                        HStack {
+                            Image(systemName: "figure.run")
+                                .font(.caption)
+                                .foregroundStyle(.green)
+                                .frame(width: 20)
+                            Text(session.dayLabel)
+                                .font(.body)
+                            Spacer()
+                            Text(session.date.formatted(.relative(presentation: .named)))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(session.durationFormatted)
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.tertiary)
+                        }
+                        .padding(.vertical, 4)
                     }
-                    .padding(.vertical, 4)
+                    .buttonStyle(.plain)
                 }
             }
         }
@@ -412,7 +446,6 @@ struct WorkoutTabView: View {
     // MARK: - Helpers
 
     private func startStrengthSession(day: WorkoutPlanDay) {
-        // If there's already an active session, navigate to it
         if let existing = sessionManager.activeSession() {
             activeStrengthSession = existing
             showStrengthSession = true
@@ -424,14 +457,62 @@ struct WorkoutTabView: View {
         showStrengthSession = true
     }
 
+    private func startCardioSession(day: WorkoutPlanDay) {
+        let cardioExercises = day.sortedCardioExercises
+        guard !cardioExercises.isEmpty else { return }
+
+        if cardioExercises.count == 1 {
+            // Single exercise — start immediately
+            launchCardioSession(day: day, exercise: cardioExercises[0])
+        } else {
+            // Multiple exercises — show picker
+            pendingCardioDay = day
+            showCardioExercisePicker = true
+        }
+    }
+
+    private func launchCardioSession(day: WorkoutPlanDay, exercise: CardioPlanExercise) {
+        cardioManager.updateModelContext(modelContext)
+        let session = cardioManager.startSession(for: day, cardioPlanExercise: exercise)
+        activeCardioSession = session
+        activeCardioPlanExercise = exercise
+        showCardioSession = true
+    }
+
+    @ViewBuilder
+    private func cardioExercisePickerSheet(day: WorkoutPlanDay) -> some View {
+        NavigationStack {
+            List(day.sortedCardioExercises) { cardioEx in
+                Button {
+                    showCardioExercisePicker = false
+                    launchCardioSession(day: day, exercise: cardioEx)
+                } label: {
+                    HStack {
+                        Text(cardioEx.exercise?.name ?? "Cardio")
+                        Spacer()
+                        Text(cardioEx.sessionType.displayName)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .navigationTitle("Choose Exercise")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { showCardioExercisePicker = false }
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+
     private func checkForActiveSession() {
         if let active = sessionManager.activeSession() {
-            // Only show recovery if session is from a different calendar day (app was killed)
             if !Calendar.current.isDateInToday(active.startedAt) {
                 recoverySession = active
                 showRecoveryAlert = true
             }
-            // If it's from today, the banner will show
         }
     }
 }

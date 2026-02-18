@@ -6,6 +6,14 @@
 	<string>SimplyLoop</string>
 	<key>NSCameraUsageDescription</key>
 	<string>This app uses the camera to capture progress photos for your tracked activities.</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>SimplyLoop reads health data to display live metrics like heart rate and distance during cardio workouts.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>SimplyLoop saves your completed workouts to Apple Health so they appear alongside your other fitness data.</string>
+	<key>NSMotionUsageDescription</key>
+	<string>SimplyLoop uses motion data to track distance and steps during cardio workouts.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>SimplyLoop uses your location to track distance during cardio workouts.</string>
 	<key>UIBackgroundModes</key>
 	<array/>
 	<key>UTExportedTypeDeclarations</key>

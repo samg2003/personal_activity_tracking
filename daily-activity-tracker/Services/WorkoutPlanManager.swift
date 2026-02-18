@@ -334,7 +334,7 @@ final class WorkoutPlanManager {
         }
 
         // Create new container activity
-        let icon = plan.planType == .strength ? "💪" : "🏃"
+        let icon = plan.planType == .strength ? "dumbbell.fill" : "figure.run"
         let container = Activity(name: containerName, icon: icon, type: .container)
         container.isManagedByWorkout = true
         modelContext.insert(container)
@@ -354,7 +354,7 @@ final class WorkoutPlanManager {
             return existing
         }
 
-        let shellIcon = plan.planType == .strength ? "💪" : "🏃"
+        let shellIcon = plan.planType == .strength ? "dumbbell.fill" : "figure.run"
         let shell = Activity(name: shellName, icon: shellIcon, type: .checkbox)
         shell.isManagedByWorkout = true
         shell.parent = container
