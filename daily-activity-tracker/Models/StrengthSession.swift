@@ -20,6 +20,14 @@ final class StrengthSession {
     var statusRaw: String = SessionStatus.inProgress.rawValue
     var notes: String?
 
+    /// When a completed session is resumed, stores the set count at resume time.
+    /// On abandon, sets added after this index are removed and the session reverts to completed.
+    /// -1 means session was started fresh (not resumed).
+    var resumedAtSetCount: Int = -1
+    /// Timing snapshot at resume — restored on abandon so duration stays accurate.
+    var resumedAtEndedAt: Date?
+    var resumedAtPausedSeconds: Double = -1
+
     // Optional live reference (nullified if plan deleted)
     var planDay: WorkoutPlanDay?
 
@@ -36,7 +44,12 @@ final class StrengthSession {
     /// Active duration excluding pauses
     var activeDuration: TimeInterval {
         let end = endedAt ?? Date()
-        return end.timeIntervalSince(startedAt) - totalPausedSeconds
+        var paused = totalPausedSeconds
+        // Subtract ongoing pause interval if currently paused
+        if let pausedAt = pausedAt {
+            paused += end.timeIntervalSince(pausedAt)
+        }
+        return end.timeIntervalSince(startedAt) - paused
     }
 
     /// Formatted duration (e.g. "45:23")

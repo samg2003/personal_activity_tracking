@@ -3,6 +3,7 @@ import SwiftData
 import HealthKit
 
 struct DashboardView: View {
+    @Binding var switchToTab: Int
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Activity.sortOrder) private var allActivities: [Activity]
     @Query(sort: \ActivityLog.date, order: .reverse) private var allLogs: [ActivityLog]
@@ -884,6 +885,12 @@ struct DashboardView: View {
     }
 
     private func completeCheckbox(_ activity: Activity, slot: TimeSlot? = nil) {
+        // Workout shells redirect to the Workout tab
+        if activity.isManagedByWorkout {
+            withAnimation { switchToTab = 3 }
+            return
+        }
+
         // For multi-session with a slot, toggle that specific session
         let logDate = effectiveLogDate(for: activity)
         if let slot, activity.isMultiSession {
@@ -1095,6 +1102,10 @@ struct DashboardView: View {
     }
 
     private func skipActivity(_ activity: Activity, reason: String, slot: TimeSlot? = nil) {
+        if activity.isManagedByWorkout {
+            withAnimation { switchToTab = 3 }
+            return
+        }
         // For multi-session with a slot, skip that specific session
         if let slot, activity.isMultiSession {
             guard !isSessionSkipped(activity, slot: slot) && !isSessionCompleted(activity, slot: slot) else { return }

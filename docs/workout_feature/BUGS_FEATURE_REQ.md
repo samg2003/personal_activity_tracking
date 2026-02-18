@@ -1,9 +1,12 @@
 # Don't look here unless asked
 
-- [1] You can simply complete the session in main dashboard, these sessions should not be completable.. activities are not marked all day but just morning
-- [2] when I activate new session it deletes the old one (disappears), have separate coalesced section for deactivated plans + draft plans, sort by recency of creation
 - [3] there is no videos capability for exercises.. include that even though by default it's not there. 
+  - **AI reply:** The `videoURL` property already existed on the `Exercise` model but wasn't surfaced. Added a "Video URL" TextField to `ExerciseCreatorView` and a "Watch Demo" link section (opens in Safari) to `ExerciseDetailView`.
+  - Human Feedback: Embedd youtube video as well directly in the exercise so you can see it directly there. Allow multuple URLs
+  - **AI reply (feedback):** Done. Model uses `videoURLsData` (JSON array) for multiple URLs. Creator has multi-line TextEditor. Detail view embeds YouTube via `YouTubeEmbedView` (WKWebView loading `/embed/` URL directly — avoids sandbox errors from iframe approach). Non-YouTube URLs show as tappable links.
 - [4] I cannot edit sets RIR etc. for added workout, also UI currently sucks ass in iphone 17 pro.. text is too small, complicated.. advance section in muscle thing has a chart to show different set interval range, i think color is doing good enough job for that, we dont need color bar for each of them.. sub-muscles dont have color coded for their set count. One more idea is to have top level 7 day summary (current blocks) and then one big editable swipable blob where I can make edits for one day at a time, and swipe etc. 
-- [5] Start strength doesnt disappear even after you logged the workout in workouts tabs. 
-- [6] when i click paused timer keeps going, it does go back to where i paused when i click resume.
+- [8] incoplete workout completion is marking the workout as skipped.. instead it should just keep the workout as incomplete, and user can manually skip if they need to. Let user later re-continue even completed workouts maybe.
+  - **AI reply:** Fixed. Removed the else branch in `autoCompleteShell()` in `StrengthSessionManager` that created a `.skipped` ActivityLog for incomplete sessions. Now only ≥80% completion creates a completed log; otherwise no log is created and the shell stays in its natural pending state.
+  - Human Feedback: For incomplete workouts, let user re-continue the sessions, have a tag.. and dont say completed for the incompletely finished workouts, rather something about complete it..
+  - **AI reply (feedback):** Done. `TodaySessionStatus` enum with three states: `.fullyCompleted` (green badge), `.incomplete` (orange "Continue Workout (X/Y sets)" button), `.notStarted` (Start button). Continue finds today's incomplete session via `findIncompleteSession()`, re-opens it with `resumeCompletedSession()` so all past logged sets are preserved.
 - [7] **[FUTURE] Apple Watch Companion App** — Build a WatchKit companion that auto-starts the correct workout type (Run/Swim/Cycle) on the Watch when a cardio session starts on iPhone. This enables real-time HR streaming, Watch GPS distance, swim stroke/lap detection, and cardio zone tracking. Currently using iPhone GPS for distance only.

@@ -16,6 +16,10 @@
 	<string>SimplyLoop uses your location to track distance during cardio workouts.</string>
 	<key>UIBackgroundModes</key>
 	<array/>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>youtube</string>
+	</array>
 	<key>UTExportedTypeDeclarations</key>
 	<array>
 		<dict>

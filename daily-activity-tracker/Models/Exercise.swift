@@ -12,7 +12,32 @@ final class Exercise {
     var isPreSeeded: Bool = false
     var createdAt: Date = Date()
     var notes: String?
-    var videoURL: String?
+    var videoURLsData: Data?
+
+    /// Multiple video URLs (YouTube, etc.) for exercise demos.
+    var videoURLs: [String] {
+        get {
+            guard let data = videoURLsData,
+                  let arr = try? JSONDecoder().decode([String].self, from: data) else { return [] }
+            return arr
+        }
+        set {
+            videoURLsData = newValue.isEmpty ? nil : (try? JSONEncoder().encode(newValue))
+        }
+    }
+
+    /// Convenience: first video URL (backward compat).
+    var videoURL: String? {
+        get { videoURLs.first }
+        set {
+            if let url = newValue {
+                if videoURLs.isEmpty { videoURLs = [url] }
+                else { videoURLs[0] = url }
+            } else {
+                if !videoURLs.isEmpty { videoURLs.removeFirst() }
+            }
+        }
+    }
 
     // Cardio-specific (nil for strength)
     var distanceUnit: String?

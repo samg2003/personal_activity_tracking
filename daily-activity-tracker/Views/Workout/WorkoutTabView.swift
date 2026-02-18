@@ -39,6 +39,13 @@ struct WorkoutTabView: View {
         allPlans.filter { $0.status != .inactive }
     }
 
+    private var inactivePlans: [WorkoutPlan] {
+        allPlans.filter { $0.status == .inactive }
+    }
+
+    @State private var inactivePlansExpanded = false
+    @State private var refreshID = UUID()
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -46,12 +53,20 @@ struct WorkoutTabView: View {
                     activeSessionBanner
                     todaySection
                     myPlansSection
+                    inactivePlansSection
                     quickLinksSection
                     recentSessionsSection
                 }
                 .padding()
             }
             .navigationTitle("Workouts")
+            .onAppear { refreshID = UUID() }
+            .onChange(of: showStrengthSession) { _, showing in
+                if !showing { refreshID = UUID() }
+            }
+            .onChange(of: showCardioSession) { _, showing in
+                if !showing { refreshID = UUID() }
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
@@ -259,26 +274,66 @@ struct WorkoutTabView: View {
                 }
             }
 
-            // Start button
-            Button {
-                if isStrength {
-                    startStrengthSession(day: day)
-                } else {
-                    startCardioSession(day: day)
+            // Start / Continue / Completed badge
+            switch planManager.todaySessionStatus(for: day) {
+            case .fullyCompleted:
+                HStack {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                    Text("Completed")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.green)
                 }
-            } label: {
-                Text(isStrength ? "Start Strength" : "Start Cardio")
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(Color.green.opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+
+            case .incomplete(let done, let total):
+                Button {
+                    if isStrength {
+                        continueStrengthSession(day: day)
+                    } else {
+                        startCardioSession(day: day)
+                    }
+                } label: {
+                    HStack {
+                        Image(systemName: "arrow.counterclockwise")
+                        Text("Continue Workout")
+                        Text("(\(done)/\(total) sets)")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.7))
+                    }
                     .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 8)
-                    .background(isStrength ? Color.orange : Color.green)
+                    .background(Color.orange)
                     .foregroundStyle(.white)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+
+            case .notStarted:
+                Button {
+                    if isStrength {
+                        startStrengthSession(day: day)
+                    } else {
+                        startCardioSession(day: day)
+                    }
+                } label: {
+                    Text(isStrength ? "Start Strength" : "Start Cardio")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background(isStrength ? Color.orange : Color.green)
+                        .foregroundStyle(.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
             }
         }
         .padding()
         .background(Color(.systemGray6))
         .clipShape(RoundedRectangle(cornerRadius: 12))
+        .id(refreshID)
     }
 
     // MARK: - My Plans
@@ -306,7 +361,112 @@ struct WorkoutTabView: View {
                     } label: {
                         planRow(plan: plan)
                     }
+                    .contextMenu {
+                        if plan.isDraft {
+                            Button(role: .destructive) {
+                                planManager.permanentlyDeletePlan(plan)
+                            } label: {
+                                Label("Delete Draft", systemImage: "trash")
+                            }
+                        }
+                        Button(role: .destructive) {
+                            planManager.deactivatePlan(plan)
+                        } label: {
+                            Label("Deactivate", systemImage: "archivebox")
+                        }
+                    }
                 }
+            }
+        }
+    }
+
+    // MARK: - Inactive Plans
+
+    @State private var planToDelete: WorkoutPlan?
+    @State private var showDeleteConfirmation = false
+
+    @ViewBuilder
+    private var inactivePlansSection: some View {
+        if !inactivePlans.isEmpty {
+            DisclosureGroup(isExpanded: $inactivePlansExpanded) {
+                ForEach(inactivePlans) { plan in
+                    HStack(spacing: 12) {
+                        Image(systemName: plan.planType == .strength ? "dumbbell.fill" : "figure.run")
+                            .foregroundStyle(.secondary)
+                            .frame(width: 24)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 6) {
+                                Text(plan.name)
+                                    .font(.body)
+                                    .foregroundStyle(.secondary)
+                                if plan.isDraft {
+                                    Text("DRAFT")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .padding(.horizontal, 5)
+                                        .padding(.vertical, 1)
+                                        .background(Color.orange.opacity(0.2))
+                                        .foregroundStyle(.orange)
+                                        .clipShape(Capsule())
+                                }
+                            }
+                            Text("\(plan.trainingDays.count) days")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+
+                        Spacer()
+
+                        Button {
+                            planManager.activatePlan(plan)
+                        } label: {
+                            Text("Reactivate")
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 4)
+                                .background(Color.green.opacity(0.15))
+                                .foregroundStyle(.green)
+                                .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.vertical, 4)
+                    .contextMenu {
+                        Button(role: .destructive) {
+                            if planManager.hasLoggedSessions(for: plan) {
+                                planToDelete = plan
+                                showDeleteConfirmation = true
+                            } else {
+                                planManager.permanentlyDeletePlan(plan)
+                            }
+                        } label: {
+                            Label("Delete Plan", systemImage: "trash")
+                        }
+                    }
+                }
+            } label: {
+                HStack {
+                    Image(systemName: "archivebox")
+                        .foregroundStyle(.secondary)
+                    Text("INACTIVE PLANS")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text("(\(inactivePlans.count))")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .tint(.secondary)
+            .alert("Delete Plan?", isPresented: $showDeleteConfirmation) {
+                Button("Delete", role: .destructive) {
+                    if let plan = planToDelete {
+                        planManager.permanentlyDeletePlan(plan)
+                        planToDelete = nil
+                    }
+                }
+                Button("Cancel", role: .cancel) { planToDelete = nil }
+            } message: {
+                Text("This plan has logged sessions. The plan configuration will be removed, but your session history (sets, times) will be preserved.")
             }
         }
     }
@@ -412,6 +572,14 @@ struct WorkoutTabView: View {
                         .padding(.vertical, 4)
                     }
                     .buttonStyle(.plain)
+                    .contextMenu {
+                        Button(role: .destructive) {
+                            sessionManager.deleteSession(session)
+                            refreshID = UUID()
+                        } label: {
+                            Label("Delete Session", systemImage: "trash")
+                        }
+                    }
                 }
 
                 ForEach(Array(recentCardio.filter { $0.status == .completed }.prefix(3))) { session in
@@ -436,6 +604,15 @@ struct WorkoutTabView: View {
                         .padding(.vertical, 4)
                     }
                     .buttonStyle(.plain)
+                    .contextMenu {
+                        Button(role: .destructive) {
+                            modelContext.delete(session)
+                            try? modelContext.save()
+                            refreshID = UUID()
+                        } label: {
+                            Label("Delete Session", systemImage: "trash")
+                        }
+                    }
                 }
             }
         }
@@ -453,6 +630,27 @@ struct WorkoutTabView: View {
         let session = sessionManager.startSession(for: day)
         activeStrengthSession = session
         showStrengthSession = true
+    }
+
+    /// Resumes an incomplete session for the day, preserving all previously logged sets.
+    private func continueStrengthSession(day: WorkoutPlanDay) {
+        // First check for an already-active session
+        if let existing = sessionManager.activeSession() {
+            activeStrengthSession = existing
+            showStrengthSession = true
+            return
+        }
+
+        // Find and re-open today's incomplete completed session
+        if let incomplete = sessionManager.findIncompleteSession(for: day) {
+            sessionManager.resumeCompletedSession(incomplete)
+            activeStrengthSession = incomplete
+            showStrengthSession = true
+            return
+        }
+
+        // Fallback: start fresh
+        startStrengthSession(day: day)
     }
 
     private func startCardioSession(day: WorkoutPlanDay) {

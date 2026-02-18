@@ -47,7 +47,11 @@ struct StrengthSessionView: View {
                 dismiss()
             }
         } message: {
-            Text("Your logged sets will be saved but the session won't count toward your plan completion.")
+            if session.resumedAtSetCount >= 0 {
+                Text("Sets added during this continuation will be removed. Your original workout data will be preserved.")
+            } else {
+                Text("Your logged sets will be saved but the session won't count toward your plan completion.")
+            }
         }
         .fullScreenCover(isPresented: $showSummary) {
             NavigationStack {

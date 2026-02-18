@@ -12,6 +12,7 @@ struct ExerciseCreatorView: View {
     @State private var exerciseType: ExerciseType = .strength
     @State private var aliasesText = ""
     @State private var notes = ""
+    @State private var videoURLsText = ""
 
     // Strength
     @State private var muscleScores: [UUID: Double] = [:]
@@ -105,6 +106,16 @@ struct ExerciseCreatorView: View {
                 TextEditor(text: $notes)
                     .frame(minHeight: 60)
             }
+
+            Section("Video URLs (one per line)") {
+                TextEditor(text: $videoURLsText)
+                    .frame(minHeight: 60)
+                    .autocapitalization(.none)
+                    .font(.body.monospaced())
+                Text("YouTube links will be embedded inline")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
         }
         .navigationTitle("New Exercise")
         .navigationBarTitleDisplayMode(.inline)
@@ -146,6 +157,10 @@ struct ExerciseCreatorView: View {
         let aliases = aliasesText.split(separator: "\n").map { String($0).trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         exercise.aliases = aliases
         exercise.notes = notes.isEmpty ? nil : notes
+        let urls = videoURLsText.split(separator: "\n")
+            .map { String($0).trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        exercise.videoURLs = urls
 
         modelContext.insert(exercise)
 

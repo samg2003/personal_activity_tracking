@@ -44,7 +44,11 @@ final class CardioSession {
 
     var activeDuration: TimeInterval {
         let end = endedAt ?? Date()
-        return end.timeIntervalSince(startedAt) - totalPausedSeconds
+        var paused = totalPausedSeconds
+        if let pausedAt = pausedAt {
+            paused += end.timeIntervalSince(pausedAt)
+        }
+        return end.timeIntervalSince(startedAt) - paused
     }
 
     var durationFormatted: String {

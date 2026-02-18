@@ -51,9 +51,38 @@ final class WorkoutPlanManager {
         try? modelContext.save()
     }
 
-    /// Deletes a plan (marks inactive, stops shells). Data preserved for history.
+    /// Soft-deletes a plan (marks inactive, stops shells). Data preserved for history.
     func deletePlan(_ plan: WorkoutPlan) {
         deactivatePlan(plan)
+    }
+
+    /// Permanently removes a plan and its shell activities from the database.
+    /// Session data (StrengthSession/CardioSession) is preserved but loses planDay reference.
+    func permanentlyDeletePlan(_ plan: WorkoutPlan) {
+        let shells = fetchShells(for: plan)
+        for shell in shells {
+            modelContext.delete(shell)
+        }
+        modelContext.delete(plan)
+        try? modelContext.save()
+    }
+
+    /// Returns true if any completed strength or cardio sessions reference this plan's days.
+    func hasLoggedSessions(for plan: WorkoutPlan) -> Bool {
+        let dayIDs = Set(plan.days.map(\.id))
+        let completedRaw = SessionStatus.completed.rawValue
+
+        let strengthDesc = FetchDescriptor<StrengthSession>(
+            predicate: #Predicate { $0.statusRaw == completedRaw }
+        )
+        if let sessions = try? modelContext.fetch(strengthDesc) {
+            if sessions.contains(where: { session in
+                guard let dayID = session.planDay?.id else { return false }
+                return dayIDs.contains(dayID)
+            }) { return true }
+        }
+
+        return false
     }
 
     // MARK: - Plan Queries
@@ -308,6 +337,63 @@ final class WorkoutPlanManager {
         }
 
         return result
+    }
+
+    /// Session completion state for today's workout card.
+    enum TodaySessionStatus {
+        case notStarted
+        case incomplete(completedSets: Int, totalSets: Int)
+        case fullyCompleted
+    }
+
+    /// Returns the session status for a plan day on the given date.
+    func todaySessionStatus(for day: WorkoutPlanDay, on date: Date = Date()) -> TodaySessionStatus {
+        let dayStart = date.startOfDay
+        let dayEnd = Calendar.current.date(byAdding: .day, value: 1, to: dayStart)!
+        let dayID = day.id
+
+        if day.plan?.planType == .strength {
+            let completedRaw = SessionStatus.completed.rawValue
+            let descriptor = FetchDescriptor<StrengthSession>(
+                predicate: #Predicate {
+                    $0.planDay?.id == dayID &&
+                    $0.statusRaw == completedRaw &&
+                    $0.date >= dayStart && $0.date < dayEnd
+                }
+            )
+            guard let sessions = try? modelContext.fetch(descriptor),
+                  let session = sessions.first else { return .notStarted }
+
+            let completedSets = session.completedSets.count
+            let plannedSets = day.totalSets
+            let ratio = plannedSets > 0 ? Double(completedSets) / Double(plannedSets) : 1.0
+            return ratio >= 0.8 ? .fullyCompleted : .incomplete(completedSets: completedSets, totalSets: plannedSets)
+        } else {
+            let completedRaw = SessionStatus.completed.rawValue
+            let descriptor = FetchDescriptor<CardioSession>(
+                predicate: #Predicate {
+                    $0.planDay?.id == dayID &&
+                    $0.statusRaw == completedRaw &&
+                    $0.date >= dayStart && $0.date < dayEnd
+                }
+            )
+            let completedCount = (try? modelContext.fetchCount(descriptor)) ?? 0
+            let totalExercises = day.sortedCardioExercises.count
+            guard totalExercises > 0 else { return .notStarted }
+            if completedCount >= totalExercises {
+                return .fullyCompleted
+            } else if completedCount > 0 {
+                return .incomplete(completedSets: completedCount, totalSets: totalExercises)
+            } else {
+                return .notStarted
+            }
+        }
+    }
+
+    /// Convenience: checks if a fully completed session exists today (backward compat).
+    func isSessionCompletedToday(for day: WorkoutPlanDay, on date: Date = Date()) -> Bool {
+        if case .fullyCompleted = todaySessionStatus(for: day, on: date) { return true }
+        return false
     }
 
     // MARK: - Private Helpers

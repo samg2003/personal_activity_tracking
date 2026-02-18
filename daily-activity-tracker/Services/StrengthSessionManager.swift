@@ -104,14 +104,33 @@ final class StrengthSessionManager {
     }
 
     /// Marks session as abandoned. No ActivityLog created.
+    /// If this was a resumed session, only removes sets added after the resume and reverts to completed.
     func abandonSession(_ session: StrengthSession) {
         if session.status == .paused, let pausedAt = session.pausedAt {
             session.totalPausedSeconds += Date().timeIntervalSince(pausedAt)
             session.pausedAt = nil
         }
 
-        session.endedAt = Date()
-        session.status = .abandoned
+        // If this was a resumed completed session, revert instead of full abandon
+        if session.resumedAtSetCount >= 0 {
+            let sortedSets = session.completedSets.sorted { ($0.completedAt ?? .distantPast) < ($1.completedAt ?? .distantPast) }
+            let setsToRemove = sortedSets.dropFirst(session.resumedAtSetCount)
+            for set in setsToRemove {
+                modelContext.delete(set)
+            }
+            session.status = .completed
+            // Restore original timing
+            session.endedAt = session.resumedAtEndedAt ?? Date()
+            if session.resumedAtPausedSeconds >= 0 {
+                session.totalPausedSeconds = session.resumedAtPausedSeconds
+            }
+            session.resumedAtSetCount = -1
+            session.resumedAtEndedAt = nil
+            session.resumedAtPausedSeconds = -1
+        } else {
+            session.endedAt = Date()
+            session.status = .abandoned
+        }
         try? modelContext.save()
     }
 
@@ -153,6 +172,50 @@ final class StrengthSessionManager {
         )
 
         return try? modelContext.fetch(descriptor).first
+    }
+
+    /// Finds today's completed-but-incomplete session for a plan day (for "Continue Workout").
+    func findIncompleteSession(for day: WorkoutPlanDay) -> StrengthSession? {
+        let dayStart = Date().startOfDay
+        let dayEnd = Calendar.current.date(byAdding: .day, value: 1, to: dayStart)!
+        let dayID = day.id
+        let completedRaw = SessionStatus.completed.rawValue
+
+        let descriptor = FetchDescriptor<StrengthSession>(
+            predicate: #Predicate {
+                $0.planDay?.id == dayID &&
+                $0.statusRaw == completedRaw &&
+                $0.date >= dayStart && $0.date < dayEnd
+            },
+            sortBy: [SortDescriptor(\StrengthSession.startedAt, order: .reverse)]
+        )
+
+        guard let session = try? modelContext.fetch(descriptor).first else { return nil }
+
+        // Only return if actually incomplete
+        let completedSets = session.completedSets.count
+        let plannedSets = day.totalSets
+        guard plannedSets > 0, Double(completedSets) / Double(plannedSets) < 0.8 else { return nil }
+        return session
+    }
+
+    /// Re-opens a completed session so the user can continue adding sets.
+    /// Snapshots set count and timing so abandon can revert cleanly.
+    /// Adds the gap since original completion to paused seconds so the timer only shows active workout time.
+    func resumeCompletedSession(_ session: StrengthSession) {
+        session.resumedAtSetCount = session.completedSets.count
+        session.resumedAtEndedAt = session.endedAt
+        session.resumedAtPausedSeconds = session.totalPausedSeconds
+
+        // Account for the gap between original end and now as "paused" time
+        if let endedAt = session.endedAt {
+            session.totalPausedSeconds += Date().timeIntervalSince(endedAt)
+        }
+
+        session.status = .inProgress
+        session.endedAt = nil
+        session.pausedAt = nil
+        try? modelContext.save()
     }
 
     // MARK: - Session Queries
@@ -197,6 +260,26 @@ final class StrengthSessionManager {
 
     // MARK: - Auto-Completion Bridge
 
+
+    /// Deletes a session and its associated shell ActivityLog (keeps dashboard in sync).
+    func deleteSession(_ session: StrengthSession) {
+        // Remove today's ActivityLog for the shell so dashboard unchecks
+        if let shell = findShellActivity(for: session) {
+            let shellID = shell.id
+            let sessionDate = session.date.startOfDay
+            let descriptor = FetchDescriptor<ActivityLog>(
+                predicate: #Predicate { $0.activity?.id == shellID }
+            )
+            if let logs = try? modelContext.fetch(descriptor) {
+                for log in logs where Calendar.current.isDate(log.date, inSameDayAs: sessionDate) {
+                    modelContext.delete(log)
+                }
+            }
+        }
+        modelContext.delete(session)
+        try? modelContext.save()
+    }
+
     /// Creates an ActivityLog on the shell activity for auto-completion.
     private func autoCompleteShell(for session: StrengthSession) {
         guard let shellActivity = findShellActivity(for: session) else { return }
@@ -214,14 +297,10 @@ final class StrengthSessionManager {
             return // Already logged today
         }
 
+        // Only auto-complete the shell when the session meets the threshold.
+        // Incomplete sessions stay pending — no log created.
         if ratio >= 0.8 {
             let log = ActivityLog(activity: shellActivity, date: today, status: .completed)
-            modelContext.insert(log)
-        } else {
-            let completed = session.completedSets.count
-            let planned = session.planDay?.totalSets ?? completed
-            let log = ActivityLog(activity: shellActivity, date: today, status: .skipped)
-            log.skipReason = "Incomplete: \(completed)/\(planned) sets"
             modelContext.insert(log)
         }
     }
