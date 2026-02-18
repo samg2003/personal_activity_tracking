@@ -359,9 +359,7 @@ struct WorkoutTabView: View {
                 quickLink(icon: "figure.strengthtraining.traditional", title: "Muscle Glossary", color: .purple)
             }
 
-            // Analytics placeholder (W4)
-            quickLink(icon: "chart.xyaxis.line", title: "Analytics", color: .teal)
-                .opacity(0.5)
+            // Analytics moved to Analytics tab (W4)
         }
     }
 

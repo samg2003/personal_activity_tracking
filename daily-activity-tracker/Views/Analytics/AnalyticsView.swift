@@ -9,6 +9,12 @@ struct AnalyticsView: View {
     private let scheduleEngine = ScheduleEngine()
 
     @State private var showAllStreaks = false
+    @State private var selectedTab: AnalyticsTab = .activities
+
+    enum AnalyticsTab: String, CaseIterable {
+        case activities = "Activities"
+        case workouts = "Workouts"
+    }
 
     private var topLevelActivities: [Activity] {
         allActivities.filter {
@@ -144,56 +150,58 @@ struct AnalyticsView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 24) {
-                    // 1. Insight Summary
-                    InsightSummaryCard(
-                        bestStreak: bestStreak,
-                        biggestWin: biggestWins.first.map { ($0.activity.name, $0.delta) },
-                        behindCount: behindSchedule.count
+            VStack(spacing: 0) {
+                // Segmented control
+                Picker("", selection: $selectedTab) {
+                    ForEach(AnalyticsTab.allCases, id: \.self) { tab in
+                        Text(tab.rawValue).tag(tab)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal)
+                .padding(.top, 8)
+
+                switch selectedTab {
+                case .activities:
+                    activitiesContent
+                case .workouts:
+                    WorkoutAnalyticsView()
+                }
+            }
+            .background(Color(.systemBackground))
+            .navigationTitle("Analytics")
+        }
+    }
+
+    // MARK: - Activities Content
+
+    private var activitiesContent: some View {
+        ScrollView {
+            VStack(spacing: 24) {
+                // 1. Insight Summary
+                InsightSummaryCard(
+                    bestStreak: bestStreak,
+                    biggestWin: biggestWins.first.map { ($0.activity.name, $0.delta) },
+                    behindCount: behindSchedule.count
+                )
+
+                // 2. Consistency Map (Heatmap)
+                VStack(alignment: .leading, spacing: 8) {
+                    sectionHeader("Consistency Map", icon: "square.grid.3x3.fill")
+                    HeatmapView(
+                        activities: topLevelActivities,
+                        allActivities: allActivities,
+                        logs: allLogs,
+                        vacationDays: vacationDays,
+                        scheduleEngine: ScheduleEngine()
                     )
+                }
 
-                    // 2. Consistency Map (Heatmap)
+                // 3. Behind Schedule
+                if !behindSchedule.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
-                        sectionHeader("Consistency Map", icon: "square.grid.3x3.fill")
-                        HeatmapView(
-                            activities: topLevelActivities,
-                            allActivities: allActivities,
-                            logs: allLogs,
-                            vacationDays: vacationDays,
-                            scheduleEngine: ScheduleEngine()
-                        )
-                    }
-
-                    // 3. Behind Schedule
-                    if !behindSchedule.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            sectionHeader("Behind Schedule", icon: "exclamationmark.triangle.fill")
-                            ForEach(behindSchedule, id: \.activity.id) { item in
-                                NavigationLink {
-                                    ActivityAnalyticsView(
-                                        activity: item.activity,
-                                        allLogs: allLogs,
-                                        vacationDays: vacationDays,
-                                        allActivities: allActivities
-                                    )
-                                } label: {
-                                    behindRow(item.activity, rate: item.rate)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-
-                    // 4. Streak Leaderboard
-                    VStack(alignment: .leading, spacing: 8) {
-                        sectionHeader("Streak Leaderboard", icon: "flame.fill")
-
-                        let visibleStreaks = showAllStreaks
-                            ? sortedStreaks
-                            : Array(sortedStreaks.prefix(5))
-
-                        ForEach(visibleStreaks, id: \.activity.id) { item in
+                        sectionHeader("Behind Schedule", icon: "exclamationmark.triangle.fill")
+                        ForEach(behindSchedule, id: \.activity.id) { item in
                             NavigationLink {
                                 ActivityAnalyticsView(
                                     activity: item.activity,
@@ -202,125 +210,146 @@ struct AnalyticsView: View {
                                     allActivities: allActivities
                                 )
                             } label: {
-                                streakRow(item.activity, streak: item.streak)
+                                behindRow(item.activity, rate: item.rate)
                             }
                             .buttonStyle(.plain)
                         }
+                    }
+                }
 
-                        if sortedStreaks.count > 5 {
-                            Button {
-                                withAnimation(.easeInOut(duration: 0.25)) {
-                                    showAllStreaks.toggle()
-                                }
+                // 4. Streak Leaderboard
+                VStack(alignment: .leading, spacing: 8) {
+                    sectionHeader("Streak Leaderboard", icon: "flame.fill")
+
+                    let visibleStreaks = showAllStreaks
+                        ? sortedStreaks
+                        : Array(sortedStreaks.prefix(5))
+
+                    ForEach(visibleStreaks, id: \.activity.id) { item in
+                        NavigationLink {
+                            ActivityAnalyticsView(
+                                activity: item.activity,
+                                allLogs: allLogs,
+                                vacationDays: vacationDays,
+                                allActivities: allActivities
+                            )
+                        } label: {
+                            streakRow(item.activity, streak: item.streak)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    if sortedStreaks.count > 5 {
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                showAllStreaks.toggle()
+                            }
+                        } label: {
+                            Text(showAllStreaks ? "Show Less" : "Show All (\(sortedStreaks.count))")
+                                .font(.caption.bold())
+                                .foregroundStyle(Color.accentColor)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 8)
+                        }
+                    }
+                }
+
+                // 5. Biggest Wins
+                if !biggestWins.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        sectionHeader("Biggest Wins", icon: "arrow.up.right")
+                        ForEach(biggestWins, id: \.activity.id) { item in
+                            NavigationLink {
+                                ActivityAnalyticsView(
+                                    activity: item.activity,
+                                    allLogs: allLogs,
+                                    vacationDays: vacationDays,
+                                    allActivities: allActivities
+                                )
                             } label: {
-                                Text(showAllStreaks ? "Show Less" : "Show All (\(sortedStreaks.count))")
-                                    .font(.caption.bold())
-                                    .foregroundStyle(Color.accentColor)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 8)
+                                winRow(item.activity, delta: item.delta)
                             }
+                            .buttonStyle(.plain)
                         }
                     }
+                }
 
-                    // 5. Biggest Wins
-                    if !biggestWins.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            sectionHeader("Biggest Wins", icon: "arrow.up.right")
-                            ForEach(biggestWins, id: \.activity.id) { item in
-                                NavigationLink {
-                                    ActivityAnalyticsView(
-                                        activity: item.activity,
-                                        allLogs: allLogs,
-                                        vacationDays: vacationDays,
-                                        allActivities: allActivities
-                                    )
-                                } label: {
-                                    winRow(item.activity, delta: item.delta)
+                // 6. Trends (Value Charts)
+                if !valueActivities.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        sectionHeader("Trends", icon: "chart.line.uptrend.xyaxis")
+                        ForEach(valueActivities) { activity in
+                            NavigationLink {
+                                ActivityAnalyticsView(
+                                    activity: activity,
+                                    allLogs: allLogs,
+                                    vacationDays: vacationDays,
+                                    allActivities: allActivities
+                                )
+                            } label: {
+                                ValueChartView(activity: activity, logs: allLogs)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+
+                // 7. Photo Progress
+                if !photoActivities.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        sectionHeader("Photo Progress", icon: "person.2.crop.square.stack")
+                        ForEach(photoActivities) { activity in
+                            NavigationLink {
+                                ActivityAnalyticsView(
+                                    activity: activity,
+                                    allLogs: allLogs,
+                                    vacationDays: vacationDays,
+                                    allActivities: allActivities
+                                )
+                            } label: {
+                                PhotoComparisonCard(activity: activity)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+
+                // 8. Deep Dive
+                if !deepDiveGroups.isEmpty {
+                    VStack(alignment: .leading, spacing: 12) {
+                        sectionHeader("Deep Dive", icon: "magnifyingglass")
+
+                        ForEach(deepDiveGroups, id: \.label) { group in
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: group.icon)
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(.secondary)
+                                    Text(group.label)
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.secondary)
                                 }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
+                                .padding(.top, 4)
 
-                    // 6. Trends (Value Charts)
-                    if !valueActivities.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            sectionHeader("Trends", icon: "chart.line.uptrend.xyaxis")
-                            ForEach(valueActivities) { activity in
-                                NavigationLink {
-                                    ActivityAnalyticsView(
-                                        activity: activity,
-                                        allLogs: allLogs,
-                                        vacationDays: vacationDays,
-                                        allActivities: allActivities
-                                    )
-                                } label: {
-                                    ValueChartView(activity: activity, logs: allLogs)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-
-                    // 7. Photo Progress
-                    if !photoActivities.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            sectionHeader("Photo Progress", icon: "person.2.crop.square.stack")
-                            ForEach(photoActivities) { activity in
-                                NavigationLink {
-                                    ActivityAnalyticsView(
-                                        activity: activity,
-                                        allLogs: allLogs,
-                                        vacationDays: vacationDays,
-                                        allActivities: allActivities
-                                    )
-                                } label: {
-                                    PhotoComparisonCard(activity: activity)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-
-                    // 8. Deep Dive
-                    if !deepDiveGroups.isEmpty {
-                        VStack(alignment: .leading, spacing: 12) {
-                            sectionHeader("Deep Dive", icon: "magnifyingglass")
-
-                            ForEach(deepDiveGroups, id: \.label) { group in
-                                VStack(alignment: .leading, spacing: 4) {
-                                    HStack(spacing: 6) {
-                                        Image(systemName: group.icon)
-                                            .font(.system(size: 11))
-                                            .foregroundStyle(.secondary)
-                                        Text(group.label)
-                                            .font(.caption.weight(.semibold))
-                                            .foregroundStyle(.secondary)
+                                ForEach(group.activities) { activity in
+                                    NavigationLink {
+                                        ActivityAnalyticsView(
+                                            activity: activity,
+                                            allLogs: allLogs,
+                                            vacationDays: vacationDays,
+                                            allActivities: allActivities
+                                        )
+                                    } label: {
+                                        deepDiveRow(activity)
                                     }
-                                    .padding(.top, 4)
-
-                                    ForEach(group.activities) { activity in
-                                        NavigationLink {
-                                            ActivityAnalyticsView(
-                                                activity: activity,
-                                                allLogs: allLogs,
-                                                vacationDays: vacationDays,
-                                                allActivities: allActivities
-                                            )
-                                        } label: {
-                                            deepDiveRow(activity)
-                                        }
-                                        .buttonStyle(.plain)
-                                    }
+                                    .buttonStyle(.plain)
                                 }
                             }
                         }
                     }
                 }
-                .padding()
             }
-            .background(Color(.systemBackground))
-            .navigationTitle("Analytics")
+            .padding()
         }
     }
 

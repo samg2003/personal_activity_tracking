@@ -20,7 +20,11 @@ graph TB
         MP["My Plans (drafts + active)"]
         EL["Exercise Library"]
         MG["Muscle Glossary"]
-        AN["Analytics"]
+    end
+
+    subgraph AnalyticsTab["Analytics Tab"]
+        AA["Activities Analytics"]
+        WA["Workout Analytics\n1RM · volume · PRs\npace · distance"]
     end
 
     subgraph Services["Services"]
