@@ -44,7 +44,10 @@ struct CardioPlanEditorView: View {
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $dayForPicker) { day in
             NavigationStack {
-                ExercisePickerView(exerciseType: .cardio) { exercise in
+                ExercisePickerView(
+                    exerciseType: .cardio,
+                    excludedExerciseIDs: Set(day.sortedCardioExercises.compactMap { $0.exercise?.id })
+                ) { exercise in
                     addExercise(exercise, to: day)
                 }
             }

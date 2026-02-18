@@ -56,7 +56,9 @@ struct CardioSessionView: View {
         } message: {
             Text("Session data will be discarded.")
         }
-        .fullScreenCover(isPresented: $showSummary) {
+        .fullScreenCover(isPresented: $showSummary, onDismiss: {
+            dismiss()
+        }) {
             NavigationStack {
                 CardioSummaryView(session: session, sessionManager: sessionManager, cardioPlanExercise: cardioPlanExercise)
             }

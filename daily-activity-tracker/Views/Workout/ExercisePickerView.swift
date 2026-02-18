@@ -9,6 +9,7 @@ struct ExercisePickerView: View {
     @Query(sort: \Exercise.name) private var exercises: [Exercise]
 
     let exerciseType: ExerciseType  // Filter: .strength or .cardio
+    var excludedExerciseIDs: Set<UUID> = []
     let onSelect: (Exercise) -> Void
 
     @State private var searchText = ""
@@ -70,7 +71,7 @@ struct ExercisePickerView: View {
     }
 
     private var typeFilteredExercises: [Exercise] {
-        exercises.filter { $0.exerciseType == exerciseType }
+        exercises.filter { $0.exerciseType == exerciseType && !excludedExerciseIDs.contains($0.id) }
     }
 
     private var matchingExercises: [Exercise] {

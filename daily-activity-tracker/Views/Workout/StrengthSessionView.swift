@@ -53,7 +53,9 @@ struct StrengthSessionView: View {
                 Text("Your logged sets will be saved but the session won't count toward your plan completion.")
             }
         }
-        .fullScreenCover(isPresented: $showSummary) {
+        .fullScreenCover(isPresented: $showSummary, onDismiss: {
+            dismiss()
+        }) {
             NavigationStack {
                 SessionSummaryView(session: session)
             }

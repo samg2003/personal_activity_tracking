@@ -45,7 +45,10 @@ struct StrengthPlanEditorView: View {
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $dayForPicker) { day in
             NavigationStack {
-                ExercisePickerView(exerciseType: .strength) { exercise in
+                ExercisePickerView(
+                    exerciseType: .strength,
+                    excludedExerciseIDs: Set(day.sortedStrengthExercises.compactMap { $0.exercise?.id })
+                ) { exercise in
                     addExercise(exercise, to: day)
                 }
             }
