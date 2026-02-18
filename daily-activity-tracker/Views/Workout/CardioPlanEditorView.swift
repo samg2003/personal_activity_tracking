@@ -1,25 +1,42 @@
 import SwiftUI
 import SwiftData
 
-/// Mon–Sun cardio plan editor — session type picker, multi-exercise per day, color linking.
+/// Mon–Sun cardio plan editor — week strip + swipable day detail, matching strength editor layout.
 struct CardioPlanEditorView: View {
     @Environment(\.modelContext) private var modelContext
     @Bindable var plan: WorkoutPlan
 
+    @State private var selectedDayIndex: Int = 0
     @State private var dayForPicker: WorkoutPlanDay?
-    @State private var dayForConfig: WorkoutPlanDay?
+    @State private var editLabelText: String = ""
+    @State private var editingDayLabel: WorkoutPlanDay?
+    @State private var showLabelEditor = false
 
     private var planManager: WorkoutPlanManager {
         WorkoutPlanManager(modelContext: modelContext)
     }
 
+    private var sortedDays: [WorkoutPlanDay] {
+        plan.days.sorted { $0.weekday < $1.weekday }
+    }
+
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
-                planHeader
-                weekGrid
+                PlanEditorComponents.PlanHeader(plan: plan, icon: "figure.run", accentColor: .green)
+
+                PlanEditorComponents.WeekStrip(days: sortedDays, selectedIndex: $selectedDayIndex, accentColor: .green, modelContext: modelContext)
+
+                dayDetail
+
                 weeklyLoadSummary
-                activateButton
+
+                PlanEditorComponents.ActivateButton(
+                    plan: plan,
+                    accentColor: .green,
+                    onActivate: { planManager.activatePlan(plan) },
+                    onDeactivate: { planManager.deactivatePlan(plan) }
+                )
             }
             .padding()
         }
@@ -32,163 +49,176 @@ struct CardioPlanEditorView: View {
                 }
             }
         }
-        .sheet(item: $dayForConfig) { day in
-            NavigationStack {
-                CardioDayConfigSheet(day: day)
-            }
-        }
+        .renameDayAlert(
+            isPresented: $showLabelEditor,
+            labelText: $editLabelText,
+            day: editingDayLabel,
+            modelContext: modelContext,
+            planManager: planManager
+        )
     }
 
-    // MARK: - Header
+    // MARK: - Day Detail (Swipable)
 
-    private var planHeader: some View {
-        HStack {
-            Image(systemName: "figure.run")
-                .foregroundStyle(.green)
-            Text(plan.name)
-                .font(.headline)
-            Spacer()
-            statusBadge
-        }
-    }
-
-    private var statusBadge: some View {
-        HStack(spacing: 4) {
-            Image(systemName: plan.status.icon)
-                .font(.caption2)
-            Text(plan.status.displayName)
-                .font(.caption)
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(plan.isActive ? Color.green.opacity(0.15) : Color(.systemGray5))
-        .foregroundStyle(plan.isActive ? .green : .secondary)
-        .clipShape(Capsule())
-    }
-
-    // MARK: - Multi-Row Week Grid (3 / 2 / 2)
-
-    private var dayRows: [[WorkoutPlanDay]] {
-        let days = plan.sortedDays
-        guard days.count >= 7 else { return [days] }
-        return [
-            Array(days[0..<3]),
-            Array(days[3..<5]),
-            Array(days[5..<7])
-        ]
-    }
-
-    private var weekGrid: some View {
-        VStack(spacing: 10) {
-            ForEach(Array(dayRows.enumerated()), id: \.offset) { _, row in
-                HStack(alignment: .top, spacing: 8) {
-                    ForEach(row) { day in
-                        dayCard(day)
-                    }
-                }
+    private var dayDetail: some View {
+        PlanEditorComponents.SwipableDayContainer(
+            selectedIndex: $selectedDayIndex,
+            dayCount: sortedDays.count
+        ) {
+            if selectedDayIndex < sortedDays.count {
+                dayEditorContent(sortedDays[selectedDayIndex])
             }
         }
     }
 
     @ViewBuilder
-    private func dayCard(_ day: WorkoutPlanDay) -> some View {
-        VStack(spacing: 6) {
-            // Header: weekday + color dot
-            HStack(spacing: 4) {
-                Text(day.weekdayName)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text(day.colorEmoji)
-                    .font(.caption2)
-                    .onTapGesture { cycleColor(day) }
-            }
+    private func dayEditorContent(_ day: WorkoutPlanDay) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            PlanEditorComponents.DayEditorHeader(
+                day: day,
+                subtitle: day.isRest ? nil : (!day.cardioExercises.isEmpty ? "\(day.cardioExercises.count) exercises" : nil),
+                onToggleRest: { toggleRest(day) }
+            )
 
             if day.isRest {
-                // Compact rest day
-                HStack(spacing: 4) {
-                    Image(systemName: "bed.double.fill")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                    Text("Rest")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 6)
+                PlanEditorComponents.RestDayView()
             } else {
-                // Expanded training day
-                VStack(alignment: .leading, spacing: 3) {
-                    ForEach(day.sortedCardioExercises) { cardioEx in
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(cardioEx.exercise?.name ?? "–")
-                                .font(.system(size: 10).weight(.medium))
-                                .lineLimit(1)
-                            HStack(spacing: 3) {
-                                Text(cardioEx.sessionType.displayName)
-                                    .font(.system(size: 9))
-                                    .foregroundStyle(.secondary)
-                                Text("·")
-                                    .font(.system(size: 9))
-                                    .foregroundStyle(.tertiary)
-                                Text(cardioEx.targetLabel)
-                                    .font(.system(size: 9))
-                                    .foregroundStyle(.tertiary)
-                            }
-                        }
-                    }
-
-                    // Add + Configure buttons
-                    HStack(spacing: 8) {
-                        Button {
-                            dayForPicker = day
-                        } label: {
-                            HStack(spacing: 2) {
-                                Image(systemName: "plus")
-                                    .font(.system(size: 9))
-                                Text("Add")
-                                    .font(.system(size: 9))
-                            }
-                            .foregroundStyle(Color.accentColor)
-                        }
-                        .buttonStyle(.plain)
-
-                        if !day.cardioExercises.isEmpty {
-                            Button {
-                                dayForConfig = day
-                            } label: {
-                                HStack(spacing: 2) {
-                                    Image(systemName: "slider.horizontal.3")
-                                        .font(.system(size: 9))
-                                    Text("Config")
-                                        .font(.system(size: 9))
-                                }
-                                .foregroundStyle(.green)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                cardioDayContent(day)
             }
-
-            // Toggle rest/train
-            Button {
-                toggleRest(day)
-            } label: {
-                Text(day.isRest ? "Train" : "Rest")
-                    .font(.system(size: 10))
-                    .foregroundStyle(Color.accentColor)
-            }
-            .buttonStyle(.plain)
         }
-        .padding(8)
-        .frame(maxWidth: .infinity)
+        .padding()
         .background(Color(.systemGray6))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
-    // MARK: - Weekly Load
+    // MARK: - Cardio Day Content
+
+    @ViewBuilder
+    private func cardioDayContent(_ day: WorkoutPlanDay) -> some View {
+        // Day label
+        PlanEditorComponents.DayLabelRow(day: day, accentColor: .green) {
+            editLabelText = day.dayLabel
+            editingDayLabel = day
+            showLabelEditor = true
+        }
+
+        // Exercise cards
+        ForEach(day.sortedCardioExercises) { cardioEx in
+            cardioExerciseCard(cardioEx, day: day)
+        }
+
+        // Add exercise
+        PlanEditorComponents.AddExerciseButton(accentColor: .green) {
+            dayForPicker = day
+        }
+    }
+
+    // MARK: - Cardio Exercise Card
+
+    private func cardioExerciseCard(_ cardioEx: CardioPlanExercise, day: WorkoutPlanDay) -> some View {
+        VStack(spacing: 8) {
+            // Name + session type + delete
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(cardioEx.exercise?.name ?? "Unknown")
+                        .font(.subheadline.weight(.medium))
+                    Text(cardioEx.sessionType.displayName)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                // Target label
+                Text(cardioEx.targetLabel)
+                    .font(.caption)
+                    .foregroundStyle(.green)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.green.opacity(0.1))
+                    .clipShape(Capsule())
+
+                Button(role: .destructive) {
+                    deleteExercise(cardioEx, from: day)
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.caption)
+                        .foregroundStyle(.red.opacity(0.7))
+                }
+                .buttonStyle(.plain)
+            }
+
+            // Session type picker
+            HStack(spacing: 12) {
+                Text("Type")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Picker("", selection: Binding(
+                    get: { cardioEx.sessionType },
+                    set: {
+                        cardioEx.sessionTypeRaw = $0.rawValue
+                        try? modelContext.save()
+                    }
+                )) {
+                    ForEach(CardioSessionType.allCases) { type in
+                        Text(type.displayName).tag(type)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+
+            // Target inputs
+            HStack(spacing: 12) {
+                // Distance
+                HStack(spacing: 4) {
+                    Text("Dist")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField("—", value: Binding(
+                        get: { cardioEx.targetDistance ?? 0 },
+                        set: {
+                            cardioEx.targetDistance = $0 > 0 ? $0 : nil
+                            try? modelContext.save()
+                        }
+                    ), format: .number)
+                    .keyboardType(.decimalPad)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 55)
+                    Text(cardioEx.exercise?.distanceUnit ?? "km")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+
+                Spacer()
+
+                // Duration
+                HStack(spacing: 4) {
+                    Text("Dur")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField("—", value: Binding(
+                        get: { cardioEx.targetDurationMin ?? 0 },
+                        set: {
+                            cardioEx.targetDurationMin = $0 > 0 ? $0 : nil
+                            try? modelContext.save()
+                        }
+                    ), format: .number)
+                    .keyboardType(.numberPad)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 55)
+                    Text("min")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        }
+        .padding(12)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    // MARK: - Weekly Load Summary
 
     @ViewBuilder
     private var weeklyLoadSummary: some View {
@@ -217,34 +247,6 @@ struct CardioPlanEditorView: View {
         }
     }
 
-    // MARK: - Activate Button
-
-    @ViewBuilder
-    private var activateButton: some View {
-        if plan.isDraft {
-            Button {
-                planManager.activatePlan(plan)
-            } label: {
-                Text("Activate Plan")
-                    .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(Color.green)
-                    .foregroundStyle(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-            }
-        } else if plan.isActive {
-            Button(role: .destructive) {
-                planManager.deactivatePlan(plan)
-            } label: {
-                Text("Deactivate Plan")
-                    .font(.subheadline.weight(.medium))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-            }
-        }
-    }
-
     // MARK: - Actions
 
     private func addExercise(_ exercise: Exercise, to day: WorkoutPlanDay) {
@@ -263,139 +265,15 @@ struct CardioPlanEditorView: View {
         try? modelContext.save()
     }
 
+    private func deleteExercise(_ cardioEx: CardioPlanExercise, from day: WorkoutPlanDay) {
+        modelContext.delete(cardioEx)
+        try? modelContext.save()
+        planManager.propagateLinkedDays(from: day)
+    }
+
     private func toggleRest(_ day: WorkoutPlanDay) {
         day.isRest.toggle()
         day.dayLabel = day.isRest ? "Rest" : ""
         try? modelContext.save()
-    }
-
-    private func cycleColor(_ day: WorkoutPlanDay) {
-        if day.hasExercises && !day.isLinked { return }
-        let next = (day.colorGroup + 2) % 8 - 1
-        day.colorGroup = next
-        try? modelContext.save()
-    }
-}
-
-// MARK: - Cardio Day Config Sheet
-
-struct CardioDayConfigSheet: View {
-    @Environment(\.modelContext) private var modelContext
-    @Environment(\.dismiss) private var dismiss
-    @Bindable var day: WorkoutPlanDay
-
-    var body: some View {
-        Form {
-            ForEach(day.sortedCardioExercises) { cardioEx in
-                Section(cardioEx.exercise?.displayName ?? "Exercise") {
-                    // Session type
-                    Picker("Session Type", selection: Binding(
-                        get: { cardioEx.sessionType },
-                        set: { cardioEx.sessionTypeRaw = $0.rawValue }
-                    )) {
-                        ForEach(CardioSessionType.allCases) { type in
-                            Text(type.displayName).tag(type)
-                        }
-                    }
-
-                    // Target: distance or duration
-                    HStack {
-                        Text("Target")
-                        Spacer()
-                        TextField("Distance", value: Binding(
-                            get: { cardioEx.targetDistance ?? 0 },
-                            set: { cardioEx.targetDistance = $0 > 0 ? $0 : nil }
-                        ), format: .number)
-                        .keyboardType(.decimalPad)
-                        .frame(width: 60)
-                        .multilineTextAlignment(.trailing)
-                        Text(cardioEx.exercise?.distanceUnit ?? "km")
-                            .foregroundStyle(.secondary)
-                    }
-
-                    HStack {
-                        Text("Duration")
-                        Spacer()
-                        TextField("Min", value: Binding(
-                            get: { cardioEx.targetDurationMin ?? 0 },
-                            set: { cardioEx.targetDurationMin = $0 > 0 ? $0 : nil }
-                        ), format: .number)
-                        .keyboardType(.numberPad)
-                        .frame(width: 60)
-                        .multilineTextAlignment(.trailing)
-                        Text("min")
-                            .foregroundStyle(.secondary)
-                    }
-
-                    // Session type-specific params
-                    sessionParamsSection(cardioEx)
-                }
-            }
-        }
-        .navigationTitle("\(day.weekdayFullName) Config")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                Button("Done") {
-                    try? modelContext.save()
-                    dismiss()
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func sessionParamsSection(_ cardioEx: CardioPlanExercise) -> some View {
-        switch cardioEx.sessionType {
-        case .steadyState:
-            Picker("HR Zone", selection: Binding(
-                get: { cardioEx.steadyStateParams?.targetHRZone ?? 2 },
-                set: { cardioEx.steadyStateParams = SteadyStateParams(targetHRZone: $0) }
-            )) {
-                ForEach(1...5, id: \.self) { zone in
-                    Text("Zone \(zone)").tag(zone)
-                }
-            }
-
-        case .hiit:
-            let params = cardioEx.hiitParams ?? HIITParams(rounds: 8, workSeconds: 30, restSeconds: 60)
-            Stepper("Rounds: \(params.rounds)", value: Binding(
-                get: { params.rounds },
-                set: { cardioEx.hiitParams = HIITParams(rounds: $0, workSeconds: params.workSeconds, restSeconds: params.restSeconds) }
-            ), in: 1...30)
-            Stepper("Work: \(params.workSeconds)s", value: Binding(
-                get: { params.workSeconds },
-                set: { cardioEx.hiitParams = HIITParams(rounds: params.rounds, workSeconds: $0, restSeconds: params.restSeconds) }
-            ), in: 5...300, step: 5)
-            Stepper("Rest: \(params.restSeconds)s", value: Binding(
-                get: { params.restSeconds },
-                set: { cardioEx.hiitParams = HIITParams(rounds: params.rounds, workSeconds: params.workSeconds, restSeconds: $0) }
-            ), in: 5...300, step: 5)
-
-        case .tempo:
-            let params = cardioEx.tempoParams ?? TempoParams(warmupMin: 5, tempoMin: 20, cooldownMin: 5, targetHRZone: 3)
-            Stepper("Warmup: \(params.warmupMin) min", value: Binding(
-                get: { params.warmupMin },
-                set: { cardioEx.tempoParams = TempoParams(warmupMin: $0, tempoMin: params.tempoMin, cooldownMin: params.cooldownMin, targetHRZone: params.targetHRZone) }
-            ), in: 0...30)
-            Stepper("Tempo: \(params.tempoMin) min", value: Binding(
-                get: { params.tempoMin },
-                set: { cardioEx.tempoParams = TempoParams(warmupMin: params.warmupMin, tempoMin: $0, cooldownMin: params.cooldownMin, targetHRZone: params.targetHRZone) }
-            ), in: 5...60)
-            Stepper("Cooldown: \(params.cooldownMin) min", value: Binding(
-                get: { params.cooldownMin },
-                set: { cardioEx.tempoParams = TempoParams(warmupMin: params.warmupMin, tempoMin: params.tempoMin, cooldownMin: $0, targetHRZone: params.targetHRZone) }
-            ), in: 0...30)
-
-        case .intervals:
-            let params = cardioEx.intervalParams ?? IntervalParams(reps: 10, distancePerRep: 100, restSeconds: 60)
-            Stepper("Reps: \(params.reps)", value: Binding(
-                get: { params.reps },
-                set: { cardioEx.intervalParams = IntervalParams(reps: $0, distancePerRep: params.distancePerRep, restSeconds: params.restSeconds) }
-            ), in: 1...30)
-
-        case .free:
-            EmptyView()
-        }
     }
 }
