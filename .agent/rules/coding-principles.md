@@ -12,3 +12,5 @@ trigger: always_on
 - Make sure everything is version controlled locally, but .gitignore anything that's not relevant etc.
 - If you are fixing Bugs from BUGS.MD promote your fix to human review section, also if asked to pick a bug, prioritize feeback of any pending human review ready bug before taking new bug. Add AI reply after each change in "promote your fix to human review section" Also make sure as you fix them: Is the bug really a bug; Is there any good reasons it's implemented like that.. make sure to address those in your fix; will the fix have any consequences (new bugs) fix those; does this need update in documentation. Do that
 - MAke sure to keep updating ARCHITECTURE.md and DATA_FORMAT.md as you make changes. Never make changes to REQUIREMENTS.md but feel free to suggest them to user via prompt.
+
+- Maybe use xcodebuild -project daily-activity-tracker.xcodeproj -scheme daily-activity-tracker -configuration Debug CODE_SIGNING_ALLOWED=NO analyze to find bugs

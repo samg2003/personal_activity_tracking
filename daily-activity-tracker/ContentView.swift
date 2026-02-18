@@ -19,6 +19,11 @@ struct ContentView: View {
                     Label("Goals", systemImage: "target")
                 }
 
+            WorkoutTabView()
+                .tabItem {
+                    Label("Workouts", systemImage: "dumbbell.fill")
+                }
+
             AnalyticsView()
                 .tabItem {
                     Label("Analytics", systemImage: "chart.bar")

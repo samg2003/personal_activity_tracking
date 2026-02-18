@@ -43,6 +43,18 @@ struct daily_activity_trackerApp: App {
             VacationDay.self,
             Goal.self,
             GoalActivity.self,
+            // Workout domain
+            MuscleGroup.self,
+            Exercise.self,
+            ExerciseMuscle.self,
+            WorkoutPlan.self,
+            WorkoutPlanDay.self,
+            StrengthPlanExercise.self,
+            CardioPlanExercise.self,
+            StrengthSession.self,
+            WorkoutSetLog.self,
+            CardioSession.self,
+            CardioSessionLog.self,
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
@@ -59,6 +71,7 @@ struct daily_activity_trackerApp: App {
                 .preferredColorScheme(.dark)
                 .onAppear {
                     seedCategoriesIfNeeded()
+                    ExerciseSeeder.seedIfNeeded(context: sharedModelContainer.mainContext)
                     setupNotifications()
                 }
         }

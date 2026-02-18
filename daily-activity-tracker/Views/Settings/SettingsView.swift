@@ -193,7 +193,29 @@ struct SettingsView: View {
             let goals = try modelContext.fetch(FetchDescriptor<Goal>())
             for goal in goals { modelContext.delete(goal) }
 
-            // 5. Delete Categories (EXCEPT Base Defaults)
+            // 5. Delete Workout data (leaf models first)
+            let strengthPlanEx = try modelContext.fetch(FetchDescriptor<StrengthPlanExercise>())
+            for item in strengthPlanEx { modelContext.delete(item) }
+
+            let cardioPlanEx = try modelContext.fetch(FetchDescriptor<CardioPlanExercise>())
+            for item in cardioPlanEx { modelContext.delete(item) }
+
+            let exerciseMuscles = try modelContext.fetch(FetchDescriptor<ExerciseMuscle>())
+            for item in exerciseMuscles { modelContext.delete(item) }
+
+            let planDays = try modelContext.fetch(FetchDescriptor<WorkoutPlanDay>())
+            for item in planDays { modelContext.delete(item) }
+
+            let workoutPlans = try modelContext.fetch(FetchDescriptor<WorkoutPlan>())
+            for item in workoutPlans { modelContext.delete(item) }
+
+            let exercises = try modelContext.fetch(FetchDescriptor<Exercise>())
+            for item in exercises { modelContext.delete(item) }
+
+            let muscleGroups = try modelContext.fetch(FetchDescriptor<MuscleGroup>())
+            for item in muscleGroups { modelContext.delete(item) }
+
+            // 6. Delete Categories (EXCEPT Base Defaults)
             let categories = try modelContext.fetch(FetchDescriptor<Category>())
             let defaultNames = Category.defaults.map { $0.name }
             for category in categories {
@@ -201,12 +223,6 @@ struct SettingsView: View {
                     modelContext.delete(category)
                 }
             }
-            
-            // 5. Ensure defaults exist (in case user deleted them previously or they are missing)
-            // If we kept them, good. If we deleted them because names matched but we want to reset?
-            // Actually, user invoked "Clear Data", usually implies "Reset to Factory".
-            // So we should probably keep defaults if they exist, or re-create them if they don't.
-            // The logic above keeps them if they exist.
             
             try modelContext.save()
             alertMessage = "All data cleared (Base categories preserved)."

@@ -47,6 +47,8 @@ final class Activity {
     var pausedParentId: UUID?
     /// When true, missed weekly/monthly occurrences carry forward to subsequent days until completed
     var carryForward: Bool = false
+    /// When true, this activity is managed by the Workout system (read-only in Activities view, tap → Workout Tab)
+    var isManagedByWorkout: Bool = false
 
     // HealthKit (future)
     var healthKitTypeID: String?
