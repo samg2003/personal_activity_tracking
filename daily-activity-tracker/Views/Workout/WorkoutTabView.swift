@@ -11,8 +11,21 @@ struct WorkoutTabView: View {
     @State private var showingNewPlan = false
     @State private var newPlanType: ExerciseType = .strength
 
+    // Session navigation
+    @State private var activeStrengthSession: StrengthSession?
+    @State private var showStrengthSession = false
+    @State private var showRecoveryAlert = false
+    @State private var recoverySession: StrengthSession?
+
+    // Summary navigation (for recent sessions)
+    @State private var selectedSummarySession: StrengthSession?
+
     private var planManager: WorkoutPlanManager {
         WorkoutPlanManager(modelContext: modelContext)
+    }
+
+    private var sessionManager: StrengthSessionManager {
+        StrengthSessionManager(modelContext: modelContext)
     }
 
     private var visiblePlans: [WorkoutPlan] {
@@ -23,6 +36,7 @@ struct WorkoutTabView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
+                    activeSessionBanner
                     todaySection
                     myPlansSection
                     quickLinksSection
@@ -56,6 +70,81 @@ struct WorkoutTabView: View {
                     NewPlanSheet(planType: newPlanType)
                 }
             }
+            .navigationDestination(isPresented: $showStrengthSession) {
+                if let session = activeStrengthSession {
+                    StrengthSessionView(session: session)
+                }
+            }
+            .sheet(item: $selectedSummarySession) { session in
+                NavigationStack {
+                    SessionSummaryView(session: session)
+                }
+            }
+            .onAppear {
+                checkForActiveSession()
+            }
+            .alert("Resume Workout?", isPresented: $showRecoveryAlert) {
+                Button("Resume") {
+                    if let session = recoverySession {
+                        activeStrengthSession = session
+                        showStrengthSession = true
+                    }
+                }
+                Button("Abandon", role: .destructive) {
+                    if let session = recoverySession {
+                        sessionManager.abandonSession(session)
+                        recoverySession = nil
+                    }
+                }
+            } message: {
+                if let session = recoverySession {
+                    Text("You have an unfinished \"\(session.dayLabel)\" session from \(session.startedAt.formatted(.relative(presentation: .named))). Would you like to continue?")
+                }
+            }
+        }
+    }
+
+    // MARK: - Active Session Banner
+
+    @ViewBuilder
+    private var activeSessionBanner: some View {
+        if let active = sessionManager.activeSession(), active.status != .completed && active.status != .abandoned {
+            Button {
+                activeStrengthSession = active
+                showStrengthSession = true
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: active.status == .paused ? "pause.circle.fill" : "bolt.fill")
+                        .font(.title3)
+                        .foregroundStyle(active.status == .paused ? .orange : .green)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Session In Progress")
+                            .font(.subheadline.weight(.semibold))
+                        Text("\(active.dayLabel) · \(active.durationFormatted)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    Text("Resume")
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.orange)
+                        .foregroundStyle(.white)
+                        .clipShape(Capsule())
+                }
+                .padding()
+                .background(Color.orange.opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.orange.opacity(0.3), lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -139,9 +228,12 @@ struct WorkoutTabView: View {
                 }
             }
 
-            // Start button (placeholder for W2/W3)
+            // Start button — wired for strength
             Button {
-                // Will be wired in W2/W3
+                if isStrength {
+                    startStrengthSession(day: day)
+                }
+                // Cardio will be wired in W3
             } label: {
                 Text(isStrength ? "Start Strength" : "Start Cardio")
                     .font(.subheadline.weight(.semibold))
@@ -151,6 +243,8 @@ struct WorkoutTabView: View {
                     .foregroundStyle(.white)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
             }
+            .disabled(!isStrength) // Cardio disabled until W3
+            .opacity(isStrength ? 1.0 : 0.6)
         }
         .padding()
         .background(Color(.systemGray6))
@@ -260,23 +354,52 @@ struct WorkoutTabView: View {
 
     @ViewBuilder
     private var recentSessionsSection: some View {
-        let sessions: [(String, String, String)] = buildRecentSessions()
+        let completedStrength = recentStrength.filter { $0.status == .completed }.prefix(5)
 
-        if !sessions.isEmpty {
+        if !completedStrength.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
                 Text("RECENT")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
 
-                ForEach(sessions, id: \.0) { (label, subtitle, duration) in
+                ForEach(Array(completedStrength)) { session in
+                    Button {
+                        selectedSummarySession = session
+                    } label: {
+                        HStack {
+                            Image(systemName: "dumbbell.fill")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                                .frame(width: 20)
+                            Text(session.dayLabel)
+                                .font(.body)
+                            Spacer()
+                            Text(session.date.formatted(.relative(presentation: .named)))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(session.durationFormatted)
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.tertiary)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                // Cardio recent (read-only, no tap for now)
+                ForEach(Array(recentCardio.filter { $0.status == .completed }.prefix(3))) { session in
                     HStack {
-                        Text(label)
+                        Image(systemName: "figure.run")
+                            .font(.caption)
+                            .foregroundStyle(.green)
+                            .frame(width: 20)
+                        Text(session.dayLabel)
                             .font(.body)
                         Spacer()
-                        Text(subtitle)
+                        Text(session.date.formatted(.relative(presentation: .named)))
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        Text(duration)
+                        Text(session.durationFormatted)
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.tertiary)
                     }
@@ -286,19 +409,30 @@ struct WorkoutTabView: View {
         }
     }
 
-    private func buildRecentSessions() -> [(String, String, String)] {
-        var result: [(String, String, String)] = []
+    // MARK: - Helpers
 
-        for s in recentStrength.prefix(3) where s.status == .completed {
-            let ago = s.date.formatted(.relative(presentation: .named))
-            result.append((s.dayLabel, ago, s.durationFormatted))
-        }
-        for s in recentCardio.prefix(3) where s.status == .completed {
-            let ago = s.date.formatted(.relative(presentation: .named))
-            result.append((s.dayLabel, ago, s.durationFormatted))
+    private func startStrengthSession(day: WorkoutPlanDay) {
+        // If there's already an active session, navigate to it
+        if let existing = sessionManager.activeSession() {
+            activeStrengthSession = existing
+            showStrengthSession = true
+            return
         }
 
-        return result.sorted { $0.1 < $1.1 }.prefix(5).map { $0 }
+        let session = sessionManager.startSession(for: day)
+        activeStrengthSession = session
+        showStrengthSession = true
+    }
+
+    private func checkForActiveSession() {
+        if let active = sessionManager.activeSession() {
+            // Only show recovery if session is from a different calendar day (app was killed)
+            if !Calendar.current.isDateInToday(active.startedAt) {
+                recoverySession = active
+                showRecoveryAlert = true
+            }
+            // If it's from today, the banner will show
+        }
     }
 }
 

@@ -194,14 +194,23 @@ struct SettingsView: View {
             for goal in goals { modelContext.delete(goal) }
 
             // 5. Delete Workout data (leaf models first)
+            let setLogs = try modelContext.fetch(FetchDescriptor<WorkoutSetLog>())
+            for item in setLogs { modelContext.delete(item) }
+
+            let strengthSessions = try modelContext.fetch(FetchDescriptor<StrengthSession>())
+            for item in strengthSessions { modelContext.delete(item) }
+
+            let cardioSessionLogs = try modelContext.fetch(FetchDescriptor<CardioSessionLog>())
+            for item in cardioSessionLogs { modelContext.delete(item) }
+
+            let cardioSessions = try modelContext.fetch(FetchDescriptor<CardioSession>())
+            for item in cardioSessions { modelContext.delete(item) }
+
             let strengthPlanEx = try modelContext.fetch(FetchDescriptor<StrengthPlanExercise>())
             for item in strengthPlanEx { modelContext.delete(item) }
 
             let cardioPlanEx = try modelContext.fetch(FetchDescriptor<CardioPlanExercise>())
             for item in cardioPlanEx { modelContext.delete(item) }
-
-            let exerciseMuscles = try modelContext.fetch(FetchDescriptor<ExerciseMuscle>())
-            for item in exerciseMuscles { modelContext.delete(item) }
 
             let planDays = try modelContext.fetch(FetchDescriptor<WorkoutPlanDay>())
             for item in planDays { modelContext.delete(item) }
@@ -209,11 +218,11 @@ struct SettingsView: View {
             let workoutPlans = try modelContext.fetch(FetchDescriptor<WorkoutPlan>())
             for item in workoutPlans { modelContext.delete(item) }
 
+            // Only delete user-created exercises; preserve pre-seeded library + muscle glossary
             let exercises = try modelContext.fetch(FetchDescriptor<Exercise>())
-            for item in exercises { modelContext.delete(item) }
-
-            let muscleGroups = try modelContext.fetch(FetchDescriptor<MuscleGroup>())
-            for item in muscleGroups { modelContext.delete(item) }
+            for ex in exercises where !ex.isPreSeeded {
+                modelContext.delete(ex)
+            }
 
             // 6. Delete Categories (EXCEPT Base Defaults)
             let categories = try modelContext.fetch(FetchDescriptor<Category>())
