@@ -12,6 +12,11 @@ enum PlanEditorComponents {
         @Binding var selectedIndex: Int
         var accentColor: Color = .orange
         let modelContext: ModelContext
+        /// Called after a color change that does NOT conflict (no exercises to resolve).
+        var onColorChange: ((WorkoutPlanDay) -> Void)? = nil
+        /// Called when linking would merge two days that both have exercises.
+        /// Parameters: (day being changed, new colorGroup, existing day in that group)
+        var onLinkConflict: ((_ day: WorkoutPlanDay, _ newGroup: Int, _ existingDay: WorkoutPlanDay) -> Void)? = nil
 
         var body: some View {
             HStack(spacing: 6) {
@@ -25,32 +30,73 @@ enum PlanEditorComponents {
                                 selectedIndex = index
                             }
                         },
-                        onLongPress: {
-                            cycleColor(day)
+                        colorMenu: {
+                            colorMenuItems(for: day)
                         }
                     )
                 }
             }
         }
 
-        private func cycleColor(_ day: WorkoutPlanDay) {
-            let next = (day.colorGroup + 2) % 8 - 1  // -1..6 cycle
-            day.colorGroup = next
+        @ViewBuilder
+        private func colorMenuItems(for day: WorkoutPlanDay) -> some View {
+            // Color choices
+            ForEach(0..<WorkoutPlanDay.linkColors.count, id: \.self) { group in
+                let color = WorkoutPlanDay.linkColors[group]
+                Button {
+                    setColor(day, group: group)
+                } label: {
+                    Label {
+                        Text(color.name)
+                    } icon: {
+                        Text(color.emoji)
+                    }
+                }
+                .disabled(day.colorGroup == group)
+            }
+
+            Divider()
+
+            Button(role: .destructive) {
+                setColor(day, group: -1)
+            } label: {
+                Label("Unlink", systemImage: "link.badge.plus")
+            }
+            .disabled(!day.isLinked)
+        }
+
+        private func setColor(_ day: WorkoutPlanDay, group: Int) {
+            let oldGroup = day.colorGroup
+
+            // Check for conflict: day has exercises AND target group already has days with exercises
+            if group >= 0 && day.hasExercises {
+                let existingInGroup = days.first {
+                    $0.id != day.id && $0.colorGroup == group && $0.hasExercises
+                }
+                if let existingDay = existingInGroup {
+                    // Conflict: let the parent handle it
+                    onLinkConflict?(day, group, existingDay)
+                    return
+                }
+            }
+
+            day.colorGroup = group
             try? modelContext.save()
+            onColorChange?(day)
         }
     }
 
     /// Single day pill in the week strip.
     /// - Tap: selects this day in the detail view
-    /// - Long-press: cycles the color group for day linking
+    /// - Long-press: shows context menu with link color options
     /// - Selected: hollow outline with the day's link color (or accent)
     /// - Non-selected linked: filled background tint
-    struct DayPill: View {
+    struct DayPill<Menu: View>: View {
         let day: WorkoutPlanDay
         let isSelected: Bool
         var accentColor: Color = .orange
         let onTap: () -> Void
-        var onLongPress: (() -> Void)? = nil
+        @ViewBuilder var colorMenu: () -> Menu
 
         private var dayColor: Color {
             guard day.isLinked, day.colorGroup >= 0, day.colorGroup < WorkoutPlanDay.linkColors.count else {
@@ -94,9 +140,7 @@ enum PlanEditorComponents {
                     .stroke(isSelected ? dayColor : .clear, lineWidth: 2)
             )
             .onTapGesture(perform: onTap)
-            .onLongPressGesture {
-                onLongPress?()
-            }
+            .contextMenu { colorMenu() }
         }
 
         /// Non-selected: linked days get a tinted fill, unlinked get gray.
@@ -302,9 +346,9 @@ enum PlanEditorComponents {
         let onDeactivate: () -> Void
 
         var body: some View {
-            if plan.isDraft {
+            if plan.isDraft || plan.isInactive {
                 Button(action: onActivate) {
-                    Text("Activate Plan")
+                    Text(plan.isDraft ? "Activate Plan" : "Reactivate Plan")
                         .font(.subheadline.weight(.semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)

@@ -27,6 +27,7 @@ final class WorkoutPlan {
 
     var isActive: Bool { status == .active }
     var isDraft: Bool { status == .draft }
+    var isInactive: Bool { status == .inactive }
 
     /// Sorted days Mon(1) → Sun(7)
     var sortedDays: [WorkoutPlanDay] {

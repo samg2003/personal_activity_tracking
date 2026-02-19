@@ -41,13 +41,35 @@ final class WorkoutPlanManager {
         try? modelContext.save()
     }
 
-    /// Deactivates a plan — shells get stoppedAt, disappear from dashboard.
+    /// Deactivates a plan — shells with no history are deleted, shells with logs are paused.
+    /// Paused shells are resumed if the plan is reactivated and the label still matches.
     func deactivatePlan(_ plan: WorkoutPlan) {
         plan.status = .inactive
+
+        // Retire all shell activities for this plan
         let shells = fetchShells(for: plan)
         for shell in shells {
-            shell.stoppedAt = Date()
+            retireShell(shell)
         }
+
+        // Retire or delete the container
+        if let containerID = plan.containerActivityID {
+            let descriptor = FetchDescriptor<Activity>(
+                predicate: #Predicate { $0.id == containerID }
+            )
+            if let container = try? modelContext.fetch(descriptor).first {
+                let liveChildren = container.children.filter { $0.stoppedAt == nil }
+                if liveChildren.isEmpty {
+                    if container.logs.isEmpty {
+                        modelContext.delete(container)
+                    } else {
+                        container.stoppedAt = Date()
+                    }
+                    plan.containerActivityID = nil
+                }
+            }
+        }
+
         try? modelContext.save()
     }
 
@@ -109,13 +131,16 @@ final class WorkoutPlanManager {
 
     /// Syncs shell activities for a plan: creates/updates shells with correct schedules.
     /// Non-linked days with the same label get numbered ("Push 1", "Push 2").
+    /// A single "Rest" shell covers all rest days without disambiguation.
     func syncShellActivities(for plan: WorkoutPlan) {
         guard plan.isActive else { return }
 
         let container = findOrCreateContainer(for: plan)
-        let trainingDays = plan.days.filter { !$0.isRest }
+        let trainingDays = plan.days.filter { !$0.isRest }.sorted { $0.weekday < $1.weekday }
+        let restDays = plan.days.filter { $0.isRest }
 
-        // Build shell labels: linked days share one shell, non-linked get disambiguated
+        // Build shell labels: linked days share one shell, non-linked get disambiguated.
+        // Sorted by weekday ensures "Push 1" = earliest weekday, "Push 2" = later.
         var shellSpecs: [(label: String, weekdays: [Int])] = []
         var handledIDs = Set<UUID>()
 
@@ -123,9 +148,8 @@ final class WorkoutPlanManager {
             guard !handledIDs.contains(day.id) else { continue }
 
             if day.isLinked, let plan = day.plan {
-                // Linked days: merge all days with same colorGroup into one shell
                 let linked = plan.days.filter { $0.colorGroup == day.colorGroup && !$0.isRest }
-                let weekdays = linked.map(\.weekday)
+                let weekdays = linked.map(\.weekday).sorted()
                 linked.forEach { handledIDs.insert($0.id) }
                 shellSpecs.append((label: day.dayLabel, weekdays: weekdays))
             } else {
@@ -134,16 +158,22 @@ final class WorkoutPlanManager {
             }
         }
 
-        // Disambiguate duplicate labels with numbering
+        // Disambiguate duplicate labels with numbering (skip "Rest" — handled separately)
         let labelCounts = Dictionary(grouping: shellSpecs, by: { $0.label })
         var labelCounters: [String: Int] = [:]
         shellSpecs = shellSpecs.map { spec in
+            guard spec.label != "Rest" else { return spec }
             if (labelCounts[spec.label]?.count ?? 0) > 1 {
                 let n = (labelCounters[spec.label] ?? 0) + 1
                 labelCounters[spec.label] = n
                 return (label: "\(spec.label) \(n)", weekdays: spec.weekdays)
             }
             return spec
+        }
+
+        // Add a single Rest shell combining all rest day weekdays
+        if !restDays.isEmpty {
+            shellSpecs.append((label: "Rest", weekdays: restDays.map(\.weekday)))
         }
 
         var activeShellIDs = Set<UUID>()
@@ -154,10 +184,10 @@ final class WorkoutPlanManager {
             activeShellIDs.insert(shell.id)
         }
 
-        // Stop shells for labels no longer in the plan
+        // Retire shells no longer in the plan (stale labels like old "Push")
         let allShells = fetchShells(for: plan)
         for shell in allShells where !activeShellIDs.contains(shell.id) {
-            shell.stoppedAt = Date()
+            retireShell(shell)
         }
 
         try? modelContext.save()
@@ -298,12 +328,22 @@ final class WorkoutPlanManager {
 
     /// Propagates exercise changes to all days with the same colorGroup.
     func propagateLinkedDays(from sourceDay: WorkoutPlanDay) {
-        guard sourceDay.isLinked, let plan = sourceDay.plan else { return }
+        guard sourceDay.isLinked, let plan = sourceDay.plan else {
+            // Even non-linked edits on active plans need shell sync
+            if let plan = sourceDay.plan, plan.isActive {
+                syncShellActivities(for: plan)
+            }
+            return
+        }
         let linkedDays = plan.days.filter {
             $0.id != sourceDay.id && $0.colorGroup == sourceDay.colorGroup
         }
         for targetDay in linkedDays {
             mirrorExercises(from: sourceDay, to: targetDay)
+        }
+        // Sync shell activities whenever an active plan changes
+        if plan.isActive {
+            syncShellActivities(for: plan)
         }
         try? modelContext.save()
     }
@@ -405,6 +445,8 @@ final class WorkoutPlanManager {
                 predicate: #Predicate { $0.id == containerID }
             )
             if let existing = try? modelContext.fetch(descriptor).first {
+                existing.category = fetchOrCreateWorkoutCategory()
+                existing.timeWindow = .allDay
                 return existing
             }
         }
@@ -416,6 +458,8 @@ final class WorkoutPlanManager {
         )
         if let existing = try? modelContext.fetch(descriptor).first {
             plan.containerActivityID = existing.id
+            existing.category = fetchOrCreateWorkoutCategory()
+            existing.timeWindow = .allDay
             return existing
         }
 
@@ -423,6 +467,8 @@ final class WorkoutPlanManager {
         let icon = plan.planType == .strength ? "dumbbell.fill" : "figure.run"
         let container = Activity(name: containerName, icon: icon, type: .container)
         container.isManagedByWorkout = true
+        container.timeWindow = .allDay
+        container.category = fetchOrCreateWorkoutCategory()
         modelContext.insert(container)
         plan.containerActivityID = container.id
         return container
@@ -437,6 +483,7 @@ final class WorkoutPlanManager {
         )
         if let existing = try? modelContext.fetch(descriptor).first {
             existing.stoppedAt = nil // Re-activate if was stopped
+            existing.category = fetchOrCreateWorkoutCategory()
             return existing
         }
 
@@ -444,13 +491,30 @@ final class WorkoutPlanManager {
         let shell = Activity(name: shellName, icon: shellIcon, type: .checkbox)
         shell.isManagedByWorkout = true
         shell.parent = container
+        shell.category = fetchOrCreateWorkoutCategory()
         modelContext.insert(shell)
         return shell
     }
 
     private func updateShellSchedule(_ shell: Activity, weekdays: [Int]) {
         shell.schedule = .weekly(weekdays)
-        shell.timeWindow = nil  // All Day section
+        shell.timeWindow = .allDay
+    }
+
+    /// Finds or creates the "Workout" category for managed activities.
+    private func fetchOrCreateWorkoutCategory() -> Category {
+        let workoutName = "Workout"
+        let descriptor = FetchDescriptor<Category>(
+            predicate: #Predicate { $0.name == workoutName }
+        )
+        if let existing = try? modelContext.fetch(descriptor).first {
+            return existing
+        }
+        // Create from defaults
+        let defaults = Category.defaults.first { $0.name == "Workout" }!
+        let category = Category(name: defaults.name, icon: defaults.icon, hexColor: defaults.color)
+        modelContext.insert(category)
+        return category
     }
 
     private func fetchShells(for plan: WorkoutPlan) -> [Activity] {
@@ -460,6 +524,17 @@ final class WorkoutPlanManager {
         )
         let all = (try? modelContext.fetch(descriptor)) ?? []
         return all.filter { $0.name.hasPrefix(prefix) }
+    }
+
+    /// Retires a shell: deletes if no log history, pauses via `stoppedAt` if it has logs.
+    /// Paused shells are automatically resumed by `findOrCreateShell` when the same
+    /// label reappears in a future sync.
+    private func retireShell(_ shell: Activity) {
+        if shell.logs.isEmpty {
+            modelContext.delete(shell)
+        } else {
+            shell.stoppedAt = Date()
+        }
     }
 
     private func mirrorExercises(from source: WorkoutPlanDay, to target: WorkoutPlanDay) {

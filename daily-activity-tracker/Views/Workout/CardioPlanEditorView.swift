@@ -12,6 +12,12 @@ struct CardioPlanEditorView: View {
     @State private var editingDayLabel: WorkoutPlanDay?
     @State private var showLabelEditor = false
 
+    // Link conflict resolution
+    @State private var showLinkConflict = false
+    @State private var conflictDay: WorkoutPlanDay?
+    @State private var conflictNewGroup: Int = -1
+    @State private var conflictExistingDay: WorkoutPlanDay?
+
     private var planManager: WorkoutPlanManager {
         WorkoutPlanManager(modelContext: modelContext)
     }
@@ -25,7 +31,21 @@ struct CardioPlanEditorView: View {
             VStack(spacing: 16) {
                 PlanEditorComponents.PlanHeader(plan: plan, icon: "figure.run", accentColor: .green)
 
-                PlanEditorComponents.WeekStrip(days: sortedDays, selectedIndex: $selectedDayIndex, accentColor: .green, modelContext: modelContext)
+                PlanEditorComponents.WeekStrip(
+                    days: sortedDays,
+                    selectedIndex: $selectedDayIndex,
+                    accentColor: .green,
+                    modelContext: modelContext,
+                    onColorChange: { day in
+                        planManager.propagateLinkedDays(from: day)
+                    },
+                    onLinkConflict: { day, newGroup, existingDay in
+                        conflictDay = day
+                        conflictNewGroup = newGroup
+                        conflictExistingDay = existingDay
+                        showLinkConflict = true
+                    }
+                )
 
                 dayDetail
 
@@ -59,6 +79,27 @@ struct CardioPlanEditorView: View {
             modelContext: modelContext,
             planManager: planManager
         )
+        .alert("Link Conflict", isPresented: $showLinkConflict) {
+            if let conflictDay, let conflictExistingDay {
+                Button("Keep \(conflictDay.weekdayName)'s exercises") {
+                    resolveLinkConflict(keepDay: conflictDay, discardDay: conflictExistingDay)
+                }
+                Button("Keep \(conflictExistingDay.weekdayName)'s exercises") {
+                    resolveLinkConflict(keepDay: conflictExistingDay, discardDay: conflictDay)
+                }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Both days have exercises. Which day's exercises should be kept? The other day's exercises will be replaced.")
+        }
+    }
+
+    /// Resolves a link conflict by setting the color group, mirroring from the keep day.
+    private func resolveLinkConflict(keepDay: WorkoutPlanDay, discardDay: WorkoutPlanDay) {
+        guard let day = conflictDay else { return }
+        day.colorGroup = conflictNewGroup
+        try? modelContext.save()
+        planManager.propagateLinkedDays(from: keepDay)
     }
 
     // MARK: - Day Detail (Swipable)
@@ -161,7 +202,7 @@ struct CardioPlanEditorView: View {
                     get: { cardioEx.sessionType },
                     set: {
                         cardioEx.sessionTypeRaw = $0.rawValue
-                        try? modelContext.save()
+                        savePlanChange(day)
                     }
                 )) {
                     ForEach(CardioSessionType.allCases) { type in
@@ -182,7 +223,7 @@ struct CardioPlanEditorView: View {
                         get: { cardioEx.targetDistance ?? 0 },
                         set: {
                             cardioEx.targetDistance = $0 > 0 ? $0 : nil
-                            try? modelContext.save()
+                            savePlanChange(day)
                         }
                     ), format: .number)
                     .keyboardType(.decimalPad)
@@ -204,7 +245,7 @@ struct CardioPlanEditorView: View {
                         get: { cardioEx.targetDurationMin ?? 0 },
                         set: {
                             cardioEx.targetDurationMin = $0 > 0 ? $0 : nil
-                            try? modelContext.save()
+                            savePlanChange(day)
                         }
                     ), format: .number)
                     .keyboardType(.numberPad)
@@ -274,9 +315,17 @@ struct CardioPlanEditorView: View {
         planManager.propagateLinkedDays(from: day)
     }
 
+    private func savePlanChange(_ day: WorkoutPlanDay) {
+        try? modelContext.save()
+        planManager.propagateLinkedDays(from: day)
+    }
+
     private func toggleRest(_ day: WorkoutPlanDay) {
         day.isRest.toggle()
         day.dayLabel = day.isRest ? "Rest" : ""
         try? modelContext.save()
+        if plan.isActive {
+            planManager.syncShellActivities(for: plan)
+        }
     }
 }

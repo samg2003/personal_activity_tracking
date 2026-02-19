@@ -13,6 +13,12 @@ struct StrengthPlanEditorView: View {
     @State private var editLabelText: String = ""
     @State private var showLabelEditor = false
 
+    // Link conflict resolution
+    @State private var showLinkConflict = false
+    @State private var conflictDay: WorkoutPlanDay?
+    @State private var conflictNewGroup: Int = -1
+    @State private var conflictExistingDay: WorkoutPlanDay?
+
     private var planManager: WorkoutPlanManager {
         WorkoutPlanManager(modelContext: modelContext)
     }
@@ -26,7 +32,21 @@ struct StrengthPlanEditorView: View {
             VStack(spacing: 16) {
                 PlanEditorComponents.PlanHeader(plan: plan, icon: "dumbbell.fill", accentColor: .orange)
 
-                PlanEditorComponents.WeekStrip(days: sortedDays, selectedIndex: $selectedDayIndex, accentColor: .orange, modelContext: modelContext)
+                PlanEditorComponents.WeekStrip(
+                    days: sortedDays,
+                    selectedIndex: $selectedDayIndex,
+                    accentColor: .orange,
+                    modelContext: modelContext,
+                    onColorChange: { day in
+                        planManager.propagateLinkedDays(from: day)
+                    },
+                    onLinkConflict: { day, newGroup, existingDay in
+                        conflictDay = day
+                        conflictNewGroup = newGroup
+                        conflictExistingDay = existingDay
+                        showLinkConflict = true
+                    }
+                )
 
                 dayDetail
                 volumeSection
@@ -60,6 +80,28 @@ struct StrengthPlanEditorView: View {
             modelContext: modelContext,
             planManager: planManager
         )
+        .alert("Link Conflict", isPresented: $showLinkConflict) {
+            if let conflictDay, let conflictExistingDay {
+                Button("Keep \(conflictDay.weekdayName)'s exercises") {
+                    resolveLinkConflict(keepDay: conflictDay, discardDay: conflictExistingDay)
+                }
+                Button("Keep \(conflictExistingDay.weekdayName)'s exercises") {
+                    resolveLinkConflict(keepDay: conflictExistingDay, discardDay: conflictDay)
+                }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Both days have exercises. Which day's exercises should be kept? The other day's exercises will be replaced.")
+        }
+    }
+
+    /// Resolves a link conflict by setting the color group, mirroring from the keep day.
+    private func resolveLinkConflict(keepDay: WorkoutPlanDay, discardDay: WorkoutPlanDay) {
+        guard let day = conflictDay else { return }
+        day.colorGroup = conflictNewGroup
+        try? modelContext.save()
+        // Mirror from keepDay to all linked days in the group
+        planManager.propagateLinkedDays(from: keepDay)
     }
 
     // MARK: - Day Detail (Swipable)
@@ -204,7 +246,7 @@ struct StrengthPlanEditorView: View {
                         Button {
                             if planEx.rir > 0 {
                                 planEx.rir -= 1
-                                try? modelContext.save()
+                                savePlanChange(day)
                             }
                         } label: {
                             Image(systemName: "minus")
@@ -222,7 +264,7 @@ struct StrengthPlanEditorView: View {
                         Button {
                             if planEx.rir < 5 {
                                 planEx.rir += 1
-                                try? modelContext.save()
+                                savePlanChange(day)
                             }
                         } label: {
                             Image(systemName: "plus")
@@ -442,6 +484,9 @@ struct StrengthPlanEditorView: View {
             day.dayLabel = planManager.autoDetectDayLabel(for: day)
         }
         try? modelContext.save()
+        if plan.isActive {
+            planManager.syncShellActivities(for: plan)
+        }
     }
 
     private func colorForStatus(_ status: VolumeStatus) -> Color {
