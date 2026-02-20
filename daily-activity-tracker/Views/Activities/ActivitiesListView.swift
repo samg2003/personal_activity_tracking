@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 /// Full activity management view — edit, reorder, delete, archive
 struct ActivitiesListView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.editMode) private var editMode
     @Query(sort: \Activity.sortOrder) private var allActivities: [Activity]
     @Query(sort: \Category.sortOrder) private var categories: [Category]
 
@@ -132,6 +133,7 @@ struct ActivitiesListView: View {
             pausedSection
         }
         .listStyle(.insetGrouped)
+        .scrollDismissesKeyboard(.interactively)
         .searchable(text: $searchText, prompt: "Search activities")
         .navigationTitle("Activities")
         .toolbar {
@@ -711,7 +713,9 @@ struct ActivitiesListView: View {
     @ViewBuilder
     private func standaloneActivityRow(_ activity: Activity) -> some View {
         Button {
-            editingActivity = activity
+            if editMode?.wrappedValue != .active {
+                editingActivity = activity
+            }
         } label: {
             HStack(spacing: 12) {
                 // Circle icon badge

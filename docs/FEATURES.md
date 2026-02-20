@@ -7,6 +7,5 @@
 - Currently everything gets deleted when i delete curr data. Ensure deleting importing, exporting, ensures default categories, exercises, muscle groups, etc. is not impacted. 
 - when i click activities in main dashboard to either load activities, or activities in activities page to edit, it's super slow 
 - allow user to edit exercises
-- cumulative needs to be sticky at top, and should alwyas be all day only.. 
 - Goal needs to have metric for it to be active. If it's checkbox activity as metric it should show (expected consistency (user set, defaul is 80%), and actual consistency since goal started or last 365 days whichever is sooner)
 - Biggest win logic is fucked -50k steps is shown as biggest win, i guess it doesnt know if things need to go up or down, maybe do only if it's guranteed, it should also show bunch of biggest wins, not just 1. Maybe for unknowns it can add as biggest changes?, but think of this logic extensively. IF we need go up or go down or stay close to goal, is better for value or metric, cumulative, etc. use the predictor from keywords as we used everywhere for this, but allow user to set it in advanced. 
