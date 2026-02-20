@@ -12,6 +12,10 @@ struct DatePickerBar: View {
     @State private var daysToShow = 14
     private let pageSize = 14
 
+    // Pre-computed caches — rebuilt in recomputeStatuses()
+    @State private var statusCache: [Date: (rate: Double, allSkipped: Bool)] = [:]
+    @State private var vacationSet: Set<Date> = []
+
     private var dates: [Date] {
         let calendar = Calendar.current
         let today = Date().startOfDay
@@ -19,20 +23,19 @@ struct DatePickerBar: View {
             calendar.date(byAdding: .day, value: -$0, to: today)
         }.reversed()
     }
-    
+
     private func isVacation(_ date: Date) -> Bool {
-        vacationDays.contains { $0.date.isSameDay(as: date) }
+        vacationSet.contains(date.startOfDay)
     }
 
-    private func completionStatus(_ date: Date) -> (rate: Double, allSkipped: Bool) {
-        let status = scheduleEngine.completionStatus(on: date, activities: allActivities, allActivities: allActivities, logs: allLogs, vacationDays: vacationDays)
-        return (status.rate, status.allSkipped)
+    private func cachedStatus(_ date: Date) -> (rate: Double, allSkipped: Bool) {
+        statusCache[date.startOfDay] ?? (rate: -1, allSkipped: false)
     }
 
     /// Dot color below the date number indicating completion
     private func dotColor(_ date: Date) -> Color? {
         if isVacation(date) { return .blue }
-        let status = completionStatus(date)
+        let status = cachedStatus(date)
         if status.rate < 0 { return nil }
         if status.allSkipped { return .orange }
         if status.rate >= 1.0 { return .green }
@@ -43,7 +46,7 @@ struct DatePickerBar: View {
     /// Background tint for non-selected chips based on completion
     private func chipBackground(_ date: Date) -> Color {
         if isVacation(date) { return .blue.opacity(0.15) }
-        let status = completionStatus(date)
+        let status = cachedStatus(date)
         if status.rate < 0 { return Color(.systemGray6).opacity(0.5) }
         if status.allSkipped { return .orange.opacity(0.15) }
         if status.rate >= 1.0 { return .green.opacity(0.2) }
@@ -53,6 +56,21 @@ struct DatePickerBar: View {
 
     private var isViewingToday: Bool {
         selectedDate.isSameDay(as: Date())
+    }
+
+    /// Rebuild status cache for all visible dates in one pass
+    private func recomputeStatuses() {
+        vacationSet = Set(vacationDays.map { $0.date.startOfDay })
+        var cache: [Date: (rate: Double, allSkipped: Bool)] = [:]
+        for date in dates {
+            let s = scheduleEngine.completionStatus(
+                on: date, activities: allActivities,
+                allActivities: allActivities, logs: allLogs,
+                vacationDays: vacationDays
+            )
+            cache[date.startOfDay] = (s.rate, s.allSkipped)
+        }
+        statusCache = cache
     }
 
     var body: some View {
@@ -93,6 +111,10 @@ struct DatePickerBar: View {
                 }
             }
         }
+        .task { recomputeStatuses() }
+        .onChange(of: allLogs.count) { recomputeStatuses() }
+        .onChange(of: allActivities.count) { recomputeStatuses() }
+        .onChange(of: daysToShow) { recomputeStatuses() }
     }
 
     /// Floating "Today →" pill that appears when not viewing today

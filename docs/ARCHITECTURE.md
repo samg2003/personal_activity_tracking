@@ -441,6 +441,22 @@ daily-activity-tracker/
 
 ---
 
+### ADR-21: Cached Derived State for View Performance
+
+**Decision**: Heavy computed properties in `DashboardView`, `DatePickerBar`, `AnalyticsView`, and `GoalsView` are replaced with `@State` cached values that recompute only on data changes (`.task {}` + `.onChange(of:)`), not on every SwiftUI body evaluation.
+
+**Rationale**: With ~1100+ logs and 30+ activities, the computed property cascade was causing noticeable UI jank — each body eval triggered O(logs) filtering across 5 simultaneously alive tabs. Caching cuts this to a single recomputation per data mutation.
+
+**Pattern**:
+1. Replace expensive computed vars with `@State private var cached…` properties
+2. Add a `recompute…()` method that computes all derived data in one pass
+3. Wire `.task {}` for initial compute and `.onChange(of: dataSource.count)` for updates
+4. Keep thin computed aliases (`var x { cachedX }`) to minimize call-site changes
+
+**Also applied**: `ScheduleEngine` streak/rate methods now pre-index activity logs by date (`Dictionary(grouping:)`) for O(1) per-day lookups instead of O(n) linear scans over 3650 days.
+
+---
+
 ## Phased Implementation Strategy
 
 | Phase                | Scope                                                                                                                           | Deliverable                                          |
@@ -451,3 +467,4 @@ daily-activity-tracker/
 | **P3: Analytics**    | InsightSummaryCard, Heatmap, ValueChart, PhotoComparisonCard, streaks, behind schedule, biggest wins, photo progress, deep dive | Activity-focused analytics and habit insights        |
 | **P4: Integrations** | HealthKit, Notifications, EventKit                                                                                              | External system connections                          |
 | **P5: Polish**       | Past-day browser, vacation mode, haptics, undo                                                                                  | Full UX refinement including editing, deleting, etc. |
+

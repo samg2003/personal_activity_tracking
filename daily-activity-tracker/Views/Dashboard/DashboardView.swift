@@ -37,14 +37,26 @@ struct DashboardView: View {
 
     private let scheduleEngine: ScheduleEngineProtocol = ScheduleEngine()
 
-    // MARK: - Derived Data
+    // MARK: - Cached Derived Data (recomputed in recomputeDashboard)
+
+    @State private var cachedTodayLogs: [ActivityLog] = []
+    @State private var cachedTodayActivities: [Activity] = []
+    @State private var cachedAllDayActivities: [Activity] = []
+    @State private var cachedPendingTimed: [Activity] = []
+    @State private var cachedStickyPending: [Activity] = []
+    @State private var cachedCompleted: [Activity] = []
+    @State private var cachedSkippedActivities: [Activity] = []
+    @State private var cachedCompletionFraction: Double = 0
+    @State private var cachedGroupedBySlot: [(slot: TimeSlot, activities: [Activity])] = []
+
+    // MARK: - Live Accessors (needed for interactive actions)
 
     private var today: Date { selectedDate }
 
     private var activityStatus: ActivityStatusService {
         ActivityStatusService(
             date: today,
-            todayLogs: todayLogs,
+            todayLogs: cachedTodayLogs,
             allLogs: allLogs,
             allActivities: allActivities,
             vacationDays: vacationDays,
@@ -52,93 +64,131 @@ struct DashboardView: View {
         )
     }
 
-    private var todayActivities: [Activity] {
-        scheduleEngine.activitiesForToday(from: allActivities, on: today, vacationDays: vacationDays, logs: allLogs)
-    }
-
-    private var todayLogs: [ActivityLog] {
-        allLogs.filter { $0.date.isSameDay(as: today) }
-    }
-
-    // All Day cumulative items (outside time buckets)
-    private var allDayActivities: [Activity] {
-        todayActivities.filter { $0.type == .cumulative && $0.timeWindow?.slot == .allDay }
-    }
-
-    // Non-cumulative pending items in time buckets
-    private var pendingTimed: [Activity] {
-        todayActivities.filter { activity in
-            activity.schedule.type != .sticky
-            && !(activity.type == .cumulative && activity.timeWindow?.slot == .allDay)
-            && !isFullyCompleted(activity)
-            && !isSkipped(activity)
-        }
-    }
-
-    private var stickyPending: [Activity] {
-        todayActivities.filter { activity in
-            activity.schedule.type == .sticky && !isFullyCompleted(activity) && !isSkipped(activity)
-        }
-    }
-
-    private var completed: [Activity] {
-        todayActivities.filter { activity in
-            if activity.type == .container {
-                // Include container if ANY child has a completed session
-                return containerApplicableChildren(activity).contains { child in
-                    if child.isMultiSession {
-                        return child.timeSlots.contains(where: { isSessionCompleted(child, slot: $0) })
-                    }
-                    return isFullyCompleted(child)
-                }
-            }
-            if activity.isMultiSession {
-                return activity.timeSlots.contains(where: { isSessionCompleted(activity, slot: $0) })
-            }
-            return isFullyCompleted(activity)
-        }
-    }
+    // Convenience aliases that read from cache
+    private var todayActivities: [Activity] { cachedTodayActivities }
+    private var todayLogs: [ActivityLog] { cachedTodayLogs }
+    private var allDayActivities: [Activity] { cachedAllDayActivities }
+    private var pendingTimed: [Activity] { cachedPendingTimed }
+    private var stickyPending: [Activity] { cachedStickyPending }
+    private var completed: [Activity] { cachedCompleted }
+    private var skippedActivities: [Activity] { cachedSkippedActivities }
+    private var completionFraction: Double { cachedCompletionFraction }
+    private var groupedBySlot: [(slot: TimeSlot, activities: [Activity])] { cachedGroupedBySlot }
 
     /// All container children applicable today: scheduled + carry-forward
     private func containerApplicableChildren(_ container: Activity) -> [Activity] {
         scheduleEngine.applicableChildren(for: container, on: today, allActivities: allActivities, logs: allLogs)
     }
 
-    private var skippedActivities: [Activity] {
-        todayActivities.filter { activity in
+    private var isSelectedDateVacation: Bool {
+        vacationDays.contains { $0.date.isSameDay(as: selectedDate) }
+    }
+
+    // MARK: - Dashboard Recomputation
+
+    /// Recomputes all cached derived data in a single pass.
+    /// Called from .task {} and .onChange(of:) — NOT on every body eval.
+    private func recomputeDashboard() {
+        let date = selectedDate
+
+        // Step 1: Filter today's logs (was O(allLogs) every body eval)
+        let tLogs = allLogs.filter { $0.date.isSameDay(as: date) }
+        cachedTodayLogs = tLogs
+
+        // Step 2: Build ActivityStatusService once for this computation
+        let status = ActivityStatusService(
+            date: date,
+            todayLogs: tLogs,
+            allLogs: allLogs,
+            allActivities: allActivities,
+            vacationDays: vacationDays,
+            scheduleEngine: scheduleEngine
+        )
+
+        // Step 3: Compute today's activities
+        let tActivities = scheduleEngine.activitiesForToday(
+            from: allActivities, on: date, vacationDays: vacationDays, logs: allLogs
+        )
+        cachedTodayActivities = tActivities
+
+        // Step 4: Partition into categories (single pass over tActivities)
+        var allDay: [Activity] = []
+        var pending: [Activity] = []
+        var sticky: [Activity] = []
+        var done: [Activity] = []
+        var skipped: [Activity] = []
+
+        for activity in tActivities {
+            // All-day cumulative
+            if activity.type == .cumulative && activity.timeWindow?.slot == .allDay {
+                allDay.append(activity)
+            }
+
+            // Completed check
+            let isComplete: Bool
             if activity.type == .container {
-                // Include container if ANY child has a skipped session (and not completed)
-                return containerApplicableChildren(activity).contains { child in
+                let children = scheduleEngine.applicableChildren(for: activity, on: date, allActivities: allActivities, logs: allLogs)
+                isComplete = children.contains { child in
                     if child.isMultiSession {
-                        return child.timeSlots.contains(where: { isSessionSkipped(child, slot: $0) && !isSessionCompleted(child, slot: $0) })
+                        return child.timeSlots.contains(where: { status.isSessionCompleted(child, slot: $0) })
                     }
-                    return isSkipped(child) && !isFullyCompleted(child)
+                    return status.isFullyCompleted(child)
                 }
+            } else if activity.isMultiSession {
+                isComplete = activity.timeSlots.contains(where: { status.isSessionCompleted(activity, slot: $0) })
+            } else {
+                isComplete = status.isFullyCompleted(activity)
             }
-            if activity.isMultiSession {
-                return activity.timeSlots.contains(where: { isSessionSkipped(activity, slot: $0) && !isSessionCompleted(activity, slot: $0) })
-            }
-            return isSkipped(activity) && !isFullyCompleted(activity)
-        }
-    }
+            if isComplete { done.append(activity) }
 
-    private var completionFraction: Double {
-        let goalsOnly = todayActivities.filter { $0.schedule.type != .sticky && $0.schedule.type != .adhoc }
-        return activityStatus.completionFraction(for: goalsOnly)
-    }
-
-    private var groupedBySlot: [(slot: TimeSlot, activities: [Activity])] {
-        var slotMap: [TimeSlot: [Activity]] = [:]
-        for activity in pendingTimed {
+            // Skipped check
+            let isSkip: Bool
             if activity.type == .container {
-                // Expand container to each slot where it has pending children
-                let children = containerApplicableChildren(activity)
+                let children = scheduleEngine.applicableChildren(for: activity, on: date, allActivities: allActivities, logs: allLogs)
+                isSkip = children.contains { child in
+                    if child.isMultiSession {
+                        return child.timeSlots.contains(where: { status.isSessionSkipped(child, slot: $0) && !status.isSessionCompleted(child, slot: $0) })
+                    }
+                    return status.isSkipped(child) && !status.isFullyCompleted(child)
+                }
+            } else if activity.isMultiSession {
+                isSkip = activity.timeSlots.contains(where: { status.isSessionSkipped(activity, slot: $0) && !status.isSessionCompleted(activity, slot: $0) })
+            } else {
+                isSkip = status.isSkipped(activity) && !status.isFullyCompleted(activity)
+            }
+            if isSkip { skipped.append(activity) }
+
+            // Pending timed
+            let fullyCompleted = status.isFullyCompleted(activity)
+            let fullySkipped = status.isSkipped(activity)
+            if activity.schedule.type == .sticky {
+                if !fullyCompleted && !fullySkipped { sticky.append(activity) }
+            } else if !(activity.type == .cumulative && activity.timeWindow?.slot == .allDay)
+                        && !fullyCompleted && !fullySkipped {
+                pending.append(activity)
+            }
+        }
+
+        cachedAllDayActivities = allDay
+        cachedCompleted = done
+        cachedSkippedActivities = skipped
+        cachedStickyPending = sticky
+        cachedPendingTimed = pending
+
+        // Step 5: Completion fraction
+        let goalsOnly = tActivities.filter { $0.schedule.type != .sticky && $0.schedule.type != .adhoc }
+        cachedCompletionFraction = status.completionFraction(for: goalsOnly)
+
+        // Step 6: Group pending by time slot
+        var slotMap: [TimeSlot: [Activity]] = [:]
+        for activity in pending {
+            if activity.type == .container {
+                let children = scheduleEngine.applicableChildren(for: activity, on: date, allActivities: allActivities, logs: allLogs)
                 for slot in [TimeSlot.allDay, .morning, .afternoon, .evening] {
                     let hasPendingChildInSlot = children.contains { child in
                         let inSlot: Bool
                         if child.isMultiSession {
-                            // For carry-forward children, only count overdue slots
-                            if let cfSlots = scheduleEngine.carriedForwardSlots(for: child, on: today, logs: allLogs) {
+                            if let cfSlots = scheduleEngine.carriedForwardSlots(for: child, on: date, logs: allLogs) {
                                 inSlot = cfSlots.slots.contains(slot)
                             } else {
                                 inSlot = child.timeSlots.contains(slot)
@@ -146,28 +196,26 @@ struct DashboardView: View {
                         } else {
                             inSlot = (child.timeWindow?.slot ?? .morning) == slot
                         }
-                        // Only count if child has a pending session in this slot
                         guard inSlot else { return false }
                         if child.isMultiSession {
-                            return !isSessionCompleted(child, slot: slot) && !isSessionSkipped(child, slot: slot)
+                            return !status.isSessionCompleted(child, slot: slot) && !status.isSessionSkipped(child, slot: slot)
                         }
-                        return !isFullyCompleted(child) && !isSkipped(child)
+                        return !status.isFullyCompleted(child) && !status.isSkipped(child)
                     }
                     if hasPendingChildInSlot {
                         slotMap[slot, default: []].append(activity)
                     }
                 }
             } else if activity.isMultiSession {
-                // For carry-forward, only show overdue slots
                 let slotsToCheck: [TimeSlot]
-                if let cfSlots = scheduleEngine.carriedForwardSlots(for: activity, on: today, logs: allLogs) {
+                if let cfSlots = scheduleEngine.carriedForwardSlots(for: activity, on: date, logs: allLogs) {
                     slotsToCheck = cfSlots.slots
                 } else {
                     slotsToCheck = activity.timeSlots
                 }
                 for slot in slotsToCheck {
-                    if !isSessionCompleted(activity, slot: slot)
-                        && !isSessionSkipped(activity, slot: slot) {
+                    if !status.isSessionCompleted(activity, slot: slot)
+                        && !status.isSessionSkipped(activity, slot: slot) {
                         slotMap[slot, default: []].append(activity)
                     }
                 }
@@ -176,14 +224,10 @@ struct DashboardView: View {
                 slotMap[slot, default: []].append(activity)
             }
         }
-        return [TimeSlot.allDay, .morning, .afternoon, .evening].compactMap { slot in
+        cachedGroupedBySlot = [TimeSlot.allDay, .morning, .afternoon, .evening].compactMap { slot in
             guard let acts = slotMap[slot], !acts.isEmpty else { return nil }
             return (slot, acts)
         }
-    }
-
-    private var isSelectedDateVacation: Bool {
-        vacationDays.contains { $0.date.isSameDay(as: selectedDate) }
     }
 
     var body: some View {
@@ -229,10 +273,18 @@ struct DashboardView: View {
                 .padding()
             }
             .background(Color(.systemGroupedBackground))
+            .task {
+                recomputeDashboard()
+            }
             .onChange(of: allLogs.count) {
+                recomputeDashboard()
                 if allDone { completedExpanded = true }
             }
+            .onChange(of: allActivities.count) {
+                recomputeDashboard()
+            }
             .onChange(of: selectedDate) {
+                recomputeDashboard()
                 completedExpanded = allDone
             }
             .navigationTitle(selectedDate.isSameDay(as: Date()) ? "Today" : selectedDate.shortDisplay)

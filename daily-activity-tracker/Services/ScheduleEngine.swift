@@ -310,7 +310,9 @@ extension ScheduleEngine {
             return containerCompletionRate(for: activity, days: days, logs: logs, vacationSet: vacationSet, allActivities: allActivities)
         }
 
+        // Pre-index: group this activity's logs by day for O(1) lookup
         let activityLogs = logs.filter { $0.activity?.id == activity.id }
+        let logsByDay = Dictionary(grouping: activityLogs) { $0.date.startOfDay }
         var totalExpected = 0
         var totalCompleted = 0
 
@@ -323,7 +325,7 @@ extension ScheduleEngine {
             let schedule = activity.scheduleActive(on: day)
             guard schedule.isScheduled(on: day) else { continue }
 
-            let dayActivityLogs = activityLogs.filter { $0.date.startOfDay == day }
+            let dayActivityLogs = logsByDay[day] ?? []
             let slots = activity.timeSlotsActive(on: day)
             let sessions = activity.sessionsPerDay(on: day)
 
@@ -440,11 +442,13 @@ extension ScheduleEngine {
             return containerStreak(for: activity, mode: .current, logs: logs, allActivities: allActivities, vacationSet: vacationSet)
         }
 
+        // Pre-index logs by date for O(1) lookups
         let activityLogs = logs.filter { $0.activity?.id == activity.id }
+        let logsByDay = Dictionary(grouping: activityLogs) { $0.date.startOfDay }
 
         var streak = 0
         var day = Date().startOfDay
-        if !isActivityDayCompleted(activityLogs: activityLogs, activity: activity, day: day) {
+        if !isActivityDayCompletedIndexed(logsByDay: logsByDay, activity: activity, day: day) {
             guard let prev = calendar.date(byAdding: .day, value: -1, to: day) else { return 0 }
             day = prev
         }
@@ -456,11 +460,11 @@ extension ScheduleEngine {
             let schedule = activity.scheduleActive(on: day)
             if !schedule.isScheduled(on: day) {
                 // not scheduled — pass through
-            } else if isActivityDayCompleted(activityLogs: activityLogs, activity: activity, day: day) {
+            } else if isActivityDayCompletedIndexed(logsByDay: logsByDay, activity: activity, day: day) {
                 streak += 1
             } else if vacationSet.contains(day) {
                 // vacation — pass through
-            } else if isActivityDayFullySkipped(activityLogs: activityLogs, day: day) {
+            } else if isActivityDayFullySkippedIndexed(logsByDay: logsByDay, day: day) {
                 // all sessions skipped, none completed — pass through
             } else {
                 break
@@ -486,7 +490,9 @@ extension ScheduleEngine {
             return containerStreak(for: activity, mode: .longest, logs: logs, allActivities: allActivities, vacationSet: vacationSet)
         }
 
+        // Pre-index logs by date for O(1) lookups
         let activityLogs = logs.filter { $0.activity?.id == activity.id }
+        let logsByDay = Dictionary(grouping: activityLogs) { $0.date.startOfDay }
         guard let earliest = activity.createdAt ?? activityLogs.map(\.date).min() else { return 0 }
 
         var maxStreak = 0
@@ -500,10 +506,10 @@ extension ScheduleEngine {
             let schedule = activity.scheduleActive(on: day)
             if !schedule.isScheduled(on: day) || vacationSet.contains(day) {
                 // not scheduled or vacation — pass through
-            } else if isActivityDayCompleted(activityLogs: activityLogs, activity: activity, day: day) {
+            } else if isActivityDayCompletedIndexed(logsByDay: logsByDay, activity: activity, day: day) {
                 current += 1
                 maxStreak = max(maxStreak, current)
-            } else if isActivityDayFullySkipped(activityLogs: activityLogs, day: day) {
+            } else if isActivityDayFullySkippedIndexed(logsByDay: logsByDay, day: day) {
                 // all sessions skipped, none completed — pass through
             } else {
                 current = 0
@@ -604,6 +610,22 @@ extension ScheduleEngine {
     /// Whether a day is fully skipped (has skip logs but no completions)
     private func isActivityDayFullySkipped(activityLogs: [ActivityLog], day: Date) -> Bool {
         let dayLogs = activityLogs.filter { $0.date.startOfDay == day }
+        let hasSkip = dayLogs.contains { $0.status == .skipped }
+        let hasCompletion = dayLogs.contains { $0.status == .completed }
+        return hasSkip && !hasCompletion
+    }
+
+    // MARK: - Indexed Variants (O(1) per-day lookup)
+
+    private func isActivityDayCompletedIndexed(logsByDay: [Date: [ActivityLog]], activity: Activity, day: Date) -> Bool {
+        let dayLogs = logsByDay[day] ?? []
+        let completed = dayLogs.filter { $0.status == .completed }.count
+        return completed >= activity.sessionsPerDay(on: day)
+    }
+
+    private func isActivityDayFullySkippedIndexed(logsByDay: [Date: [ActivityLog]], day: Date) -> Bool {
+        let dayLogs = logsByDay[day] ?? []
+        guard !dayLogs.isEmpty else { return false }
         let hasSkip = dayLogs.contains { $0.status == .skipped }
         let hasCompletion = dayLogs.contains { $0.status == .completed }
         return hasSkip && !hasCompletion

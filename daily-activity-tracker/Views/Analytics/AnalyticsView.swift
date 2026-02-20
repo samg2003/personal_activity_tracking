@@ -11,6 +11,12 @@ struct AnalyticsView: View {
     @State private var showAllStreaks = false
     @State private var selectedTab: AnalyticsTab = .activities
 
+    // Cached analytics data (computed in recomputeAnalytics)
+    @State private var cachedSortedStreaks: [(activity: Activity, streak: Int)] = []
+    @State private var cachedBehindSchedule: [(activity: Activity, rate: Double)] = []
+    @State private var cachedBiggestWins: [(activity: Activity, delta: String)] = []
+    @State private var cachedDeepDiveGroups: [(label: String, icon: String, activities: [Activity])] = []
+
     enum AnalyticsTab: String, CaseIterable {
         case activities = "Activities"
         case workouts = "Workouts"
@@ -37,113 +43,101 @@ struct AnalyticsView: View {
         }
     }
 
-    // MARK: - Deep Dive Groups
+    // Convenience aliases for cached data
+    private var sortedStreaks: [(activity: Activity, streak: Int)] { cachedSortedStreaks }
+    private var bestStreak: (name: String, count: Int)? {
+        cachedSortedStreaks.first.map { ($0.activity.name, $0.streak) }
+    }
+    private var behindSchedule: [(activity: Activity, rate: Double)] { cachedBehindSchedule }
+    private var biggestWins: [(activity: Activity, delta: String)] { cachedBiggestWins }
+    private var deepDiveGroups: [(label: String, icon: String, activities: [Activity])] { cachedDeepDiveGroups }
 
-    private var deepDiveGroups: [(label: String, icon: String, activities: [Activity])] {
+    // MARK: - Analytics Recomputation
+
+    private func recomputeAnalytics() {
+        let topLevel = topLevelActivities
+        let logsByActivity = Dictionary(grouping: allLogs) { $0.activity?.id ?? UUID() }
+
+        // Streaks
+        cachedSortedStreaks = topLevel
+            .map { (activity: $0, streak: scheduleEngine.currentStreak(for: $0, logs: allLogs, allActivities: allActivities, vacationDays: vacationDays)) }
+            .sorted { $0.streak > $1.streak }
+
+        // Behind schedule
+        cachedBehindSchedule = topLevel
+            .map { (activity: $0, rate: scheduleEngine.completionRate(for: $0, days: 7, logs: allLogs, vacationDays: vacationDays, allActivities: allActivities)) }
+            .filter { $0.rate < 0.5 && $0.rate > 0 }
+            .sorted { $0.rate < $1.rate }
+
+        // Biggest wins
+        let calendar = Calendar.current
+        let now = Date().startOfDay
+        if let startOfThisWeek = calendar.date(byAdding: .day, value: -6, to: now),
+           let startOfLastWeek = calendar.date(byAdding: .day, value: -13, to: now),
+           let endOfLastWeek = calendar.date(byAdding: .day, value: -7, to: now) {
+
+            var results: [(activity: Activity, delta: Double, formatted: String)] = []
+            for activity in valueActivities {
+                let logs = logsByActivity[activity.id] ?? []
+                let thisWeekLogs = logs.filter {
+                    $0.status == .completed && $0.value != nil &&
+                    $0.date >= startOfThisWeek && $0.date <= now
+                }
+                let lastWeekLogs = logs.filter {
+                    $0.status == .completed && $0.value != nil &&
+                    $0.date >= startOfLastWeek && $0.date <= endOfLastWeek
+                }
+                guard !thisWeekLogs.isEmpty, !lastWeekLogs.isEmpty else { continue }
+
+                let thisAvg = activity.type == .cumulative
+                    ? activity.aggregateMultiDayValue(from: thisWeekLogs)
+                    : thisWeekLogs.compactMap(\.value).reduce(0, +) / Double(thisWeekLogs.count)
+                let lastAvg = activity.type == .cumulative
+                    ? activity.aggregateMultiDayValue(from: lastWeekLogs)
+                    : lastWeekLogs.compactMap(\.value).reduce(0, +) / Double(lastWeekLogs.count)
+
+                let delta = thisAvg - lastAvg
+                guard abs(delta) > 0.01 else { continue }
+
+                let unit = activity.unit ?? ""
+                let sign = delta > 0 ? "+" : ""
+                let formatted: String
+                if abs(delta) >= 10 {
+                    formatted = "\(sign)\(Int(delta))\(unit)/wk"
+                } else {
+                    formatted = "\(sign)\(String(format: "%.1f", delta))\(unit)/wk"
+                }
+                results.append((activity, abs(delta), formatted))
+            }
+            cachedBiggestWins = results
+                .sorted { $0.delta > $1.delta }
+                .prefix(3)
+                .map { ($0.activity, $0.formatted) }
+        } else {
+            cachedBiggestWins = []
+        }
+
+        // Deep dive groups
         let eligible = allActivities.filter {
             $0.parent == nil
             && $0.type != .container
             && $0.schedule.type != .sticky && $0.schedule.type != .adhoc
         }
-
-        // Sort by recency of last log (most recent first)
         let sortedByRecency: (Activity, Activity) -> Bool = { a, b in
-            let aDate = allLogs.first(where: { $0.activity?.id == a.id })?.date ?? .distantPast
-            let bDate = allLogs.first(where: { $0.activity?.id == b.id })?.date ?? .distantPast
+            let aDate = logsByActivity[a.id]?.first?.date ?? .distantPast
+            let bDate = logsByActivity[b.id]?.first?.date ?? .distantPast
             return aDate > bDate
         }
-
         var groups: [(label: String, icon: String, activities: [Activity])] = []
-
         let checkboxes = eligible.filter { $0.type == .checkbox }.sorted(by: sortedByRecency)
         if !checkboxes.isEmpty { groups.append(("Checkbox", "checkmark.circle", checkboxes)) }
-
         let values = eligible.filter { $0.type == .value }.sorted(by: sortedByRecency)
         if !values.isEmpty { groups.append(("Value", "number", values)) }
-
         let cumulatives = eligible.filter { $0.type == .cumulative }.sorted(by: sortedByRecency)
         if !cumulatives.isEmpty { groups.append(("Cumulative", "chart.bar.fill", cumulatives)) }
-
         let metrics = eligible.filter { $0.type == .metric }.sorted(by: sortedByRecency)
         if !metrics.isEmpty { groups.append(("Metric", "chart.line.uptrend.xyaxis", metrics)) }
-
-        return groups
-    }
-
-    // MARK: - Streak Leaderboard
-
-    private var sortedStreaks: [(activity: Activity, streak: Int)] {
-        topLevelActivities
-            .map { (activity: $0, streak: scheduleEngine.currentStreak(for: $0, logs: allLogs, allActivities: allActivities, vacationDays: vacationDays)) }
-            .sorted { $0.streak > $1.streak }
-    }
-
-    private var bestStreak: (name: String, count: Int)? {
-        sortedStreaks.first.map { ($0.activity.name, $0.streak) }
-    }
-
-    // MARK: - Behind Schedule
-
-    private var behindSchedule: [(activity: Activity, rate: Double)] {
-        topLevelActivities
-            .map { (activity: $0, rate: scheduleEngine.completionRate(for: $0, days: 7, logs: allLogs, vacationDays: vacationDays, allActivities: allActivities)) }
-            .filter { $0.rate < 0.5 && $0.rate > 0 }
-            .sorted { $0.rate < $1.rate }
-    }
-
-    // MARK: - Biggest Wins (metric improvements this week vs last)
-
-    private var biggestWins: [(activity: Activity, delta: String)] {
-        let calendar = Calendar.current
-        let now = Date().startOfDay
-        guard let startOfThisWeek = calendar.date(byAdding: .day, value: -6, to: now),
-              let startOfLastWeek = calendar.date(byAdding: .day, value: -13, to: now),
-              let endOfLastWeek = calendar.date(byAdding: .day, value: -7, to: now)
-        else { return [] }
-
-        var results: [(activity: Activity, delta: Double, formatted: String)] = []
-        let logsByActivity = Dictionary(grouping: allLogs) { $0.activity?.id ?? UUID() }
-
-        for activity in valueActivities {
-            let logs = logsByActivity[activity.id] ?? []
-            let thisWeekLogs = logs.filter {
-                $0.status == .completed && $0.value != nil &&
-                $0.date >= startOfThisWeek && $0.date <= now
-            }
-            let lastWeekLogs = logs.filter {
-                $0.status == .completed && $0.value != nil &&
-                $0.date >= startOfLastWeek && $0.date <= endOfLastWeek
-            }
-
-            guard !thisWeekLogs.isEmpty, !lastWeekLogs.isEmpty else { continue }
-
-            // Use centralized aggregation for cumulative activities (groups by day first)
-            let thisAvg = activity.type == .cumulative
-                ? activity.aggregateMultiDayValue(from: thisWeekLogs)
-                : thisWeekLogs.compactMap(\.value).reduce(0, +) / Double(thisWeekLogs.count)
-            let lastAvg = activity.type == .cumulative
-                ? activity.aggregateMultiDayValue(from: lastWeekLogs)
-                : lastWeekLogs.compactMap(\.value).reduce(0, +) / Double(lastWeekLogs.count)
-
-            let delta = thisAvg - lastAvg
-            guard abs(delta) > 0.01 else { continue }
-
-            let unit = activity.unit ?? ""
-            let sign = delta > 0 ? "+" : ""
-            let formatted: String
-            if abs(delta) >= 10 {
-                formatted = "\(sign)\(Int(delta))\(unit)/wk"
-            } else {
-                formatted = "\(sign)\(String(format: "%.1f", delta))\(unit)/wk"
-            }
-
-            results.append((activity, abs(delta), formatted))
-        }
-
-        return results
-            .sorted { $0.delta > $1.delta }
-            .prefix(3)
-            .map { ($0.activity, $0.formatted) }
+        cachedDeepDiveGroups = groups
     }
 
     // MARK: - Body
@@ -170,6 +164,9 @@ struct AnalyticsView: View {
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("Analytics")
+            .task { recomputeAnalytics() }
+            .onChange(of: allLogs.count) { recomputeAnalytics() }
+            .onChange(of: allActivities.count) { recomputeAnalytics() }
         }
     }
 

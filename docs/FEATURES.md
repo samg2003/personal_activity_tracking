@@ -4,3 +4,4 @@
 - Crazy alarm system
 - Have sticky notes + history of notes along with each activity (embdedded links, resources, things to note etc.) + journalling for each day.. to look back in time and see. 
 - Ability to edit exercises, and add notes at individual workout level, exercise level, etc. 
+- Currently everything gets deleted when i delete curr data. Ensure deleting importing, exporting, ensures default categories, exercises, muscle groups, etc. is not impacted. 

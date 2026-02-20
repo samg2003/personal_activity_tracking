@@ -12,6 +12,7 @@ struct GoalsView: View {
 
     @State private var showAddGoal = false
     @State private var editingGoal: Goal?
+    @State private var cachedScores: [UUID: Double] = [:]
 
     private var activeGoals: [Goal] {
         allGoals.filter { !$0.isPaused }
@@ -19,6 +20,17 @@ struct GoalsView: View {
 
     private var pausedGoals: [Goal] {
         allGoals.filter { $0.isPaused }
+    }
+
+    private func recomputeScores() {
+        var scores: [UUID: Double] = [:]
+        for goal in allGoals {
+            scores[goal.id] = goal.consistencyScore(
+                days: 14, logs: allLogs, vacationDays: vacationDays,
+                allActivities: allActivities, scheduleEngine: scheduleEngine
+            )
+        }
+        cachedScores = scores
     }
 
     var body: some View {
@@ -32,7 +44,7 @@ struct GoalsView: View {
                             NavigationLink(value: goal.id) {
                                 GoalCardView(
                                     goal: goal,
-                                    score: consistencyScore(for: goal),
+                                    score: cachedScores[goal.id] ?? 0,
                                     logs: allLogs,
                                     vacationDays: vacationDays
                                 )
@@ -69,6 +81,9 @@ struct GoalsView: View {
                     GoalDetailView(goal: goal, allLogs: allLogs, vacationDays: vacationDays, allActivities: allActivities)
                 }
             }
+            .task { recomputeScores() }
+            .onChange(of: allLogs.count) { recomputeScores() }
+            .onChange(of: allGoals.count) { recomputeScores() }
         }
     }
 
@@ -153,7 +168,7 @@ struct GoalsView: View {
 
     /// 14-day weighted completion score for contributing activities
     func consistencyScore(for goal: Goal) -> Double {
-        goal.consistencyScore(days: 14, logs: allLogs, vacationDays: vacationDays, allActivities: allActivities, scheduleEngine: scheduleEngine)
+        cachedScores[goal.id] ?? 0
     }
 }
 
