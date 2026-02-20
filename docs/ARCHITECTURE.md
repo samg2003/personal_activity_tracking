@@ -85,6 +85,7 @@ erDiagram
         Enum aggregationModeRaw "sum|average (optional, cumulative only, default: sum)"
         String healthKitTypeID "optional"
         Enum healthKitMode "read|write|both (optional)"
+        Bool isPassive "false = dashboard activity, true = silent HK metric"
         Bool isArchived "deprecated — use stoppedAt"
         Date createdAt
         Date stoppedAt "optional - paused tracking date"

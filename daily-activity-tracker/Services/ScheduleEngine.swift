@@ -134,14 +134,14 @@ final class ScheduleEngine: ScheduleEngineProtocol {
     /// Legacy method without logs (no carry-forward)
     func activitiesForToday(from activities: [Activity], on date: Date, vacationDays: [VacationDay]) -> [Activity] {
         return activities
-            .filter { $0.parent == nil && $0.parentID(on: date) == nil }
+            .filter { $0.parent == nil && $0.parentID(on: date) == nil && !$0.isPassive }
             .filter { shouldShow($0, on: date) }
             .sorted { $0.sortOrder < $1.sortOrder }
     }
 
     /// Full method with carry-forward support
     func activitiesForToday(from activities: [Activity], on date: Date, vacationDays: [VacationDay], logs: [ActivityLog]) -> [Activity] {
-        let topLevel = activities.filter { $0.parent == nil && $0.parentID(on: date) == nil }
+        let topLevel = activities.filter { $0.parent == nil && $0.parentID(on: date) == nil && !$0.isPassive }
 
         // Normal scheduled activities
         var result = topLevel

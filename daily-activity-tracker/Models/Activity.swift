@@ -49,6 +49,9 @@ final class Activity {
     var carryForward: Bool = false
     /// When true, this activity is managed by the Workout system (read-only in Activities view, tap → Workout Tab)
     var isManagedByWorkout: Bool = false
+    /// When true, this is a passive HealthKit-only metric — hidden from dashboard, excluded from completion %, 
+    /// synced automatically in background. Shown in Activities tab "Health Metrics" section and linkable to Goals.
+    var isPassive: Bool = false
 
     // HealthKit (future)
     var healthKitTypeID: String?

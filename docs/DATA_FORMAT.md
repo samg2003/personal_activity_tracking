@@ -96,6 +96,9 @@ Defines the trackers themselves.
   // Carry forward missed weekly/monthly occurrences (default: false, metrics default: true)
   "carryForward": true,
   
+  // Optional: when true, this is a passive HK-only metric (hidden from dashboard)
+  "isPassive": false,
+  
   // Encoded [String] array of named photo slots (Optional, photo-metric only)
   // Default: ["Photo"] for single-slot backward compat
   "photoSlotsData": "BASE64-ENCODED-JSON-STRING"
@@ -107,6 +110,7 @@ Defines the trackers themselves.
 - **`typeRaw`**: One of `"checkbox"`, `"value"`, `"cumulative"`, `"container"`, `"metric"`.
 - **`metricKindRaw`**: Only for `metric` type — one of `"photo"`, `"value"`, `"checkbox"`, `"notes"`.
 - **`aggregationModeRaw`**: Only for `cumulative` type — `"sum"` (default) or `"average"`. Controls how multiple daily entries are aggregated.
+- **`isPassive`**: When `true`, the activity is a silent HealthKit-only metric — hidden from the dashboard and daily completion %, but visible in the Activities tab "Health Metrics" section and linkable to Goals.
 - **`scheduleData`** / **`timeWindowData`**: These are `Data` blobs in Swift, serialized as Base64 strings in the JSON.
     - *Note for manual editing*: It is difficult to manually construct these Base64 strings. It is recommended to create a dummy activity in the app, export it, and copy the strings if needed.
 

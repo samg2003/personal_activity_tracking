@@ -24,7 +24,7 @@ struct AnalyticsView: View {
 
     private var topLevelActivities: [Activity] {
         allActivities.filter {
-            $0.parent == nil && !$0.isStopped
+            $0.parent == nil && !$0.isStopped && !$0.isPassive
             && $0.schedule.type != .sticky && $0.schedule.type != .adhoc
         }
     }

@@ -7,6 +7,8 @@ struct ActivitiesListView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.editMode) private var editMode
     @Query(sort: \Activity.sortOrder) private var allActivities: [Activity]
+    @Query(sort: \ActivityLog.date, order: .reverse) private var allLogs: [ActivityLog]
+    @Query private var vacationDays: [VacationDay]
     @Query(sort: \Category.sortOrder) private var categories: [Category]
 
     @State private var editingActivity: Activity?
@@ -46,10 +48,12 @@ struct ActivitiesListView: View {
     @State private var cachedCompletedOneTime: [Activity] = []
     @State private var cachedPaused: [Activity] = []
     @State private var cachedContainerActivities: [Activity] = []
+    @State private var cachedPassiveMetrics: [Activity] = []
+    @State private var healthMetricsExpanded = false
 
     private func recomputeCachedLists() {
         let topLevel = allActivities.filter {
-            $0.parent == nil && !$0.isStopped
+            $0.parent == nil && !$0.isStopped && !$0.isPassive
             && $0.schedule.type != .sticky && $0.schedule.type != .adhoc
         }
 
@@ -97,10 +101,11 @@ struct ActivitiesListView: View {
             && ($0.schedule.type == .sticky || $0.schedule.type == .adhoc)
         }
         cachedPaused = allActivities.filter {
-            $0.isStopped
+            $0.isStopped && !$0.isPassive
             && $0.schedule.type != .sticky && $0.schedule.type != .adhoc
         }
-        cachedContainerActivities = allActivities.filter { $0.type == .container && !$0.isStopped }
+        cachedContainerActivities = allActivities.filter { $0.type == .container && !$0.isStopped && !$0.isPassive }
+        cachedPassiveMetrics = allActivities.filter { $0.isPassive && !$0.isStopped }
     }
 
     var body: some View {
@@ -139,6 +144,7 @@ struct ActivitiesListView: View {
             oneTimeTasksSection
             emptyStateSection
             completedOneTimeSection
+            healthMetricsSection
             pausedSection
         }
         .listStyle(.insetGrouped)
@@ -424,6 +430,89 @@ struct ActivitiesListView: View {
                     .font(.system(size: 12, weight: .bold, design: .rounded))
             }
         }
+    }
+
+    // MARK: - Health Metrics Section (passive HK-only activities)
+    
+    @ViewBuilder
+    private var healthMetricsSection: some View {
+        if !cachedPassiveMetrics.isEmpty {
+            Section {
+                DisclosureGroup(isExpanded: $healthMetricsExpanded) {
+                    ForEach(cachedPassiveMetrics) { activity in
+                        NavigationLink {
+                            ActivityAnalyticsView(activity: activity, allLogs: allLogs, vacationDays: vacationDays, allActivities: allActivities)
+                        } label: {
+                            passiveMetricRow(activity)
+                        }
+                        .contextMenu {
+                            Button {
+                                editingActivity = activity
+                            } label: {
+                                Label("Edit", systemImage: "pencil")
+                            }
+                            Button(role: .destructive) {
+                                activity.stoppedAt = Date()
+                            } label: {
+                                Label("Pause Tracking", systemImage: "pause.circle")
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "heart.text.square")
+                            .font(.caption)
+                        Text("Health Metrics (\(cachedPassiveMetrics.count))")
+                            .font(.caption.weight(.medium))
+                    }
+                    .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+    
+    private func passiveMetricRow(_ activity: Activity) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: activity.icon)
+                .font(.system(size: 14))
+                .foregroundStyle(Color(hex: activity.hexColor))
+                .frame(width: 24)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(activity.name)
+                    .font(.subheadline)
+                if let typeKey = activity.healthKitTypeID,
+                   let info = HealthKitService.allTypes.first(where: { $0.key == typeKey }) {
+                    Text(info.name)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            
+            Spacer()
+            
+            // Show latest synced value
+            if let latestLog = activity.logs.sorted(by: { ($0.completedAt ?? $0.date) > ($1.completedAt ?? $1.date) }).first,
+               let val = latestLog.value {
+                Text(formatPassiveValue(val, unit: activity.unit))
+                    .font(.system(.caption, design: .rounded, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            
+            Image(systemName: "heart.fill")
+                .font(.caption2)
+                .foregroundStyle(.red.opacity(0.6))
+        }
+    }
+    
+    private func formatPassiveValue(_ value: Double, unit: String?) -> String {
+        let formatted = value.truncatingRemainder(dividingBy: 1) == 0
+            ? String(format: "%.0f", value)
+            : String(format: "%.1f", value)
+        if let u = unit, !u.isEmpty {
+            return "\(formatted) \(u)"
+        }
+        return formatted
     }
 
     @ViewBuilder

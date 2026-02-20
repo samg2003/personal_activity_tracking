@@ -1368,12 +1368,15 @@ struct DashboardView: View {
         guard HealthKitService.shared.isAvailable else { return }
         
         Task {
-            // 1. Request Auth for all relevant types
-            let typesToRead = Set(todayActivities.compactMap { $0.healthKitTypeID }.compactMap { HealthKitService.identifierFrom($0) })
-            guard !typesToRead.isEmpty else { return }
-            try? await HealthKitService.shared.requestAuthorization(for: typesToRead)
+            // Collect all HK types (dashboard + passive) for a single auth request
+            let dashboardTypes = todayActivities.compactMap { $0.healthKitTypeID }
+            let passiveActivities = allActivities.filter { $0.isPassive && $0.healthKitTypeID != nil }
+            let passiveTypes = passiveActivities.compactMap { $0.healthKitTypeID }
+            let allTypeIDs = Set((dashboardTypes + passiveTypes).compactMap { HealthKitService.identifierFrom($0) })
+            guard !allTypeIDs.isEmpty else { return }
+            try? await HealthKitService.shared.requestAuthorization(for: allTypeIDs)
             
-            // 2. Read and update per activity type
+            // 1. Sync dashboard activities (type-aware)
             for activity in todayActivities {
                 guard let typeID = activity.healthKitTypeID,
                       let hkType = HealthKitService.identifierFrom(typeID),
@@ -1381,7 +1384,6 @@ struct DashboardView: View {
                 else { continue }
                 
                 let unit: HKUnit = HealthKitService.unitFor(type: hkType)
-                // When mode is .both, exclude samples our app wrote to avoid double-counting
                 let excludeOwn = activity.healthKitMode == .both
                 
                 switch activity.type {
@@ -1396,6 +1398,15 @@ struct DashboardView: View {
                 case .container:
                     break
                 }
+            }
+            
+            // 2. Sync passive health metrics (always read-only, latest value)
+            for activity in passiveActivities {
+                guard let typeID = activity.healthKitTypeID,
+                      let hkType = HealthKitService.identifierFrom(typeID)
+                else { continue }
+                let unit = HealthKitService.unitFor(type: hkType)
+                await syncValueFromHK(activity: activity, hkType: hkType, unit: unit, excludeOwn: false)
             }
         }
     }

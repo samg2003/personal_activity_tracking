@@ -43,6 +43,7 @@ struct AddActivityView: View {
     @State private var enableHealthKit = false
     @State private var hkType = "stepCount"
     @State private var hkMode = "read"
+    @State private var isPassive = false
 
     // Container config
     @State private var selectedParent: Activity?
@@ -376,6 +377,7 @@ struct AddActivityView: View {
             enableHealthKit = true
             hkType = hkID
             hkMode = activity.healthKitModeRaw ?? "read"
+            isPassive = activity.isPassive
         }
 
         // Restore carry forward
@@ -906,12 +908,28 @@ struct AddActivityView: View {
                     }
                 }
                 
-                Picker("Mode", selection: $hkMode) {
-                    Text("Read Only").tag("read")
-                    Text("Write Only").tag("write")
-                    Text("Read & Write").tag("both")
+                if !isPassive {
+                    Picker("Mode", selection: $hkMode) {
+                        Text("Read Only").tag("read")
+                        Text("Write Only").tag("write")
+                        Text("Read & Write").tag("both")
+                    }
+                    .pickerStyle(.segmented)
                 }
-                .pickerStyle(.segmented)
+                
+                Toggle(isOn: $isPassive) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Passive Metric")
+                        Text("Track silently — won't appear on dashboard")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .onChange(of: isPassive) { _, newValue in
+                    if newValue {
+                        hkMode = "read"
+                    }
+                }
             }
         }
     }
@@ -1012,6 +1030,7 @@ struct AddActivityView: View {
                 if effectiveType != .container && effectiveType != .metric && enableHealthKit {
                     activity.healthKitTypeID = hkType
                     activity.healthKitModeRaw = hkMode
+                    activity.isPassive = isPassive
                 }
             }
 
@@ -1115,9 +1134,11 @@ struct AddActivityView: View {
             if selectedType != .container && selectedType != .metric && enableHealthKit {
                 activity.healthKitTypeID = hkType
                 activity.healthKitModeRaw = hkMode
+                activity.isPassive = isPassive
             } else if selectedType == .container || selectedType == .metric {
                 activity.healthKitTypeID = nil
                 activity.healthKitModeRaw = nil
+                activity.isPassive = false
             }
         }
     }

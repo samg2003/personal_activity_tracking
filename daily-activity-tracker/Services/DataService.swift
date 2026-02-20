@@ -62,6 +62,7 @@ final class DataService {
         let healthKitModeRaw: String?
         let aggregationModeRaw: String?
         var pausedParentId: UUID?
+        var isPassive: Bool?
 
         init(id: UUID, name: String, icon: String, hexColor: String,
              typeRaw: String, scheduleData: Data?, timeWindowData: Data?,
@@ -73,7 +74,8 @@ final class DataService {
              stoppedAt: Date? = nil,
              healthKitTypeID: String? = nil, healthKitModeRaw: String? = nil,
              aggregationModeRaw: String? = nil,
-             pausedParentId: UUID? = nil) {
+             pausedParentId: UUID? = nil,
+             isPassive: Bool? = nil) {
             self.id = id; self.name = name; self.icon = icon; self.hexColor = hexColor
             self.typeRaw = typeRaw; self.scheduleData = scheduleData
             self.timeWindowData = timeWindowData; self.timeSlotsData = timeSlotsData
@@ -86,6 +88,7 @@ final class DataService {
             self.healthKitModeRaw = healthKitModeRaw
             self.aggregationModeRaw = aggregationModeRaw
             self.pausedParentId = pausedParentId
+            self.isPassive = isPassive
         }
 
         init(from decoder: Decoder) throws {
@@ -112,6 +115,7 @@ final class DataService {
             healthKitModeRaw = try c.decodeIfPresent(String.self, forKey: .healthKitModeRaw)
             aggregationModeRaw = try c.decodeIfPresent(String.self, forKey: .aggregationModeRaw)
             pausedParentId = try c.decodeIfPresent(UUID.self, forKey: .pausedParentId)
+            isPassive = try c.decodeIfPresent(Bool.self, forKey: .isPassive)
             // Old fields silently ignored: allowsPhoto, allowsNotes, weight, reminderData
         }
     }
@@ -447,7 +451,8 @@ final class DataService {
                 healthKitTypeID: $0.healthKitTypeID,
                 healthKitModeRaw: $0.healthKitModeRaw,
                 aggregationModeRaw: $0.aggregationModeRaw,
-                pausedParentId: $0.pausedParentId
+                pausedParentId: $0.pausedParentId,
+                isPassive: $0.isPassive
             )
         }
         
@@ -732,6 +737,7 @@ final class DataService {
             act.healthKitTypeID = dto.healthKitTypeID
             act.healthKitModeRaw = dto.healthKitModeRaw
             act.aggregationModeRaw = dto.aggregationModeRaw
+            act.isPassive = dto.isPassive ?? false
             act.photoSlotsData = dto.photoSlotsData
             
             context.insert(act)
