@@ -20,6 +20,7 @@ struct CumulativeLogSheet: View {
             log.date.isSameDay(as: date) &&
             log.status == .completed
         }
+        .sorted { ($0.completedAt ?? .distantPast) > ($1.completedAt ?? .distantPast) }
     }
     
     /// Logs that will remain after staged deletions are applied
