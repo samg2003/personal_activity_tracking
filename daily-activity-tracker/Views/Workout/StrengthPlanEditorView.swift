@@ -1,158 +1,51 @@
 import SwiftUI
 import SwiftData
 
-/// Strength plan editor — week strip overview + swipable day detail with editable exercise cards.
+/// Strength plan editor — uses shared scaffold + strength-specific exercise cards and volume analysis.
 struct StrengthPlanEditorView: View {
     @Environment(\.modelContext) private var modelContext
     @Bindable var plan: WorkoutPlan
 
-    @State private var selectedDayIndex: Int = 0
-    @State private var dayForPicker: WorkoutPlanDay?
     @State private var showAdvancedVolume = false
-    @State private var editingDayLabel: WorkoutPlanDay?
-    @State private var editLabelText: String = ""
-    @State private var showLabelEditor = false
-
-    // Link conflict resolution
-    @State private var showLinkConflict = false
-    @State private var conflictDay: WorkoutPlanDay?
-    @State private var conflictNewGroup: Int = -1
-    @State private var conflictExistingDay: WorkoutPlanDay?
 
     private var planManager: WorkoutPlanManager {
         WorkoutPlanManager(modelContext: modelContext)
     }
 
-    private var sortedDays: [WorkoutPlanDay] {
-        plan.days.sorted { $0.weekday < $1.weekday }
-    }
-
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                PlanEditorComponents.PlanHeader(plan: plan, icon: "dumbbell.fill", accentColor: .orange)
-
-                PlanEditorComponents.WeekStrip(
-                    days: sortedDays,
-                    selectedIndex: $selectedDayIndex,
-                    accentColor: .orange,
-                    modelContext: modelContext,
-                    onColorChange: { day in
-                        planManager.propagateLinkedDays(from: day)
-                    },
-                    onLinkConflict: { day, newGroup, existingDay in
-                        conflictDay = day
-                        conflictNewGroup = newGroup
-                        conflictExistingDay = existingDay
-                        showLinkConflict = true
-                    }
-                )
-
-                dayDetail
+        PlanEditorComponents.PlanEditorScaffold(
+            plan: plan,
+            icon: "dumbbell.fill",
+            accentColor: .orange,
+            exerciseType: .strength,
+            excludedIDs: { day in
+                Set(day.sortedStrengthExercises.compactMap { $0.exercise?.id })
+            },
+            onAddExercise: { exercise, day in
+                addExercise(exercise, to: day)
+            },
+            autoLabelProvider: { day in
+                planManager.autoDetectDayLabel(for: day)
+            },
+            trainingContent: { day, openPicker in
+                trainingDayContent(day, openPicker: openPicker)
+            },
+            extraSections: {
                 volumeSection
                 junkAlerts
-
-                PlanEditorComponents.ActivateButton(
-                    plan: plan,
-                    accentColor: .orange,
-                    onActivate: { planManager.activatePlan(plan) },
-                    onDeactivate: { planManager.deactivatePlan(plan) }
-                )
             }
-            .padding()
-        }
-        .navigationTitle(plan.name)
-        .navigationBarTitleDisplayMode(.inline)
-        .sheet(item: $dayForPicker) { day in
-            NavigationStack {
-                ExercisePickerView(
-                    exerciseType: .strength,
-                    excludedExerciseIDs: Set(day.sortedStrengthExercises.compactMap { $0.exercise?.id })
-                ) { exercise in
-                    addExercise(exercise, to: day)
-                }
-            }
-        }
-        .renameDayAlert(
-            isPresented: $showLabelEditor,
-            labelText: $editLabelText,
-            day: editingDayLabel,
-            modelContext: modelContext,
-            planManager: planManager
         )
-        .alert("Link Conflict", isPresented: $showLinkConflict) {
-            if let conflictDay, let conflictExistingDay {
-                Button("Keep \(conflictDay.weekdayName)'s exercises") {
-                    resolveLinkConflict(keepDay: conflictDay, discardDay: conflictExistingDay)
-                }
-                Button("Keep \(conflictExistingDay.weekdayName)'s exercises") {
-                    resolveLinkConflict(keepDay: conflictExistingDay, discardDay: conflictDay)
-                }
-            }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text("Both days have exercises. Which day's exercises should be kept? The other day's exercises will be replaced.")
-        }
     }
 
-    /// Resolves a link conflict by setting the color group, mirroring from the keep day.
-    private func resolveLinkConflict(keepDay: WorkoutPlanDay, discardDay: WorkoutPlanDay) {
-        guard let day = conflictDay else { return }
-        day.colorGroup = conflictNewGroup
-        try? modelContext.save()
-        // Mirror from keepDay to all linked days in the group
-        planManager.propagateLinkedDays(from: keepDay)
-    }
-
-    // MARK: - Day Detail (Swipable)
-
-    private var dayDetail: some View {
-        PlanEditorComponents.SwipableDayContainer(
-            selectedIndex: $selectedDayIndex,
-            dayCount: sortedDays.count
-        ) {
-            if selectedDayIndex < sortedDays.count {
-                dayEditorContent(sortedDays[selectedDayIndex])
-            }
-        }
-    }
+    // MARK: - Training Day Content
 
     @ViewBuilder
-    private func dayEditorContent(_ day: WorkoutPlanDay) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            PlanEditorComponents.DayEditorHeader(
-                day: day,
-                subtitle: !day.isRest && day.totalSets > 0 ? "\(day.totalSets) sets" : nil,
-                onToggleRest: { toggleRest(day) }
-            )
-
-            if day.isRest {
-                PlanEditorComponents.RestDayView()
-            } else {
-                trainingDayContent(day)
-            }
-        }
-        .padding()
-        .background(Color(.systemGray6))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-    }
-
-    @ViewBuilder
-    private func trainingDayContent(_ day: WorkoutPlanDay) -> some View {
-        PlanEditorComponents.DayLabelRow(day: day, accentColor: .orange) {
-            editLabelText = day.dayLabel
-            editingDayLabel = day
-            showLabelEditor = true
-        }
-
-        // Exercise cards
+    private func trainingDayContent(_ day: WorkoutPlanDay, openPicker: @escaping () -> Void) -> some View {
         ForEach(day.sortedStrengthExercises) { planEx in
             exerciseCard(planEx, day: day)
         }
 
-        PlanEditorComponents.AddExerciseButton(accentColor: .orange) {
-            dayForPicker = day
-        }
+        PlanEditorComponents.AddExerciseButton(accentColor: .orange, action: openPicker)
     }
 
     // MARK: - Exercise Card
@@ -164,8 +57,8 @@ struct StrengthPlanEditorView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(planEx.exercise?.name ?? "Unknown")
                         .font(.subheadline.weight(.medium))
-                    if let equip = planEx.exercise?.equipment, !equip.isEmpty {
-                        Text(equip)
+                    if let equipment = planEx.exercise?.equipment, !equipment.isEmpty {
+                        Text(equipment)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -173,17 +66,7 @@ struct StrengthPlanEditorView: View {
 
                 Spacer()
 
-                if let group = planEx.supersetGroup {
-                    Text(group)
-                        .font(.caption.weight(.bold))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.purple.opacity(0.15))
-                        .foregroundStyle(.purple)
-                        .clipShape(Capsule())
-                }
-
-                Button(role: .destructive) {
+                Button {
                     deleteExercise(planEx, from: day)
                 } label: {
                     Image(systemName: "trash")
@@ -291,7 +174,7 @@ struct StrengthPlanEditorView: View {
         if !weeklyVolume.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Text("WEEKLY VOLUME")
+                    Text("Weekly Volume")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -352,7 +235,6 @@ struct StrengthPlanEditorView: View {
                 let status = planManager.volumeStatus(muscle: group.parent, effectiveSets: parentSets)
 
                 VStack(alignment: .leading, spacing: 4) {
-                    // Parent header (no range bar — color does the job)
                     HStack {
                         Circle()
                             .fill(colorForStatus(status))
@@ -366,7 +248,6 @@ struct StrengthPlanEditorView: View {
                             .font(.caption2)
                     }
 
-                    // Sub-muscles with color coding
                     let realChildren = group.children.filter { $0.name != group.parent }
                     if !realChildren.isEmpty {
                         VStack(spacing: 3) {
@@ -398,7 +279,6 @@ struct StrengthPlanEditorView: View {
         }
     }
 
-    /// Approximates child muscle volume status from parent benchmarks and child proportion.
     private func subMuscleStatus(child: (name: String, sets: Double), parentSets: Double, parentMuscle: String) -> VolumeStatus {
         guard parentSets > 0 else { return .belowMEV }
         let ratio = child.sets / parentSets
@@ -439,8 +319,6 @@ struct StrengthPlanEditorView: View {
         }
     }
 
-
-
     // MARK: - Actions
 
     private func addExercise(_ exercise: Exercise, to day: WorkoutPlanDay) {
@@ -474,19 +352,6 @@ struct StrengthPlanEditorView: View {
     private func savePlanChange(_ day: WorkoutPlanDay) {
         try? modelContext.save()
         planManager.propagateLinkedDays(from: day)
-    }
-
-    private func toggleRest(_ day: WorkoutPlanDay) {
-        day.isRest.toggle()
-        if day.isRest {
-            day.dayLabel = "Rest"
-        } else if !day.isLabelOverridden {
-            day.dayLabel = planManager.autoDetectDayLabel(for: day)
-        }
-        try? modelContext.save()
-        if plan.isActive {
-            planManager.syncShellActivities(for: plan)
-        }
     }
 
     private func colorForStatus(_ status: VolumeStatus) -> Color {

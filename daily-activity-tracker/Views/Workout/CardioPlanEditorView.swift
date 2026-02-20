@@ -1,160 +1,45 @@
 import SwiftUI
 import SwiftData
 
-/// Mon–Sun cardio plan editor — week strip + swipable day detail, matching strength editor layout.
+/// Cardio plan editor — uses shared scaffold + cardio-specific exercise cards and weekly load summary.
 struct CardioPlanEditorView: View {
     @Environment(\.modelContext) private var modelContext
     @Bindable var plan: WorkoutPlan
-
-    @State private var selectedDayIndex: Int = 0
-    @State private var dayForPicker: WorkoutPlanDay?
-    @State private var editLabelText: String = ""
-    @State private var editingDayLabel: WorkoutPlanDay?
-    @State private var showLabelEditor = false
-
-    // Link conflict resolution
-    @State private var showLinkConflict = false
-    @State private var conflictDay: WorkoutPlanDay?
-    @State private var conflictNewGroup: Int = -1
-    @State private var conflictExistingDay: WorkoutPlanDay?
 
     private var planManager: WorkoutPlanManager {
         WorkoutPlanManager(modelContext: modelContext)
     }
 
-    private var sortedDays: [WorkoutPlanDay] {
-        plan.days.sorted { $0.weekday < $1.weekday }
-    }
-
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                PlanEditorComponents.PlanHeader(plan: plan, icon: "figure.run", accentColor: .green)
-
-                PlanEditorComponents.WeekStrip(
-                    days: sortedDays,
-                    selectedIndex: $selectedDayIndex,
-                    accentColor: .green,
-                    modelContext: modelContext,
-                    onColorChange: { day in
-                        planManager.propagateLinkedDays(from: day)
-                    },
-                    onLinkConflict: { day, newGroup, existingDay in
-                        conflictDay = day
-                        conflictNewGroup = newGroup
-                        conflictExistingDay = existingDay
-                        showLinkConflict = true
-                    }
-                )
-
-                dayDetail
-
+        PlanEditorComponents.PlanEditorScaffold(
+            plan: plan,
+            icon: "figure.run",
+            accentColor: .green,
+            exerciseType: .cardio,
+            excludedIDs: { day in
+                Set(day.sortedCardioExercises.compactMap { $0.exercise?.id })
+            },
+            onAddExercise: { exercise, day in
+                addExercise(exercise, to: day)
+            },
+            trainingContent: { day, openPicker in
+                trainingDayContent(day, openPicker: openPicker)
+            },
+            extraSections: {
                 weeklyLoadSummary
-
-                PlanEditorComponents.ActivateButton(
-                    plan: plan,
-                    accentColor: .green,
-                    onActivate: { planManager.activatePlan(plan) },
-                    onDeactivate: { planManager.deactivatePlan(plan) }
-                )
             }
-            .padding()
-        }
-        .navigationTitle(plan.name)
-        .navigationBarTitleDisplayMode(.inline)
-        .sheet(item: $dayForPicker) { day in
-            NavigationStack {
-                ExercisePickerView(
-                    exerciseType: .cardio,
-                    excludedExerciseIDs: Set(day.sortedCardioExercises.compactMap { $0.exercise?.id })
-                ) { exercise in
-                    addExercise(exercise, to: day)
-                }
-            }
-        }
-        .renameDayAlert(
-            isPresented: $showLabelEditor,
-            labelText: $editLabelText,
-            day: editingDayLabel,
-            modelContext: modelContext,
-            planManager: planManager
         )
-        .alert("Link Conflict", isPresented: $showLinkConflict) {
-            if let conflictDay, let conflictExistingDay {
-                Button("Keep \(conflictDay.weekdayName)'s exercises") {
-                    resolveLinkConflict(keepDay: conflictDay, discardDay: conflictExistingDay)
-                }
-                Button("Keep \(conflictExistingDay.weekdayName)'s exercises") {
-                    resolveLinkConflict(keepDay: conflictExistingDay, discardDay: conflictDay)
-                }
-            }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text("Both days have exercises. Which day's exercises should be kept? The other day's exercises will be replaced.")
-        }
     }
 
-    /// Resolves a link conflict by setting the color group, mirroring from the keep day.
-    private func resolveLinkConflict(keepDay: WorkoutPlanDay, discardDay: WorkoutPlanDay) {
-        guard let day = conflictDay else { return }
-        day.colorGroup = conflictNewGroup
-        try? modelContext.save()
-        planManager.propagateLinkedDays(from: keepDay)
-    }
-
-    // MARK: - Day Detail (Swipable)
-
-    private var dayDetail: some View {
-        PlanEditorComponents.SwipableDayContainer(
-            selectedIndex: $selectedDayIndex,
-            dayCount: sortedDays.count
-        ) {
-            if selectedDayIndex < sortedDays.count {
-                dayEditorContent(sortedDays[selectedDayIndex])
-            }
-        }
-    }
+    // MARK: - Training Day Content
 
     @ViewBuilder
-    private func dayEditorContent(_ day: WorkoutPlanDay) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            PlanEditorComponents.DayEditorHeader(
-                day: day,
-                subtitle: day.isRest ? nil : (!day.cardioExercises.isEmpty ? "\(day.cardioExercises.count) exercises" : nil),
-                onToggleRest: { toggleRest(day) }
-            )
-
-            if day.isRest {
-                PlanEditorComponents.RestDayView()
-            } else {
-                cardioDayContent(day)
-            }
-        }
-        .padding()
-        .background(Color(.systemGray6))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-    }
-
-    // MARK: - Cardio Day Content
-
-    @ViewBuilder
-    private func cardioDayContent(_ day: WorkoutPlanDay) -> some View {
-        // Day label
-        PlanEditorComponents.DayLabelRow(day: day, accentColor: .green) {
-            editLabelText = day.dayLabel
-            editingDayLabel = day
-            showLabelEditor = true
-        }
-
-        // Exercise cards
+    private func trainingDayContent(_ day: WorkoutPlanDay, openPicker: @escaping () -> Void) -> some View {
         ForEach(day.sortedCardioExercises) { cardioEx in
             cardioExerciseCard(cardioEx, day: day)
         }
 
-        // Add exercise
-        PlanEditorComponents.AddExerciseButton(accentColor: .green) {
-            dayForPicker = day
-        }
+        PlanEditorComponents.AddExerciseButton(accentColor: .green, action: openPicker)
     }
 
     // MARK: - Cardio Exercise Card
@@ -176,13 +61,9 @@ struct CardioPlanEditorView: View {
                 // Target label
                 Text(cardioEx.targetLabel)
                     .font(.caption)
-                    .foregroundStyle(.green)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(Color.green.opacity(0.1))
-                    .clipShape(Capsule())
+                    .foregroundStyle(.secondary)
 
-                Button(role: .destructive) {
+                Button {
                     deleteExercise(cardioEx, from: day)
                 } label: {
                     Image(systemName: "trash")
@@ -226,7 +107,6 @@ struct CardioPlanEditorView: View {
                             savePlanChange(day)
                         }
                     ), format: .number)
-                    .keyboardType(.decimalPad)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 55)
                     Text(cardioEx.exercise?.distanceUnit ?? "km")
@@ -242,13 +122,12 @@ struct CardioPlanEditorView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     TextField("—", value: Binding(
-                        get: { cardioEx.targetDurationMin ?? 0 },
+                        get: { cardioEx.targetDuration ?? 0 },
                         set: {
-                            cardioEx.targetDurationMin = $0 > 0 ? $0 : nil
+                            cardioEx.targetDuration = $0 > 0 ? $0 : nil
                             savePlanChange(day)
                         }
                     ), format: .number)
-                    .keyboardType(.numberPad)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 55)
                     Text("min")
@@ -269,10 +148,10 @@ struct CardioPlanEditorView: View {
         let sessions = plan.trainingDays.count
         let totalExercises = plan.trainingDays.reduce(0) { $0 + $1.cardioExercises.count }
 
-        if sessions > 0 {
-            HStack(spacing: 16) {
-                loadPill("\(sessions)", label: "sessions")
-                loadPill("\(totalExercises)", label: "exercises")
+        if totalExercises > 0 {
+            HStack(spacing: 20) {
+                loadStat("\(sessions)", label: "Sessions/wk")
+                loadStat("\(totalExercises)", label: "Exercises/wk")
             }
             .padding()
             .background(Color(.systemGray6))
@@ -280,7 +159,7 @@ struct CardioPlanEditorView: View {
         }
     }
 
-    private func loadPill(_ value: String, label: String) -> some View {
+    private func loadStat(_ value: String, label: String) -> some View {
         VStack(spacing: 2) {
             Text(value)
                 .font(.headline.monospacedDigit())
@@ -318,14 +197,5 @@ struct CardioPlanEditorView: View {
     private func savePlanChange(_ day: WorkoutPlanDay) {
         try? modelContext.save()
         planManager.propagateLinkedDays(from: day)
-    }
-
-    private func toggleRest(_ day: WorkoutPlanDay) {
-        day.isRest.toggle()
-        day.dayLabel = day.isRest ? "Rest" : ""
-        try? modelContext.save()
-        if plan.isActive {
-            planManager.syncShellActivities(for: plan)
-        }
     }
 }

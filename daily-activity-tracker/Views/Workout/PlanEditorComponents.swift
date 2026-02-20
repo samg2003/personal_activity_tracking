@@ -367,6 +367,189 @@ enum PlanEditorComponents {
         }
     }
 
+    // MARK: - Plan Editor Scaffold
+
+    /// Shared editor structure used by both Strength and Cardio plan editors.
+    /// Each editor provides its unique content via closures, while the scaffold
+    /// handles all shared state, navigation, and modifiers.
+    struct PlanEditorScaffold<TrainingContent: View, ExtraSections: View>: View {
+        @Environment(\.modelContext) private var modelContext
+        @Bindable var plan: WorkoutPlan
+
+        let icon: String
+        let accentColor: Color
+        let exerciseType: ExerciseType
+
+        /// Provides the exercise IDs to exclude from the picker for a given day.
+        let excludedIDs: (WorkoutPlanDay) -> Set<UUID>
+        /// Called when user picks an exercise from the sheet.
+        let onAddExercise: (Exercise, WorkoutPlanDay) -> Void
+        /// Returns an auto-detected label for non-rest days (strength uses muscle detection, cardio returns nil).
+        var autoLabelProvider: ((WorkoutPlanDay) -> String?)?
+
+        /// Builds the training day content (exercise cards + add button). Receives an `openPicker` action to trigger the exercise picker sheet.
+        @ViewBuilder let trainingContent: (_ day: WorkoutPlanDay, _ openPicker: @escaping () -> Void) -> TrainingContent
+        /// Extra sections below the day detail (volume, junk alerts, weekly load, etc.).
+        @ViewBuilder let extraSections: () -> ExtraSections
+
+        @State private var selectedDayIndex: Int = 0
+        @State private var dayForPicker: WorkoutPlanDay?
+        @State private var editLabelText: String = ""
+        @State private var editingDayLabel: WorkoutPlanDay?
+        @State private var showLabelEditor = false
+
+        // Link conflict resolution
+        @State private var showLinkConflict = false
+        @State private var conflictDay: WorkoutPlanDay?
+        @State private var conflictNewGroup: Int = -1
+        @State private var conflictExistingDay: WorkoutPlanDay?
+
+        private var planManager: WorkoutPlanManager {
+            WorkoutPlanManager(modelContext: modelContext)
+        }
+
+        private var sortedDays: [WorkoutPlanDay] {
+            plan.days.sorted { $0.weekday < $1.weekday }
+        }
+
+        var body: some View {
+            ScrollView {
+                VStack(spacing: 16) {
+                    PlanHeader(plan: plan, icon: icon, accentColor: accentColor)
+
+                    WeekStrip(
+                        days: sortedDays,
+                        selectedIndex: $selectedDayIndex,
+                        accentColor: accentColor,
+                        modelContext: modelContext,
+                        onColorChange: { day in
+                            planManager.propagateLinkedDays(from: day)
+                        },
+                        onLinkConflict: { day, newGroup, existingDay in
+                            conflictDay = day
+                            conflictNewGroup = newGroup
+                            conflictExistingDay = existingDay
+                            showLinkConflict = true
+                        }
+                    )
+
+                    dayDetail
+
+                    extraSections()
+
+                    ActivateButton(
+                        plan: plan,
+                        accentColor: accentColor,
+                        onActivate: { planManager.activatePlan(plan) },
+                        onDeactivate: { planManager.deactivatePlan(plan) }
+                    )
+                }
+                .padding()
+            }
+            .navigationTitle(plan.name)
+            .navigationBarTitleDisplayMode(.inline)
+            .sheet(item: $dayForPicker) { day in
+                NavigationStack {
+                    ExercisePickerView(
+                        exerciseType: exerciseType,
+                        excludedExerciseIDs: excludedIDs(day)
+                    ) { exercise in
+                        onAddExercise(exercise, day)
+                    }
+                }
+            }
+            .renameDayAlert(
+                isPresented: $showLabelEditor,
+                labelText: $editLabelText,
+                day: editingDayLabel,
+                modelContext: modelContext,
+                planManager: planManager
+            )
+            .alert("Link Conflict", isPresented: $showLinkConflict) {
+                if let conflictDay, let conflictExistingDay {
+                    Button("Keep \(conflictDay.weekdayName)'s exercises") {
+                        resolveLinkConflict(keepDay: conflictDay, discardDay: conflictExistingDay)
+                    }
+                    Button("Keep \(conflictExistingDay.weekdayName)'s exercises") {
+                        resolveLinkConflict(keepDay: conflictExistingDay, discardDay: conflictDay)
+                    }
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("Both days have exercises. Which day's exercises should be kept? The other day's exercises will be replaced.")
+            }
+        }
+
+        // MARK: - Day Detail
+
+        private var dayDetail: some View {
+            SwipableDayContainer(
+                selectedIndex: $selectedDayIndex,
+                dayCount: sortedDays.count
+            ) {
+                if selectedDayIndex < sortedDays.count {
+                    dayEditorContent(sortedDays[selectedDayIndex])
+                }
+            }
+        }
+
+        @ViewBuilder
+        private func dayEditorContent(_ day: WorkoutPlanDay) -> some View {
+            VStack(alignment: .leading, spacing: 12) {
+                DayEditorHeader(
+                    day: day,
+                    subtitle: daySummary(day),
+                    onToggleRest: { toggleRest(day) }
+                )
+
+                if day.isRest {
+                    RestDayView()
+                } else {
+                    DayLabelRow(day: day, accentColor: accentColor) {
+                        editLabelText = day.dayLabel
+                        editingDayLabel = day
+                        showLabelEditor = true
+                    }
+
+                    trainingContent(day, { dayForPicker = day })
+                }
+            }
+            .padding()
+            .background(Color(.systemGray6))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+
+        // MARK: - Actions
+
+        private func toggleRest(_ day: WorkoutPlanDay) {
+            day.isRest.toggle()
+            if day.isRest {
+                day.dayLabel = "Rest"
+            } else if !day.isLabelOverridden {
+                day.dayLabel = autoLabelProvider?(day) ?? ""
+            }
+            try? modelContext.save()
+            if plan.isActive {
+                planManager.syncShellActivities(for: plan)
+            }
+        }
+
+        private func resolveLinkConflict(keepDay: WorkoutPlanDay, discardDay: WorkoutPlanDay) {
+            guard let day = conflictDay else { return }
+            day.colorGroup = conflictNewGroup
+            try? modelContext.save()
+            planManager.propagateLinkedDays(from: keepDay)
+        }
+
+        /// Generates the subtitle for the day editor header.
+        private func daySummary(_ day: WorkoutPlanDay) -> String? {
+            guard !day.isRest else { return nil }
+            if day.totalSets > 0 { return "\(day.totalSets) sets" }
+            if !day.cardioExercises.isEmpty { return "\(day.cardioExercises.count) exercises" }
+            return nil
+        }
+    }
+
     // MARK: - Rename Alert Modifier
 
     struct RenameDayModifier: ViewModifier {
