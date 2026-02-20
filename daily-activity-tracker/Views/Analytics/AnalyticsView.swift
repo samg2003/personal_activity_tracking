@@ -6,16 +6,15 @@ struct AnalyticsView: View {
     @Query(sort: \ActivityLog.date, order: .reverse) private var allLogs: [ActivityLog]
     @Query private var vacationDays: [VacationDay]
 
-    private let scheduleEngine = ScheduleEngine()
-
-    @State private var showAllStreaks = false
     @State private var selectedTab: AnalyticsTab = .activities
 
-    // Cached analytics data (computed in recomputeAnalytics)
-    @State private var cachedSortedStreaks: [(activity: Activity, streak: Int)] = []
-    @State private var cachedBehindSchedule: [(activity: Activity, rate: Double)] = []
-    @State private var cachedBiggestWins: [(activity: Activity, delta: String)] = []
-    @State private var cachedDeepDiveGroups: [(label: String, icon: String, activities: [Activity])] = []
+    // Centralized analytics cache — computed ONCE, shared by all sections
+    @State private var streaks: [(activity: Activity, streak: Int)] = []
+    @State private var completionRates: [(activity: Activity, rate: Double)] = []
+    @State private var biggestWins: [(activity: Activity, delta: String)] = []
+    @State private var deepDiveGroups: [(label: String, icon: String, activities: [Activity])] = []
+    @State private var cachedPhotoActivities: [Activity] = []
+    @State private var analyticsReady = false
 
     enum AnalyticsTab: String, CaseIterable {
         case activities = "Activities"
@@ -36,116 +35,11 @@ struct AnalyticsView: View {
         }
     }
 
-    private var photoActivities: [Activity] {
-        allActivities.filter {
-            $0.type == .metric && $0.metricKind == .photo
-            && !MediaService.shared.allPhotos(for: $0.id).isEmpty
-        }
-    }
-
-    // Convenience aliases for cached data
-    private var sortedStreaks: [(activity: Activity, streak: Int)] { cachedSortedStreaks }
-    private var bestStreak: (name: String, count: Int)? {
-        cachedSortedStreaks.first.map { ($0.activity.name, $0.streak) }
-    }
-    private var behindSchedule: [(activity: Activity, rate: Double)] { cachedBehindSchedule }
-    private var biggestWins: [(activity: Activity, delta: String)] { cachedBiggestWins }
-    private var deepDiveGroups: [(label: String, icon: String, activities: [Activity])] { cachedDeepDiveGroups }
-
-    // MARK: - Analytics Recomputation
-
-    private func recomputeAnalytics() {
-        let topLevel = topLevelActivities
-        let logsByActivity = Dictionary(grouping: allLogs) { $0.activity?.id ?? UUID() }
-
-        // Streaks
-        cachedSortedStreaks = topLevel
-            .map { (activity: $0, streak: scheduleEngine.currentStreak(for: $0, logs: allLogs, allActivities: allActivities, vacationDays: vacationDays)) }
-            .sorted { $0.streak > $1.streak }
-
-        // Behind schedule
-        cachedBehindSchedule = topLevel
-            .map { (activity: $0, rate: scheduleEngine.completionRate(for: $0, days: 7, logs: allLogs, vacationDays: vacationDays, allActivities: allActivities)) }
-            .filter { $0.rate < 0.5 && $0.rate > 0 }
-            .sorted { $0.rate < $1.rate }
-
-        // Biggest wins
-        let calendar = Calendar.current
-        let now = Date().startOfDay
-        if let startOfThisWeek = calendar.date(byAdding: .day, value: -6, to: now),
-           let startOfLastWeek = calendar.date(byAdding: .day, value: -13, to: now),
-           let endOfLastWeek = calendar.date(byAdding: .day, value: -7, to: now) {
-
-            var results: [(activity: Activity, delta: Double, formatted: String)] = []
-            for activity in valueActivities {
-                let logs = logsByActivity[activity.id] ?? []
-                let thisWeekLogs = logs.filter {
-                    $0.status == .completed && $0.value != nil &&
-                    $0.date >= startOfThisWeek && $0.date <= now
-                }
-                let lastWeekLogs = logs.filter {
-                    $0.status == .completed && $0.value != nil &&
-                    $0.date >= startOfLastWeek && $0.date <= endOfLastWeek
-                }
-                guard !thisWeekLogs.isEmpty, !lastWeekLogs.isEmpty else { continue }
-
-                let thisAvg = activity.type == .cumulative
-                    ? activity.aggregateMultiDayValue(from: thisWeekLogs)
-                    : thisWeekLogs.compactMap(\.value).reduce(0, +) / Double(thisWeekLogs.count)
-                let lastAvg = activity.type == .cumulative
-                    ? activity.aggregateMultiDayValue(from: lastWeekLogs)
-                    : lastWeekLogs.compactMap(\.value).reduce(0, +) / Double(lastWeekLogs.count)
-
-                let delta = thisAvg - lastAvg
-                guard abs(delta) > 0.01 else { continue }
-
-                let unit = activity.unit ?? ""
-                let sign = delta > 0 ? "+" : ""
-                let formatted: String
-                if abs(delta) >= 10 {
-                    formatted = "\(sign)\(Int(delta))\(unit)/wk"
-                } else {
-                    formatted = "\(sign)\(String(format: "%.1f", delta))\(unit)/wk"
-                }
-                results.append((activity, abs(delta), formatted))
-            }
-            cachedBiggestWins = results
-                .sorted { $0.delta > $1.delta }
-                .prefix(3)
-                .map { ($0.activity, $0.formatted) }
-        } else {
-            cachedBiggestWins = []
-        }
-
-        // Deep dive groups
-        let eligible = allActivities.filter {
-            $0.parent == nil
-            && $0.type != .container
-            && $0.schedule.type != .sticky && $0.schedule.type != .adhoc
-        }
-        let sortedByRecency: (Activity, Activity) -> Bool = { a, b in
-            let aDate = logsByActivity[a.id]?.first?.date ?? .distantPast
-            let bDate = logsByActivity[b.id]?.first?.date ?? .distantPast
-            return aDate > bDate
-        }
-        var groups: [(label: String, icon: String, activities: [Activity])] = []
-        let checkboxes = eligible.filter { $0.type == .checkbox }.sorted(by: sortedByRecency)
-        if !checkboxes.isEmpty { groups.append(("Checkbox", "checkmark.circle", checkboxes)) }
-        let values = eligible.filter { $0.type == .value }.sorted(by: sortedByRecency)
-        if !values.isEmpty { groups.append(("Value", "number", values)) }
-        let cumulatives = eligible.filter { $0.type == .cumulative }.sorted(by: sortedByRecency)
-        if !cumulatives.isEmpty { groups.append(("Cumulative", "chart.bar.fill", cumulatives)) }
-        let metrics = eligible.filter { $0.type == .metric }.sorted(by: sortedByRecency)
-        if !metrics.isEmpty { groups.append(("Metric", "chart.line.uptrend.xyaxis", metrics)) }
-        cachedDeepDiveGroups = groups
-    }
-
     // MARK: - Body
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                // Segmented control
                 Picker("", selection: $selectedTab) {
                     ForEach(AnalyticsTab.allCases, id: \.self) { tab in
                         Text(tab.rawValue).tag(tab)
@@ -164,9 +58,14 @@ struct AnalyticsView: View {
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("Analytics")
-            .task { recomputeAnalytics() }
-            .onChange(of: allLogs.count) { recomputeAnalytics() }
-            .onChange(of: allActivities.count) { recomputeAnalytics() }
+        }
+        .task {
+            guard !analyticsReady else { return }
+            await computeAllAnalytics()
+        }
+        .onChange(of: allLogs.count) {
+            analyticsReady = false
+            Task { await computeAllAnalytics() }
         }
     }
 
@@ -174,17 +73,24 @@ struct AnalyticsView: View {
 
     private var activitiesContent: some View {
         ScrollView {
-            VStack(spacing: 24) {
+            LazyVStack(spacing: 24) {
                 // 1. Insight Summary
-                InsightSummaryCard(
-                    bestStreak: bestStreak,
-                    biggestWin: biggestWins.first.map { ($0.activity.name, $0.delta) },
-                    behindCount: behindSchedule.count
-                )
+                if analyticsReady {
+                    let bestStreak = streaks.max(by: { $0.streak < $1.streak }).map { ($0.activity.name, $0.streak) }
+                    let behindCount = completionRates.filter { $0.rate < 0.5 && $0.rate > 0 }.count
+                    let topWin = biggestWins.first
+                    InsightSummaryCard(
+                        bestStreak: bestStreak,
+                        biggestWin: topWin.map { ($0.activity.name, $0.delta) },
+                        behindCount: behindCount
+                    )
+                } else {
+                    sectionPlaceholder(height: 80)
+                }
 
-                // 2. Consistency Map (Heatmap)
+                // 2. Consistency Heatmap (self-loading — different data shape)
                 VStack(alignment: .leading, spacing: 8) {
-                    sectionHeader("Consistency Map", icon: "square.grid.3x3.fill")
+                    analyticsSectionHeader("Consistency Map", icon: "square.grid.3x3.fill")
                     HeatmapView(
                         activities: topLevelActivities,
                         allActivities: allActivities,
@@ -195,66 +101,49 @@ struct AnalyticsView: View {
                 }
 
                 // 3. Behind Schedule
-                if !behindSchedule.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        sectionHeader("Behind Schedule", icon: "exclamationmark.triangle.fill")
-                        ForEach(behindSchedule, id: \.activity.id) { item in
-                            NavigationLink {
-                                ActivityAnalyticsView(
-                                    activity: item.activity,
-                                    allLogs: allLogs,
-                                    vacationDays: vacationDays,
-                                    allActivities: allActivities
-                                )
-                            } label: {
-                                behindRow(item.activity, rate: item.rate)
+                if analyticsReady {
+                    let behindItems = completionRates.filter { $0.rate < 0.5 && $0.rate > 0 }.sorted { $0.rate < $1.rate }
+                    if !behindItems.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            analyticsSectionHeader("Behind Schedule", icon: "exclamationmark.triangle.fill")
+                            ForEach(behindItems, id: \.activity.id) { item in
+                                NavigationLink {
+                                    ActivityAnalyticsView(
+                                        activity: item.activity,
+                                        allLogs: allLogs,
+                                        vacationDays: vacationDays,
+                                        allActivities: allActivities
+                                    )
+                                } label: {
+                                    behindRow(item.activity, rate: item.rate)
+                                }
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
                         }
                     }
+                } else {
+                    sectionPlaceholder(height: 60)
                 }
 
                 // 4. Streak Leaderboard
-                VStack(alignment: .leading, spacing: 8) {
-                    sectionHeader("Streak Leaderboard", icon: "flame.fill")
-
-                    let visibleStreaks = showAllStreaks
-                        ? sortedStreaks
-                        : Array(sortedStreaks.prefix(5))
-
-                    ForEach(visibleStreaks, id: \.activity.id) { item in
-                        NavigationLink {
-                            ActivityAnalyticsView(
-                                activity: item.activity,
-                                allLogs: allLogs,
-                                vacationDays: vacationDays,
-                                allActivities: allActivities
-                            )
-                        } label: {
-                            streakRow(item.activity, streak: item.streak)
-                        }
-                        .buttonStyle(.plain)
-                    }
-
-                    if sortedStreaks.count > 5 {
-                        Button {
-                            withAnimation(.easeInOut(duration: 0.25)) {
-                                showAllStreaks.toggle()
-                            }
-                        } label: {
-                            Text(showAllStreaks ? "Show Less" : "Show All (\(sortedStreaks.count))")
-                                .font(.caption.bold())
-                                .foregroundStyle(Color.accentColor)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 8)
-                        }
+                if analyticsReady {
+                    StreakLeaderboardSectionView(
+                        items: streaks.sorted { $0.streak > $1.streak },
+                        allLogs: allLogs,
+                        allActivities: allActivities,
+                        vacationDays: vacationDays
+                    )
+                } else {
+                    VStack(alignment: .leading, spacing: 8) {
+                        analyticsSectionHeader("Streak Leaderboard", icon: "flame.fill")
+                        sectionPlaceholder(height: 120)
                     }
                 }
 
                 // 5. Biggest Wins
-                if !biggestWins.isEmpty {
+                if analyticsReady && !biggestWins.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
-                        sectionHeader("Biggest Wins", icon: "arrow.up.right")
+                        analyticsSectionHeader("Biggest Wins", icon: "arrow.up.right")
                         ForEach(biggestWins, id: \.activity.id) { item in
                             NavigationLink {
                                 ActivityAnalyticsView(
@@ -269,12 +158,14 @@ struct AnalyticsView: View {
                             .buttonStyle(.plain)
                         }
                     }
+                } else if !analyticsReady {
+                    sectionPlaceholder(height: 60)
                 }
 
                 // 6. Trends (Value Charts)
-                if !valueActivities.isEmpty {
+                if analyticsReady && !valueActivities.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
-                        sectionHeader("Trends", icon: "chart.line.uptrend.xyaxis")
+                        analyticsSectionHeader("Trends", icon: "chart.line.uptrend.xyaxis")
                         ForEach(valueActivities) { activity in
                             NavigationLink {
                                 ActivityAnalyticsView(
@@ -292,10 +183,10 @@ struct AnalyticsView: View {
                 }
 
                 // 7. Photo Progress
-                if !photoActivities.isEmpty {
+                if !cachedPhotoActivities.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
-                        sectionHeader("Photo Progress", icon: "person.2.crop.square.stack")
-                        ForEach(photoActivities) { activity in
+                        analyticsSectionHeader("Photo Progress", icon: "person.2.crop.square.stack")
+                        ForEach(cachedPhotoActivities) { activity in
                             NavigationLink {
                                 ActivityAnalyticsView(
                                     activity: activity,
@@ -312,9 +203,9 @@ struct AnalyticsView: View {
                 }
 
                 // 8. Deep Dive
-                if !deepDiveGroups.isEmpty {
+                if analyticsReady && !deepDiveGroups.isEmpty {
                     VStack(alignment: .leading, spacing: 12) {
-                        sectionHeader("Deep Dive", icon: "magnifyingglass")
+                        analyticsSectionHeader("Deep Dive", icon: "magnifyingglass")
 
                         ForEach(deepDiveGroups, id: \.label) { group in
                             VStack(alignment: .leading, spacing: 4) {
@@ -344,26 +235,149 @@ struct AnalyticsView: View {
                             }
                         }
                     }
+                } else if !analyticsReady {
+                    VStack(alignment: .leading, spacing: 8) {
+                        analyticsSectionHeader("Deep Dive", icon: "magnifyingglass")
+                        sectionPlaceholder(height: 120)
+                    }
                 }
             }
             .padding()
         }
     }
 
-    // MARK: - Sub-views
+    // MARK: - Centralized Compute (ONE pass for everything)
 
-    private func sectionHeader(_ title: String, icon: String, color: Color = Color(hex: 0x10B981)) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 22, height: 22)
-                .background(Circle().fill(color))
+    private func computeAllAnalytics() async {
+        let engine = ScheduleEngine()
+        let activities = topLevelActivities
+        let values = valueActivities
 
-            Text(title.uppercased())
-                .font(.system(size: 13, weight: .bold, design: .rounded))
-                .foregroundStyle(.secondary)
-            Spacer()
+        // Single log index — O(n) once
+        let logIndex = engine.preIndexLogs(allLogs)
+        let vacationSet = Set(vacationDays.map { $0.date.startOfDay })
+
+        await Task.yield()
+
+        // Batch streaks (yields per-activity internally)
+        streaks = await engine.batchCurrentStreaks(
+            for: activities, logIndex: logIndex,
+            allActivities: allActivities, vacationSet: vacationSet
+        )
+
+        await Task.yield()
+
+        // Batch completion rates (yields per-activity internally)
+        completionRates = await engine.batchCompletionRates(
+            for: activities, days: 7, logIndex: logIndex,
+            vacationSet: vacationSet, allActivities: allActivities
+        )
+
+        await Task.yield()
+
+        // Lightweight computations
+        biggestWins = Self.buildBiggestWins(values: values, logIndex: logIndex)
+        deepDiveGroups = Self.buildDeepDiveGroups(allActivities: allActivities, logIndex: logIndex)
+
+        cachedPhotoActivities = allActivities.filter {
+            $0.type == .metric && $0.metricKind == .photo
+            && !MediaService.shared.allPhotos(for: $0.id).isEmpty
+        }
+
+        analyticsReady = true
+    }
+
+    private static func buildBiggestWins(values: [Activity], logIndex: [UUID: [ActivityLog]]) -> [(Activity, String)] {
+        let calendar = Calendar.current
+        let now = Date().startOfDay
+        guard let s1 = calendar.date(byAdding: .day, value: -6, to: now),
+              let s2 = calendar.date(byAdding: .day, value: -13, to: now),
+              let e2 = calendar.date(byAdding: .day, value: -7, to: now)
+        else { return [] }
+
+        var results: [(activity: Activity, delta: Double, formatted: String)] = []
+        for activity in values {
+            let logs = logIndex[activity.id] ?? []
+            let tw = logs.filter { $0.status == .completed && $0.value != nil && $0.date >= s1 && $0.date <= now }
+            let lw = logs.filter { $0.status == .completed && $0.value != nil && $0.date >= s2 && $0.date <= e2 }
+            guard !tw.isEmpty, !lw.isEmpty else { continue }
+            let ta = activity.type == .cumulative ? activity.aggregateMultiDayValue(from: tw)
+                : tw.compactMap(\.value).reduce(0, +) / Double(tw.count)
+            let la = activity.type == .cumulative ? activity.aggregateMultiDayValue(from: lw)
+                : lw.compactMap(\.value).reduce(0, +) / Double(lw.count)
+            let d = ta - la
+            guard abs(d) > 0.01 else { continue }
+            let unit = activity.unit ?? ""
+            let sign = d > 0 ? "+" : ""
+            let f = abs(d) >= 10 ? "\(sign)\(Int(d))\(unit)/wk" : "\(sign)\(String(format: "%.1f", d))\(unit)/wk"
+            results.append((activity, abs(d), f))
+        }
+        return results.sorted { $0.1 > $1.1 }.prefix(3).map { ($0.0, $0.2) }
+    }
+
+    private static func buildDeepDiveGroups(allActivities: [Activity], logIndex: [UUID: [ActivityLog]]) -> [(String, String, [Activity])] {
+        let eligible = allActivities.filter {
+            $0.parent == nil && $0.type != .container
+            && $0.schedule.type != .sticky && $0.schedule.type != .adhoc
+        }
+        let sortedByRecency: (Activity, Activity) -> Bool = { a, b in
+            let aDate = logIndex[a.id]?.first?.date ?? .distantPast
+            let bDate = logIndex[b.id]?.first?.date ?? .distantPast
+            return aDate > bDate
+        }
+        var g: [(label: String, icon: String, activities: [Activity])] = []
+        let checkboxes = eligible.filter { $0.type == .checkbox }.sorted(by: sortedByRecency)
+        if !checkboxes.isEmpty { g.append(("Checkbox", "checkmark.circle", checkboxes)) }
+        let values = eligible.filter { $0.type == .value }.sorted(by: sortedByRecency)
+        if !values.isEmpty { g.append(("Value", "number", values)) }
+        let cumulatives = eligible.filter { $0.type == .cumulative }.sorted(by: sortedByRecency)
+        if !cumulatives.isEmpty { g.append(("Cumulative", "chart.bar.fill", cumulatives)) }
+        let metrics = eligible.filter { $0.type == .metric }.sorted(by: sortedByRecency)
+        if !metrics.isEmpty { g.append(("Metric", "chart.line.uptrend.xyaxis", metrics)) }
+        return g
+    }
+}
+
+// MARK: - Streak Leaderboard (pure renderer, data pre-computed)
+
+private struct StreakLeaderboardSectionView: View {
+    let items: [(activity: Activity, streak: Int)]
+    let allLogs: [ActivityLog]
+    let allActivities: [Activity]
+    let vacationDays: [VacationDay]
+
+    @State private var showAll = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            analyticsSectionHeader("Streak Leaderboard", icon: "flame.fill")
+
+            let visible = showAll ? items : Array(items.prefix(5))
+            ForEach(visible, id: \.activity.id) { item in
+                NavigationLink {
+                    ActivityAnalyticsView(
+                        activity: item.activity,
+                        allLogs: allLogs,
+                        vacationDays: vacationDays,
+                        allActivities: allActivities
+                    )
+                } label: {
+                    streakRow(item.activity, streak: item.streak)
+                }
+                .buttonStyle(.plain)
+            }
+
+            if items.count > 5 {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.25)) { showAll.toggle() }
+                } label: {
+                    Text(showAll ? "Show Less" : "Show All (\(items.count))")
+                        .font(.caption.bold())
+                        .foregroundStyle(Color.accentColor)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                }
+            }
         }
     }
 
@@ -387,114 +401,16 @@ struct AnalyticsView: View {
 
                 Spacer()
 
-                if streak > 0 {
-                    HStack(spacing: 4) {
-                        Image(systemName: "flame.fill")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.orange)
-                        Text("\(streak)d")
-                            .font(.system(.caption, design: .rounded, weight: .bold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Capsule().fill(.orange))
-                    }
-                } else {
-                    Text("—")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-            }
-            .padding(.leading, 8)
-            .padding(.trailing, 12)
-        }
-        .padding(.vertical, 6)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: WDS.cardRadius, style: .continuous))
-        .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
-    }
+                Image(systemName: "flame.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(streak > 0 ? .orange : Color.gray.opacity(0.3))
 
-    private func behindRow(_ activity: Activity, rate: Double) -> some View {
-        let barColor: Color = rate < 0.25 ? .red : .orange
-        return HStack(spacing: 0) {
-            RoundedRectangle(cornerRadius: 2)
-                .fill(barColor)
-                .frame(width: 4)
-                .padding(.vertical, 6)
-
-            HStack(spacing: 10) {
-                Image(systemName: activity.icon)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Color(hex: activity.hexColor))
-                    .frame(width: 26, height: 26)
-                    .background(Circle().fill(Color(hex: activity.hexColor).opacity(0.12)))
-
-                Text(activity.name)
-                    .font(.subheadline.weight(.medium))
-                    .lineLimit(1)
-
-                Spacer()
-
-                // Gradient mini progress bar
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        RoundedRectangle(cornerRadius: 4)
-                            .fill(Color(.systemGray5))
-                        RoundedRectangle(cornerRadius: 4)
-                            .fill(
-                                LinearGradient(
-                                    colors: [barColor.opacity(0.5), barColor],
-                                    startPoint: .leading, endPoint: .trailing
-                                )
-                            )
-                            .frame(width: geo.size.width * rate)
-                    }
-                }
-                .frame(width: 60, height: 8)
-
-                Text("\(Int(rate * 100))%")
-                    .font(.system(.caption, design: .rounded, weight: .bold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Capsule().fill(barColor))
-                    .frame(width: 44, alignment: .trailing)
-            }
-            .padding(.leading, 8)
-            .padding(.trailing, 12)
-        }
-        .padding(.vertical, 8)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: WDS.cardRadius, style: .continuous))
-        .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
-    }
-
-    private func winRow(_ activity: Activity, delta: String) -> some View {
-        HStack(spacing: 0) {
-            RoundedRectangle(cornerRadius: 2)
-                .fill(Color.green)
-                .frame(width: 4)
-                .padding(.vertical, 6)
-
-            HStack(spacing: 10) {
-                Image(systemName: activity.icon)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Color(hex: activity.hexColor))
-                    .frame(width: 26, height: 26)
-                    .background(Circle().fill(Color(hex: activity.hexColor).opacity(0.12)))
-
-                Text(activity.name)
-                    .font(.subheadline.weight(.medium))
-                    .lineLimit(1)
-
-                Spacer()
-
-                Text(delta)
+                Text("\(streak)d")
                     .font(.system(.caption, design: .rounded, weight: .bold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
-                    .background(Capsule().fill(.green))
+                    .background(Capsule().fill(streak > 0 ? Color.orange : Color.gray.opacity(0.5)))
             }
             .padding(.leading, 8)
             .padding(.trailing, 12)
@@ -504,55 +420,167 @@ struct AnalyticsView: View {
         .clipShape(RoundedRectangle(cornerRadius: WDS.cardRadius, style: .continuous))
         .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
     }
+}
 
-    private func deepDiveRow(_ activity: Activity) -> some View {
-        HStack(spacing: 0) {
-            RoundedRectangle(cornerRadius: 2)
-                .fill(Color(hex: activity.hexColor))
-                .frame(width: 4)
-                .padding(.vertical, 6)
+// MARK: - Shared Row Views
 
-            HStack(spacing: 10) {
-                Image(systemName: activity.icon)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Color(hex: activity.hexColor))
-                    .frame(width: 26, height: 26)
-                    .background(Circle().fill(Color(hex: activity.hexColor).opacity(0.12)))
+private func behindRow(_ activity: Activity, rate: Double) -> some View {
+    let barColor: Color = rate < 0.25 ? .red : .orange
+    return HStack(spacing: 0) {
+        RoundedRectangle(cornerRadius: 2)
+            .fill(barColor)
+            .frame(width: 4)
+            .padding(.vertical, 6)
 
-                Text(activity.name)
-                    .font(.subheadline.weight(.medium))
-                    .lineLimit(1)
+        HStack(spacing: 10) {
+            Image(systemName: activity.icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Color(hex: activity.hexColor))
+                .frame(width: 26, height: 26)
+                .background(Circle().fill(Color(hex: activity.hexColor).opacity(0.12)))
 
-                if activity.isStopped {
-                    Text("Paused")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.orange)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(.orange.opacity(0.12))
-                        .clipShape(Capsule())
+            Text(activity.name)
+                .font(.subheadline.weight(.medium))
+                .lineLimit(1)
+
+            Spacer()
+
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color(.systemGray5))
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(
+                            LinearGradient(
+                                colors: [barColor.opacity(0.5), barColor],
+                                startPoint: .leading, endPoint: .trailing
+                            )
+                        )
+                        .frame(width: geo.size.width * rate)
                 }
-
-                Spacer()
-
-                // Last logged date
-                if let lastLog = allLogs.first(where: { $0.activity?.id == activity.id }) {
-                    Text(lastLog.date, format: .dateTime.month(.abbreviated).day().year())
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                }
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.quaternary)
             }
-            .padding(.leading, 8)
-            .padding(.trailing, 12)
+            .frame(width: 60, height: 8)
+
+            Text("\(Int(rate * 100))%")
+                .font(.system(.caption, design: .rounded, weight: .bold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Capsule().fill(barColor))
+                .frame(width: 44, alignment: .trailing)
         }
-        .padding(.vertical, 8)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: WDS.cardRadius, style: .continuous))
-        .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
+        .padding(.leading, 8)
+        .padding(.trailing, 12)
+    }
+    .padding(.vertical, 8)
+    .background(.ultraThinMaterial)
+    .clipShape(RoundedRectangle(cornerRadius: WDS.cardRadius, style: .continuous))
+    .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
+}
+
+private func winRow(_ activity: Activity, delta: String) -> some View {
+    HStack(spacing: 0) {
+        RoundedRectangle(cornerRadius: 2)
+            .fill(Color.green)
+            .frame(width: 4)
+            .padding(.vertical, 6)
+
+        HStack(spacing: 10) {
+            Image(systemName: activity.icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Color(hex: activity.hexColor))
+                .frame(width: 26, height: 26)
+                .background(Circle().fill(Color(hex: activity.hexColor).opacity(0.12)))
+
+            Text(activity.name)
+                .font(.subheadline.weight(.medium))
+                .lineLimit(1)
+
+            Spacer()
+
+            Text(delta)
+                .font(.system(.caption, design: .rounded, weight: .bold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Capsule().fill(.green))
+        }
+        .padding(.leading, 8)
+        .padding(.trailing, 12)
+    }
+    .padding(.vertical, 8)
+    .background(.ultraThinMaterial)
+    .clipShape(RoundedRectangle(cornerRadius: WDS.cardRadius, style: .continuous))
+    .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
+}
+
+private func deepDiveRow(_ activity: Activity) -> some View {
+    HStack(spacing: 0) {
+        RoundedRectangle(cornerRadius: 2)
+            .fill(Color(hex: activity.hexColor))
+            .frame(width: 4)
+            .padding(.vertical, 6)
+
+        HStack(spacing: 10) {
+            Image(systemName: activity.icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Color(hex: activity.hexColor))
+                .frame(width: 26, height: 26)
+                .background(Circle().fill(Color(hex: activity.hexColor).opacity(0.12)))
+
+            Text(activity.name)
+                .font(.subheadline.weight(.medium))
+                .lineLimit(1)
+
+            if activity.isStopped {
+                Text("Paused")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(.orange.opacity(0.12))
+                    .clipShape(Capsule())
+            }
+
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.quaternary)
+        }
+        .padding(.leading, 8)
+        .padding(.trailing, 12)
+    }
+    .padding(.vertical, 8)
+    .background(.ultraThinMaterial)
+    .clipShape(RoundedRectangle(cornerRadius: WDS.cardRadius, style: .continuous))
+    .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
+}
+
+// MARK: - Shared Placeholder
+
+private func sectionPlaceholder(height: CGFloat) -> some View {
+    RoundedRectangle(cornerRadius: WDS.cardRadius, style: .continuous)
+        .fill(.ultraThinMaterial)
+        .frame(height: height)
+        .overlay {
+            ProgressView()
+                .tint(.secondary)
+        }
+}
+
+private func analyticsSectionHeader(_ title: String, icon: String, color: Color = Color(hex: 0x10B981)) -> some View {
+    HStack(spacing: 8) {
+        Image(systemName: icon)
+            .font(.system(size: 11, weight: .bold))
+            .foregroundStyle(.white)
+            .frame(width: 22, height: 22)
+            .background(Circle().fill(color))
+
+        Text(title.uppercased())
+            .font(.system(size: 13, weight: .bold, design: .rounded))
+            .foregroundStyle(.secondary)
+        Spacer()
     }
 }
 

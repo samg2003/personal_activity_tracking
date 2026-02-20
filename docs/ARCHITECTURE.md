@@ -453,7 +453,9 @@ daily-activity-tracker/
 3. Wire `.task {}` for initial compute and `.onChange(of: dataSource.count)` for updates
 4. Keep thin computed aliases (`var x { cachedX }`) to minimize call-site changes
 
-**Also applied**: `ScheduleEngine` streak/rate methods now pre-index activity logs by date (`Dictionary(grouping:)`) for O(1) per-day lookups instead of O(n) linear scans over 3650 days.
+**Also applied**:
+- `ScheduleEngine` streak/rate methods pre-index activity logs by date (`Dictionary(grouping:)`) for O(1) per-day lookups instead of O(n) linear scans over 3650 days
+- `ContentView` uses lazy tab loading — only the selected tab's view (and its `@Query` watchers) are instantiated; inactive tabs render a lightweight placeholder, eliminating SwiftData tracking for ~4 simultaneous tab queries
 
 ---
 

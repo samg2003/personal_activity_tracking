@@ -358,6 +358,17 @@ extension ScheduleEngine {
     private func containerCompletionRate(
         for container: Activity,
         days: Int,
+        logIndex: [UUID: [ActivityLog]],
+        vacationSet: Set<Date>,
+        allActivities: [Activity]
+    ) -> Double {
+        let logs = Array(logIndex.values.joined())
+        return containerCompletionRate(for: container, days: days, logs: logs, vacationSet: vacationSet, allActivities: allActivities)
+    }
+
+    private func containerCompletionRate(
+        for container: Activity,
+        days: Int,
         logs: [ActivityLog],
         vacationSet: Set<Date>,
         allActivities: [Activity]
@@ -528,6 +539,18 @@ extension ScheduleEngine {
     private func containerStreak(
         for container: Activity,
         mode: StreakMode,
+        logIndex: [UUID: [ActivityLog]],
+        allActivities: [Activity],
+        vacationSet: Set<Date>
+    ) -> Int {
+        // Flatten only for this single container call (containers are rare)
+        let logs = Array(logIndex.values.joined())
+        return containerStreak(for: container, mode: mode, logs: logs, allActivities: allActivities, vacationSet: vacationSet)
+    }
+
+    private func containerStreak(
+        for container: Activity,
+        mode: StreakMode,
         logs: [ActivityLog],
         allActivities: [Activity],
         vacationSet: Set<Date>
@@ -629,5 +652,144 @@ extension ScheduleEngine {
         let hasSkip = dayLogs.contains { $0.status == .skipped }
         let hasCompletion = dayLogs.contains { $0.status == .completed }
         return hasSkip && !hasCompletion
+    }
+
+    // MARK: - Batch Computation (pre-indexed)
+
+    /// Pre-indexes all logs by activity ID for batch operations.
+    /// Call once, then pass the result to batch methods.
+    func preIndexLogs(_ logs: [ActivityLog]) -> [UUID: [ActivityLog]] {
+        Dictionary(grouping: logs) { $0.activity?.id ?? UUID() }
+    }
+
+    /// Compute current streaks for all activities in batch, reusing pre-indexed logs.
+    /// Async to yield between activities so the main thread stays responsive.
+    func batchCurrentStreaks(
+        for activities: [Activity],
+        logIndex: [UUID: [ActivityLog]],
+        allActivities: [Activity],
+        vacationSet: Set<Date>
+    ) async -> [(activity: Activity, streak: Int)] {
+        let calendar = Calendar.current
+        var results: [(activity: Activity, streak: Int)] = []
+        results.reserveCapacity(activities.count)
+
+        for activity in activities {
+            await Task.yield()
+
+            if activity.type == .container {
+                let streak = containerStreak(for: activity, mode: .current, logIndex: logIndex, allActivities: allActivities, vacationSet: vacationSet)
+                results.append((activity, streak))
+                continue
+            }
+
+            let activityLogs = logIndex[activity.id] ?? []
+            let logsByDay = Dictionary(grouping: activityLogs) { $0.date.startOfDay }
+
+            var streak = 0
+            var day = Date().startOfDay
+            if !isActivityDayCompletedIndexed(logsByDay: logsByDay, activity: activity, day: day) {
+                guard let prev = calendar.date(byAdding: .day, value: -1, to: day) else {
+                    results.append((activity, 0))
+                    continue
+                }
+                day = prev
+            }
+
+            for i in 0..<3650 {
+                if day < activity.createdDate.startOfDay { break }
+                if let stopped = activity.stoppedAt, day > stopped { break }
+
+                let schedule = activity.scheduleActive(on: day)
+                if !schedule.isScheduled(on: day) {
+                    // not scheduled — pass through
+                } else if isActivityDayCompletedIndexed(logsByDay: logsByDay, activity: activity, day: day) {
+                    streak += 1
+                } else if vacationSet.contains(day) {
+                    // vacation — pass through
+                } else if isActivityDayFullySkippedIndexed(logsByDay: logsByDay, day: day) {
+                    // all sessions skipped — pass through
+                } else {
+                    break
+                }
+
+                guard let prev = calendar.date(byAdding: .day, value: -1, to: day) else { break }
+                day = prev
+
+                // Yield every 200 days to keep UI responsive during long streaks
+                if i > 0 && i % 200 == 0 { await Task.yield() }
+            }
+            results.append((activity, streak))
+        }
+        return results
+    }
+
+    /// Compute completion rates for all activities in batch, reusing pre-indexed logs.
+    /// Async to yield between activities so the main thread stays responsive.
+    func batchCompletionRates(
+        for activities: [Activity],
+        days: Int,
+        logIndex: [UUID: [ActivityLog]],
+        vacationSet: Set<Date>,
+        allActivities: [Activity]
+    ) async -> [(activity: Activity, rate: Double)] {
+        let calendar = Calendar.current
+        let today = Date().startOfDay
+        var results: [(activity: Activity, rate: Double)] = []
+        results.reserveCapacity(activities.count)
+
+        for activity in activities {
+            await Task.yield()
+
+            if activity.type == .container {
+                let rate = containerCompletionRate(for: activity, days: days, logIndex: logIndex, vacationSet: vacationSet, allActivities: allActivities)
+                results.append((activity, rate))
+                continue
+            }
+
+            let activityLogs = logIndex[activity.id] ?? []
+            let logsByDay = Dictionary(grouping: activityLogs) { $0.date.startOfDay }
+            var totalExpected = 0
+            var totalCompleted = 0
+
+            for offset in 0..<days {
+                guard let day = calendar.date(byAdding: .day, value: -offset, to: today) else { continue }
+                if vacationSet.contains(day) { continue }
+                if let stopped = activity.stoppedAt, day > stopped { continue }
+                if day < activity.createdDate.startOfDay { continue }
+
+                let schedule = activity.scheduleActive(on: day)
+                guard schedule.isScheduled(on: day) else { continue }
+
+                let dayActivityLogs = logsByDay[day] ?? []
+                let slots = activity.timeSlotsActive(on: day)
+                let sessions = activity.sessionsPerDay(on: day)
+
+                if slots.count > 1 {
+                    var slotsDone = 0
+                    var slotsSkipped = 0
+                    for slot in slots {
+                        if dayActivityLogs.contains(where: { $0.status == .completed && $0.timeSlot == slot }) {
+                            slotsDone += 1
+                        } else if dayActivityLogs.contains(where: { $0.status == .skipped && $0.timeSlot == slot }) {
+                            slotsSkipped += 1
+                        }
+                    }
+                    if slotsSkipped == sessions && slotsDone == 0 { continue }
+                    totalExpected += sessions - slotsSkipped
+                    totalCompleted += min(slotsDone, sessions - slotsSkipped)
+                } else {
+                    let dayCompleted = dayActivityLogs.filter { $0.status == .completed }.count
+                    let daySkipped = dayActivityLogs.contains { $0.status == .skipped }
+                    if daySkipped && dayCompleted == 0 { continue }
+                    totalExpected += sessions
+                    totalCompleted += min(dayCompleted, sessions)
+                }
+            }
+
+            let rate = totalExpected > 0 ? Double(totalCompleted) / Double(totalExpected) : 0
+            results.append((activity, rate))
+        }
+        return results
     }
 }
