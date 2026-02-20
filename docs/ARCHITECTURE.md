@@ -152,8 +152,12 @@ enum ActivityType: String, Codable {
     case value       // log number + unit
     case cumulative  // multiple logs/day, aggregated via sum or average
     case container   // derived from children
+    case metric      // outcome measurement (photo, value, checkbox, notes)
 }
 ```
+
+> [!NOTE]
+> **Cumulative activities** are always "All Day" — the time window picker is hidden during creation/editing, and they are pinned to the top of each category section in the Activities list. On the Dashboard they appear in a dedicated `AllDaySection` above all time-bucketed activities. The quick-add button shows a smart increment: mode of last 20 log entries → `round(goal/8)` → fallback `1`.
 
 ### Schedule
 ```swift
@@ -443,7 +447,7 @@ daily-activity-tracker/
 
 ### ADR-21: Cached Derived State for View Performance
 
-**Decision**: Heavy computed properties in `DashboardView`, `DatePickerBar`, `AnalyticsView`, and `GoalsView` are replaced with `@State` cached values that recompute only on data changes (`.task {}` + `.onChange(of:)`), not on every SwiftUI body evaluation.
+**Decision**: Heavy computed properties in `DashboardView`, `ActivitiesListView`, `DatePickerBar`, `AnalyticsView`, and `GoalsView` are replaced with `@State` cached values that recompute only on data changes (`.task {}` + `.onChange(of:)`), not on every SwiftUI body evaluation.
 
 **Rationale**: With ~1100+ logs and 30+ activities, the computed property cascade was causing noticeable UI jank — each body eval triggered O(logs) filtering across 5 simultaneously alive tabs. Caching cuts this to a single recomputation per data mutation.
 
@@ -454,8 +458,12 @@ daily-activity-tracker/
 4. Keep thin computed aliases (`var x { cachedX }`) to minimize call-site changes
 
 **Also applied**:
+- `ActivitiesListView`: `topLevelActivities`, `groupedByCategory`, `activeOneTimeTasks`, `completedOneTimeTasks`, `pausedActivities`, and `containerActivities` are all cached via `recomputeCachedLists()`
+- `DashboardView`: `cachedQuickIncrements` dictionary caches smart quick-add values per activity (mode of last 20 logs → `round(goal/8)` → 1) to avoid recalculation on every body eval
+- `AddActivityView`: Uses deferred rendering (`ready` flag + `.task` with 50ms delay) so the sheet presents instantly with a `ProgressView` placeholder
 - `ScheduleEngine` streak/rate methods pre-index activity logs by date (`Dictionary(grouping:)`) for O(1) per-day lookups instead of O(n) linear scans over 3650 days
 - `ContentView` uses lazy tab loading — only the selected tab's view (and its `@Query` watchers) are instantiated; inactive tabs render a lightweight placeholder, eliminating SwiftData tracking for ~4 simultaneous tab queries
+- Relationship faulting avoided: `modelContext.fetchCount(FetchDescriptor)` replaces direct `activity.logs.isEmpty` / `.count` access to prevent loading all log objects into memory
 
 ---
 

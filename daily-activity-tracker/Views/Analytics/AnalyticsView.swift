@@ -307,10 +307,20 @@ struct AnalyticsView: View {
             let tw = logs.filter { $0.status == .completed && $0.value != nil && $0.date >= s1 && $0.date <= now }
             let lw = logs.filter { $0.status == .completed && $0.value != nil && $0.date >= s2 && $0.date <= e2 }
             guard !tw.isEmpty, !lw.isEmpty else { continue }
-            let ta = activity.type == .cumulative ? activity.aggregateMultiDayValue(from: tw)
-                : tw.compactMap(\.value).reduce(0, +) / Double(tw.count)
-            let la = activity.type == .cumulative ? activity.aggregateMultiDayValue(from: lw)
-                : lw.compactMap(\.value).reduce(0, +) / Double(lw.count)
+            let avgDaily: ([ActivityLog]) -> Double = { logs in
+                let byDay = Dictionary(grouping: logs) { $0.date.startOfDay }
+                let dailyVals: [Double] = byDay.values.compactMap { dayLogs in
+                    let v = dayLogs.compactMap(\.value)
+                    guard !v.isEmpty else { return nil }
+                    return activity.type == .cumulative
+                        ? activity.aggregateDayValue(from: v)
+                        : v.reduce(0, +) / Double(v.count)
+                }
+                guard !dailyVals.isEmpty else { return 0 }
+                return dailyVals.reduce(0, +) / Double(dailyVals.count)
+            }
+            let ta = avgDaily(tw)
+            let la = avgDaily(lw)
             let d = ta - la
             guard abs(d) > 0.01 else { continue }
             let unit = activity.unit ?? ""

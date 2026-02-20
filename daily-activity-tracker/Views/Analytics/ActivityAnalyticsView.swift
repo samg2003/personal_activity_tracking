@@ -152,19 +152,10 @@ struct ActivityAnalyticsView: View {
             switch activity.type {
             case .checkbox:
                 aggregate = values.reduce(0, +) // total completions in week
-            case .value, .metric:
+            case .value, .metric, .cumulative, .container:
+                // Average daily values across the period (non-zero days only)
                 let nonZero = values.filter { $0 > 0 }
-                aggregate = nonZero.isEmpty ? 0 : nonZero.reduce(0, +) / Double(nonZero.count) // weekly avg
-            case .cumulative:
-                if activity.aggregationMode == .average {
-                    let nonZero = values.filter { $0 > 0 }
-                    aggregate = nonZero.isEmpty ? 0 : nonZero.reduce(0, +) / Double(nonZero.count)
-                } else {
-                    aggregate = values.reduce(0, +)
-                }
-            case .container:
-                let nonZero = values.filter { $0 > 0 }
-                aggregate = nonZero.isEmpty ? 0 : nonZero.reduce(0, +) / Double(nonZero.count) // avg %
+                aggregate = nonZero.isEmpty ? 0 : nonZero.reduce(0, +) / Double(nonZero.count)
             }
 
             return BarChartView.BarData(

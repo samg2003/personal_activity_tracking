@@ -68,20 +68,27 @@ struct ValueChartView: View {
         .sorted { $0.date < $1.date }
     }
 
-    /// Weekly-aggregated points for wider ranges
+    /// Weekly-aggregated points for wider ranges — averages daily values across each week
     private var weeklyPoints: [(date: Date, value: Double)] {
         let calendar = Calendar.current
         let grouped = Dictionary(grouping: filteredLogs) { log in
             calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: log.date))!
         }
         return grouped.map { (weekStart, weekLogs) in
-            let value: Double
-            if activity.type == .cumulative {
-                value = activity.aggregateMultiDayValue(from: weekLogs)
-            } else {
-                let values = weekLogs.compactMap(\.value)
-                value = values.isEmpty ? 0 : values.reduce(0, +) / Double(values.count)
+            // First compute per-day values
+            let byDay = Dictionary(grouping: weekLogs.filter { $0.status == .completed }) { $0.date.startOfDay }
+            let dailyValues: [Double] = byDay.values.compactMap { dayLogs in
+                let vals = dayLogs.compactMap(\.value)
+                guard !vals.isEmpty else { return nil }
+                if activity.type == .cumulative {
+                    return activity.aggregateDayValue(from: vals)
+                } else {
+                    return vals.reduce(0, +) / Double(vals.count)
+                }
             }
+            guard !dailyValues.isEmpty else { return (weekStart, 0.0) }
+            // Then average across days
+            let value = dailyValues.reduce(0, +) / Double(dailyValues.count)
             return (weekStart, value)
         }
         .sorted { $0.date < $1.date }
