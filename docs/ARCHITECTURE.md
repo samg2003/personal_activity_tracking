@@ -376,6 +376,7 @@ daily-activity-tracker/
 - **Resume**: Clears `stoppedAt`, restores parent from `pausedParentId` if container still exists  
 - `isArchived` property kept in SwiftData schema for backward compatibility but deprecated
 - DataService import handles legacy `isArchived=true` by setting `stoppedAt` if not already set
+- DataService v2.0 adds export/import for workout domain: Exercise, ExerciseMuscle, MuscleGroup, WorkoutPlan, WorkoutPlanDay, StrengthPlanExercise, CardioPlanExercise, StrengthSession, WorkoutSetLog, CardioSession, CardioSessionLog. All new fields are optional for backward compatibility with v1.0 exports.
 
 ---
 

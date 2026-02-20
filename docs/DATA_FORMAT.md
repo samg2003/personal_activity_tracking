@@ -4,11 +4,11 @@ The Daily Activity Tracker uses a JSON-based format for importing and exporting 
 
 ## Schema Overview
 
-The root of the JSON file is an object containing arrays for `categories`, `activities`, `logs`, `vacationDays`, `configSnapshots`, `goals`, `goalActivities`, and `goalMeasurements`.
+The root of the JSON file is an object. Version `2.0` adds workout-domain arrays (all optional for backward compat with v1.0 imports).
 
 ```json
 {
-  "version": "1.0",
+  "version": "2.0",
   "timestamp": "2026-02-15T12:00:00Z",
   "categories": [ ... ],
   "activities": [ ... ],
@@ -17,7 +17,17 @@ The root of the JSON file is an object containing arrays for `categories`, `acti
   "configSnapshots": [ ... ],
   "goals": [ ... ],
   "goalActivities": [ ... ],
-  "goalMeasurements": [ ... ]
+  "exercises": [ ... ],
+  "exerciseMuscles": [ ... ],
+  "muscleGroups": [ ... ],
+  "workoutPlans": [ ... ],
+  "workoutPlanDays": [ ... ],
+  "strengthPlanExercises": [ ... ],
+  "cardioPlanExercises": [ ... ],
+  "strengthSessions": [ ... ],
+  "workoutSetLogs": [ ... ],
+  "cardioSessions": [ ... ],
+  "cardioSessionLogs": [ ... ]
 }
 ```
 
@@ -244,3 +254,181 @@ Links goals to activities with a role (`activity` for habits, `metric` for outco
 
 > [!NOTE]
 > GoalMeasurement was removed in the metrics-as-activities redesign. Outcome metrics are now tracked via standard ActivityLog entries on metric-role activities.
+
+---
+
+## 8. Exercises (v2.0)
+
+```json
+{
+  "id": "UUID-STRING",
+  "name": "Bench Press",
+  "equipment": "Barbell",
+  "exerciseTypeRaw": "strength",
+  "aliasesData": null,
+  "videoURLsData": null,
+  "notes": null,
+  "distanceUnit": null,
+  "paceUnit": null,
+  "availableMetricsData": null,
+  "isPreSeeded": false,
+  "createdAt": "2026-01-01T00:00:00Z"
+}
+```
+
+| Field             | Type   | Description                                     |
+| :---------------- | :----- | :---------------------------------------------- |
+| `exerciseTypeRaw` | String | `"strength"`, `"cardio"`, or `"timed"`.         |
+| `equipment`       | String | Equipment name (e.g., "Barbell", "Bodyweight"). |
+| `distanceUnit`    | String | (Optional) For cardio: `"km"`, `"mi"`.          |
+| `paceUnit`        | String | (Optional) For cardio: `"/km"`, `"/mi"`.        |
+
+---
+
+## 9. Exercise Muscles (v2.0)
+
+Junction linking exercises to muscle groups.
+
+| Field              | Type   | Description                            |
+| :----------------- | :----- | :------------------------------------- |
+| `exerciseID`       | UUID   | References an Exercise.                |
+| `muscleGroupID`    | UUID   | (Optional) References a MuscleGroup.   |
+| `involvementScore` | Double | 0.0–1.0 indicating muscle involvement. |
+
+---
+
+## 10. Muscle Groups (v2.0)
+
+| Field         | Type   | Description                           |
+| :------------ | :----- | :------------------------------------ |
+| `name`        | String | Muscle group name.                    |
+| `parentID`    | UUID   | (Optional) Parent muscle group ID.    |
+| `mevSets`     | Int    | Minimum Effective Volume (sets/week). |
+| `mavSets`     | Int    | Maximum Adaptive Volume.              |
+| `mrvSets`     | Int    | Maximum Recoverable Volume.           |
+| `isPreSeeded` | Bool   | Whether pre-seeded by the app.        |
+
+---
+
+## 11. Workout Plans (v2.0)
+
+| Field                 | Type   | Description                              |
+| :-------------------- | :----- | :--------------------------------------- |
+| `name`                | String | Plan name (e.g., "Push Pull Legs").      |
+| `planTypeRaw`         | String | `"strength"`, `"cardio"`, or `"timed"`.  |
+| `statusRaw`           | String | `"active"`, `"paused"`, `"deactivated"`. |
+| `containerActivityID` | UUID   | (Optional) Linked container Activity.    |
+
+---
+
+## 12. Workout Plan Days (v2.0)
+
+| Field               | Type   | Description                             |
+| :------------------ | :----- | :-------------------------------------- |
+| `weekday`           | Int    | 1=Mon … 7=Sun.                          |
+| `dayLabel`          | String | Display label (e.g., "Push A", "Rest"). |
+| `isLabelOverridden` | Bool   | Whether the label was manually set.     |
+| `isRest`            | Bool   | Whether this is a rest day.             |
+| `colorGroup`        | Int    | Color group index for UI.               |
+| `planID`            | UUID   | References a WorkoutPlan.               |
+
+---
+
+## 13. Strength Plan Exercises (v2.0)
+
+| Field           | Type   | Description                        |
+| :-------------- | :----- | :--------------------------------- |
+| `targetSets`    | Int    | Number of target sets.             |
+| `rir`           | Int    | Reps In Reserve.                   |
+| `sortOrder`     | Int    | Display order within the day.      |
+| `supersetGroup` | String | (Optional) Group ID for superset.  |
+| `exerciseID`    | UUID   | (Optional) References an Exercise. |
+| `planDayID`     | UUID   | References a WorkoutPlanDay.       |
+
+---
+
+## 14. Cardio Plan Exercises (v2.0)
+
+| Field               | Type   | Description                                |
+| :------------------ | :----- | :----------------------------------------- |
+| `sessionTypeRaw`    | String | `"steadyState"`, `"hiit"`, `"tempo"`, etc. |
+| `targetDistance`    | Double | (Optional) Target distance.                |
+| `targetDurationMin` | Int    | (Optional) Target duration in minutes.     |
+| `sessionParamsData` | Data   | (Optional) Encoded session parameters.     |
+| `exerciseID`        | UUID   | (Optional) References an Exercise.         |
+| `planDayID`         | UUID   | References a WorkoutPlanDay.               |
+
+---
+
+## 15. Strength Sessions (v2.0)
+
+Logs a completed strength workout. Stores snapshot data so the session is self-contained even if the plan changes.
+
+| Field                    | Type    | Description                             |
+| :----------------------- | :------ | :-------------------------------------- |
+| `planName`               | String  | Snapshot of plan name.                  |
+| `dayLabel`               | String  | Snapshot of day label.                  |
+| `weekday`                | Int     | Day of week (1=Mon).                    |
+| `date`                   | ISO8601 | Session date.                           |
+| `startedAt`              | ISO8601 | When the session started.               |
+| `endedAt`                | ISO8601 | (Optional) When the session ended.      |
+| `totalPausedSeconds`     | Double  | Total paused time.                      |
+| `statusRaw`              | String  | `"inProgress"`, `"completed"`, etc.     |
+| `resumedAtSetCount`      | Int     | Set count when resumed.                 |
+| `resumedAtPausedSeconds` | Double  | Paused seconds when resumed.            |
+| `planDayID`              | UUID    | (Optional) References a WorkoutPlanDay. |
+
+---
+
+## 16. Workout Set Logs (v2.0)
+
+Individual set records within a strength session.
+
+| Field             | Type    | Description                        |
+| :---------------- | :------ | :--------------------------------- |
+| `setNumber`       | Int     | Set number within the exercise.    |
+| `reps`            | Int     | Number of reps completed.          |
+| `weight`          | Double  | Weight used.                       |
+| `durationSeconds` | Int     | (Optional) For timed sets.         |
+| `isWarmup`        | Bool    | Whether this was a warmup set.     |
+| `completedAt`     | ISO8601 | Timestamp of set completion.       |
+| `exerciseID`      | UUID    | (Optional) References an Exercise. |
+| `sessionID`       | UUID    | References a StrengthSession.      |
+
+---
+
+## 17. Cardio Sessions (v2.0)
+
+| Field            | Type    | Description                             |
+| :--------------- | :------ | :-------------------------------------- |
+| `planName`       | String  | Snapshot of plan name.                  |
+| `dayLabel`       | String  | Snapshot of day label.                  |
+| `weekday`        | Int     | Day of week.                            |
+| `date`           | ISO8601 | Session date.                           |
+| `startedAt`      | ISO8601 | When the session started.               |
+| `endedAt`        | ISO8601 | (Optional) When the session ended.      |
+| `statusRaw`      | String  | Session status.                         |
+| `sessionTypeRaw` | String  | `"steadyState"`, `"hiit"`, etc.         |
+| `hkWorkoutID`    | String  | (Optional) HealthKit workout reference. |
+| `planDayID`      | UUID    | (Optional) References a WorkoutPlanDay. |
+
+---
+
+## 18. Cardio Session Logs (v2.0)
+
+Per-exercise log entries within a cardio session.
+
+| Field                | Type   | Description                        |
+| :------------------- | :----- | :--------------------------------- |
+| `distance`           | Double | (Optional) Distance covered.       |
+| `durationSeconds`    | Int    | Duration in seconds.               |
+| `avgPace`            | Double | (Optional) Average pace.           |
+| `avgSpeed`           | Double | (Optional) Average speed.          |
+| `calories`           | Double | (Optional) Calories burned.        |
+| `elevationGain`      | Double | (Optional) Elevation gain.         |
+| `avgHeartRate`       | Int    | (Optional) Average heart rate.     |
+| `maxHeartRate`       | Int    | (Optional) Maximum heart rate.     |
+| `heartRateZonesData` | Data   | (Optional) Encoded HR zone data.   |
+| `exerciseID`         | UUID   | (Optional) References an Exercise. |
+| `sessionID`          | UUID   | References a CardioSession.        |
+

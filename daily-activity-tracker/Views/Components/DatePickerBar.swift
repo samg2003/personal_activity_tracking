@@ -51,37 +51,82 @@ struct DatePickerBar: View {
         return Color(.systemGray6).opacity(0.5)
     }
 
-    var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    loadMoreButton(proxy: proxy)
+    private var isViewingToday: Bool {
+        selectedDate.isSameDay(as: Date())
+    }
 
-                    ForEach(Array(dates.enumerated()), id: \.element.timeIntervalSince1970) { index, date in
-                        if isMonthBoundary(at: index) {
-                            monthLabel(for: date)
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        loadMoreButton(proxy: proxy)
+
+                        ForEach(Array(dates.enumerated()), id: \.element.timeIntervalSince1970) { index, date in
+                            if isMonthBoundary(at: index) {
+                                monthLabel(for: date)
+                            }
+                            dateChip(date)
+                                .id(date.startOfDay)
                         }
-                        dateChip(date)
-                            .id(date.startOfDay)
+                    }
+                    .padding(.horizontal)
+                }
+                .onAppear {
+                    proxy.scrollTo(selectedDate.startOfDay, anchor: .trailing)
+                }
+                .onChange(of: selectedDate) { _, newDate in
+                    let calendar = Calendar.current
+                    if let earliest = dates.first,
+                       newDate.startOfDay < earliest.startOfDay {
+                        let daysBack = calendar.dateComponents([.day], from: newDate.startOfDay, to: Date().startOfDay).day ?? 0
+                        daysToShow = max(daysToShow, daysBack + pageSize)
+                    }
+                    withAnimation {
+                        proxy.scrollTo(newDate.startOfDay, anchor: .center)
                     }
                 }
-                .padding(.horizontal)
-            }
-            .onAppear {
-                proxy.scrollTo(selectedDate.startOfDay, anchor: .trailing)
-            }
-            .onChange(of: selectedDate) { _, newDate in
-                let calendar = Calendar.current
-                if let earliest = dates.first,
-                   newDate.startOfDay < earliest.startOfDay {
-                    let daysBack = calendar.dateComponents([.day], from: newDate.startOfDay, to: Date().startOfDay).day ?? 0
-                    daysToShow = max(daysToShow, daysBack + pageSize)
-                }
-                withAnimation {
-                    proxy.scrollTo(newDate.startOfDay, anchor: .center)
+
+                // UX-3: "Today" jump button
+                if !isViewingToday {
+                    todayJumpButton(proxy: proxy)
                 }
             }
         }
+    }
+
+    /// Floating "Today →" pill that appears when not viewing today
+    private func todayJumpButton(proxy: ScrollViewProxy) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.3)) {
+                selectedDate = Date().startOfDay
+                proxy.scrollTo(Date().startOfDay, anchor: .trailing)
+            }
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        } label: {
+            HStack(spacing: 4) {
+                Text("Today")
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 9, weight: .bold))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [Color(hex: 0x10B981), Color(hex: 0x0D9488)],
+                            startPoint: .leading, endPoint: .trailing
+                        )
+                    )
+                    .shadow(color: Color(hex: 0x10B981).opacity(0.3), radius: 4, y: 2)
+            )
+        }
+        .buttonStyle(.plain)
+        .padding(.trailing, 12)
+        .transition(.move(edge: .trailing).combined(with: .opacity))
     }
 
     private func loadMoreButton(proxy: ScrollViewProxy) -> some View {

@@ -17,6 +17,18 @@ final class DataService {
         var configSnapshots: [ConfigSnapshotDTO]?
         var goals: [GoalDTO]?
         var goalActivities: [GoalActivityDTO]?
+        // Workout domain (v2.0)
+        var exercises: [ExerciseDTO]?
+        var exerciseMuscles: [ExerciseMuscleDTO]?
+        var muscleGroups: [MuscleGroupDTO]?
+        var workoutPlans: [WorkoutPlanDTO]?
+        var workoutPlanDays: [WorkoutPlanDayDTO]?
+        var strengthPlanExercises: [StrengthPlanExDTO]?
+        var cardioPlanExercises: [CardioPlanExDTO]?
+        var strengthSessions: [StrengthSessionDTO]?
+        var workoutSetLogs: [WorkoutSetLogDTO]?
+        var cardioSessions: [CardioSessionDTO]?
+        var cardioSessionLogs: [CardioSessionLogDTO]?
     }
     
     struct CategoryDTO: Codable {
@@ -253,6 +265,149 @@ final class DataService {
             metricDirectionRaw = try c.decodeIfPresent(String.self, forKey: .metricDirectionRaw)
         }
     }
+
+    // MARK: - Workout Domain DTOs
+
+    struct ExerciseDTO: Codable {
+        let id: UUID
+        let name: String
+        let equipment: String
+        let exerciseTypeRaw: String
+        let aliasesData: Data?
+        let videoURLsData: Data?
+        let notes: String?
+        let distanceUnit: String?
+        let paceUnit: String?
+        let availableMetricsData: Data?
+        let isPreSeeded: Bool
+        let createdAt: Date
+    }
+
+    struct ExerciseMuscleDTO: Codable {
+        let id: UUID
+        let exerciseID: UUID
+        let muscleGroupID: UUID?
+        let involvementScore: Double
+    }
+
+    struct MuscleGroupDTO: Codable {
+        let id: UUID
+        let name: String
+        let parentID: UUID?
+        let sortOrder: Int
+        let mevSets: Int
+        let mavSets: Int
+        let mrvSets: Int
+        let isPreSeeded: Bool
+    }
+
+    struct WorkoutPlanDTO: Codable {
+        let id: UUID
+        let name: String
+        let planTypeRaw: String
+        let statusRaw: String
+        let containerActivityID: UUID?
+        let createdAt: Date
+    }
+
+    struct WorkoutPlanDayDTO: Codable {
+        let id: UUID
+        let weekday: Int
+        let dayLabel: String
+        let isLabelOverridden: Bool
+        let isRest: Bool
+        let colorGroup: Int
+        let planID: UUID
+    }
+
+    struct StrengthPlanExDTO: Codable {
+        let id: UUID
+        let targetSets: Int
+        let rir: Int
+        let sortOrder: Int
+        let supersetGroup: String?
+        let exerciseID: UUID?
+        let planDayID: UUID
+    }
+
+    struct CardioPlanExDTO: Codable {
+        let id: UUID
+        let sessionTypeRaw: String
+        let targetDistance: Double?
+        let targetDurationMin: Int?
+        let sessionParamsData: Data?
+        let sortOrder: Int
+        let exerciseID: UUID?
+        let planDayID: UUID
+    }
+
+    struct StrengthSessionDTO: Codable {
+        let id: UUID
+        let planName: String
+        let dayLabel: String
+        let weekday: Int
+        let date: Date
+        let startedAt: Date
+        let pausedAt: Date?
+        let endedAt: Date?
+        let totalPausedSeconds: Double
+        let statusRaw: String
+        let notes: String?
+        let resumedAtSetCount: Int
+        let resumedAtEndedAt: Date?
+        let resumedAtPausedSeconds: Double
+        let planDayID: UUID?
+    }
+
+    struct WorkoutSetLogDTO: Codable {
+        let id: UUID
+        let setNumber: Int
+        let reps: Int
+        let weight: Double
+        let durationSeconds: Int?
+        let isWarmup: Bool
+        let completedAt: Date
+        let exerciseID: UUID?
+        let sessionID: UUID
+    }
+
+    struct CardioSessionDTO: Codable {
+        let id: UUID
+        let planName: String
+        let dayLabel: String
+        let weekday: Int
+        let date: Date
+        let startedAt: Date
+        let pausedAt: Date?
+        let endedAt: Date?
+        let totalPausedSeconds: Double
+        let statusRaw: String
+        let sessionTypeRaw: String
+        let notes: String?
+        let hkWorkoutID: String?
+        let planDayID: UUID?
+    }
+
+    struct CardioSessionLogDTO: Codable {
+        let id: UUID
+        let distance: Double?
+        let durationSeconds: Int
+        let avgPace: Double?
+        let avgSpeed: Double?
+        let calories: Double?
+        let elevationGain: Double?
+        let avgHeartRate: Int?
+        let maxHeartRate: Int?
+        let heartRateZonesData: Data?
+        let avgCadence: Int?
+        let strokeCount: Int?
+        let strokeType: String?
+        let swolf: Int?
+        let laps: Int?
+        let exerciseID: UUID?
+        let sessionID: UUID
+    }
+
     
     // MARK: - Export
     
@@ -343,9 +498,114 @@ final class DataService {
                                    metricDirectionRaw: link.metricDirectionRaw)
         }
 
+        // Workout Domain
+        let allExercises = try context.fetch(FetchDescriptor<Exercise>())
+        let exerciseDTOs = allExercises.map { e in
+            ExerciseDTO(id: e.id, name: e.name, equipment: e.equipment,
+                        exerciseTypeRaw: e.exerciseTypeRaw, aliasesData: e.aliasesData,
+                        videoURLsData: e.videoURLsData, notes: e.notes,
+                        distanceUnit: e.distanceUnit, paceUnit: e.paceUnit,
+                        availableMetricsData: e.availableMetricsData,
+                        isPreSeeded: e.isPreSeeded, createdAt: e.createdAt)
+        }
+
+        let allExMuscles = try context.fetch(FetchDescriptor<ExerciseMuscle>())
+        let exMuscleDTOs = allExMuscles.compactMap { em -> ExerciseMuscleDTO? in
+            guard let exID = em.exercise?.id else { return nil }
+            return ExerciseMuscleDTO(id: em.id, exerciseID: exID,
+                                     muscleGroupID: em.muscleGroupID,
+                                     involvementScore: em.involvementScore)
+        }
+
+        let allMuscleGroups = try context.fetch(FetchDescriptor<MuscleGroup>())
+        let mgDTOs = allMuscleGroups.map { mg in
+            MuscleGroupDTO(id: mg.id, name: mg.name, parentID: mg.parentID,
+                           sortOrder: mg.sortOrder, mevSets: mg.mevSets,
+                           mavSets: mg.mavSets, mrvSets: mg.mrvSets,
+                           isPreSeeded: mg.isPreSeeded)
+        }
+
+        let allPlans = try context.fetch(FetchDescriptor<WorkoutPlan>())
+        let planDTOs = allPlans.map { p in
+            WorkoutPlanDTO(id: p.id, name: p.name, planTypeRaw: p.planTypeRaw,
+                           statusRaw: p.statusRaw, containerActivityID: p.containerActivityID,
+                           createdAt: p.createdAt)
+        }
+
+        let allDays = try context.fetch(FetchDescriptor<WorkoutPlanDay>())
+        let dayDTOs = allDays.compactMap { d -> WorkoutPlanDayDTO? in
+            guard let planID = d.plan?.id else { return nil }
+            return WorkoutPlanDayDTO(id: d.id, weekday: d.weekday, dayLabel: d.dayLabel,
+                                     isLabelOverridden: d.isLabelOverridden, isRest: d.isRest,
+                                     colorGroup: d.colorGroup, planID: planID)
+        }
+
+        let allStrPlanEx = try context.fetch(FetchDescriptor<StrengthPlanExercise>())
+        let strPlanExDTOs = allStrPlanEx.compactMap { spe -> StrengthPlanExDTO? in
+            guard let dayID = spe.planDay?.id else { return nil }
+            return StrengthPlanExDTO(id: spe.id, targetSets: spe.targetSets, rir: spe.rir,
+                                     sortOrder: spe.sortOrder, supersetGroup: spe.supersetGroup,
+                                     exerciseID: spe.exercise?.id, planDayID: dayID)
+        }
+
+        let allCardioPlanEx = try context.fetch(FetchDescriptor<CardioPlanExercise>())
+        let cardioPlanExDTOs = allCardioPlanEx.compactMap { cpe -> CardioPlanExDTO? in
+            guard let dayID = cpe.planDay?.id else { return nil }
+            return CardioPlanExDTO(id: cpe.id, sessionTypeRaw: cpe.sessionTypeRaw,
+                                   targetDistance: cpe.targetDistance,
+                                   targetDurationMin: cpe.targetDurationMin,
+                                   sessionParamsData: cpe.sessionParamsData,
+                                   sortOrder: cpe.sortOrder, exerciseID: cpe.exercise?.id,
+                                   planDayID: dayID)
+        }
+
+        let allStrSessions = try context.fetch(FetchDescriptor<StrengthSession>())
+        let strSessionDTOs = allStrSessions.map { s in
+            StrengthSessionDTO(id: s.id, planName: s.planName, dayLabel: s.dayLabel,
+                               weekday: s.weekday, date: s.date, startedAt: s.startedAt,
+                               pausedAt: s.pausedAt, endedAt: s.endedAt,
+                               totalPausedSeconds: s.totalPausedSeconds, statusRaw: s.statusRaw,
+                               notes: s.notes, resumedAtSetCount: s.resumedAtSetCount,
+                               resumedAtEndedAt: s.resumedAtEndedAt,
+                               resumedAtPausedSeconds: s.resumedAtPausedSeconds,
+                               planDayID: s.planDay?.id)
+        }
+
+        let allSetLogs = try context.fetch(FetchDescriptor<WorkoutSetLog>())
+        let setLogDTOs = allSetLogs.compactMap { sl -> WorkoutSetLogDTO? in
+            guard let sessionID = sl.session?.id else { return nil }
+            return WorkoutSetLogDTO(id: sl.id, setNumber: sl.setNumber, reps: sl.reps,
+                                    weight: sl.weight, durationSeconds: sl.durationSeconds,
+                                    isWarmup: sl.isWarmup, completedAt: sl.completedAt,
+                                    exerciseID: sl.exercise?.id, sessionID: sessionID)
+        }
+
+        let allCardioSessions = try context.fetch(FetchDescriptor<CardioSession>())
+        let cardioSessionDTOs = allCardioSessions.map { cs in
+            CardioSessionDTO(id: cs.id, planName: cs.planName, dayLabel: cs.dayLabel,
+                             weekday: cs.weekday, date: cs.date, startedAt: cs.startedAt,
+                             pausedAt: cs.pausedAt, endedAt: cs.endedAt,
+                             totalPausedSeconds: cs.totalPausedSeconds, statusRaw: cs.statusRaw,
+                             sessionTypeRaw: cs.sessionTypeRaw, notes: cs.notes,
+                             hkWorkoutID: cs.hkWorkoutID, planDayID: cs.planDay?.id)
+        }
+
+        let allCardioLogs = try context.fetch(FetchDescriptor<CardioSessionLog>())
+        let cardioLogDTOs = allCardioLogs.compactMap { cl -> CardioSessionLogDTO? in
+            guard let sessionID = cl.session?.id else { return nil }
+            return CardioSessionLogDTO(id: cl.id, distance: cl.distance,
+                                       durationSeconds: cl.durationSeconds, avgPace: cl.avgPace,
+                                       avgSpeed: cl.avgSpeed, calories: cl.calories,
+                                       elevationGain: cl.elevationGain, avgHeartRate: cl.avgHeartRate,
+                                       maxHeartRate: cl.maxHeartRate, heartRateZonesData: cl.heartRateZonesData,
+                                       avgCadence: cl.avgCadence, strokeCount: cl.strokeCount,
+                                       strokeType: cl.strokeType, swolf: cl.swolf, laps: cl.laps,
+                                       exerciseID: cl.exerciseID, sessionID: sessionID)
+        }
+
         // Create Package
-        let package = ExportPackage(
-            version: "1.0",
+        var package = ExportPackage(
+            version: "2.0",
             timestamp: Date(),
             categories: catDTOs,
             activities: actDTOs,
@@ -355,6 +615,17 @@ final class DataService {
             goals: goalDTOs,
             goalActivities: goalActDTOs
         )
+        package.exercises = exerciseDTOs
+        package.exerciseMuscles = exMuscleDTOs
+        package.muscleGroups = mgDTOs
+        package.workoutPlans = planDTOs
+        package.workoutPlanDays = dayDTOs
+        package.strengthPlanExercises = strPlanExDTOs
+        package.cardioPlanExercises = cardioPlanExDTOs
+        package.strengthSessions = strSessionDTOs
+        package.workoutSetLogs = setLogDTOs
+        package.cardioSessions = cardioSessionDTOs
+        package.cardioSessionLogs = cardioLogDTOs
         
         // Encode
         let encoder = JSONEncoder()
@@ -392,7 +663,31 @@ final class DataService {
 
         let snapshots = try context.fetch(FetchDescriptor<ActivityConfigSnapshot>())
         for snap in snapshots { context.delete(snap) }
-        
+
+        // Clear workout domain (children first)
+        let existingSetLogs = try context.fetch(FetchDescriptor<WorkoutSetLog>())
+        for sl in existingSetLogs { context.delete(sl) }
+        let existingCardioLogs = try context.fetch(FetchDescriptor<CardioSessionLog>())
+        for cl in existingCardioLogs { context.delete(cl) }
+        let existingStrSessions = try context.fetch(FetchDescriptor<StrengthSession>())
+        for ss in existingStrSessions { context.delete(ss) }
+        let existingCardioSessions = try context.fetch(FetchDescriptor<CardioSession>())
+        for cs in existingCardioSessions { context.delete(cs) }
+        let existingStrPlanEx = try context.fetch(FetchDescriptor<StrengthPlanExercise>())
+        for spe in existingStrPlanEx { context.delete(spe) }
+        let existingCardioPlanEx = try context.fetch(FetchDescriptor<CardioPlanExercise>())
+        for cpe in existingCardioPlanEx { context.delete(cpe) }
+        let existingPlanDays = try context.fetch(FetchDescriptor<WorkoutPlanDay>())
+        for pd in existingPlanDays { context.delete(pd) }
+        let existingPlans = try context.fetch(FetchDescriptor<WorkoutPlan>())
+        for wp in existingPlans { context.delete(wp) }
+        let existingExMuscles = try context.fetch(FetchDescriptor<ExerciseMuscle>())
+        for em in existingExMuscles { context.delete(em) }
+        let existingExercises = try context.fetch(FetchDescriptor<Exercise>())
+        for ex in existingExercises { context.delete(ex) }
+        let existingMG = try context.fetch(FetchDescriptor<MuscleGroup>())
+        for mg in existingMG { context.delete(mg) }
+
         // Save to ensure clear state before insert
         try context.save()
         
@@ -523,6 +818,206 @@ final class DataService {
                 link.metricTarget = dto.metricTarget
                 link.metricDirectionRaw = dto.metricDirectionRaw
                 context.insert(link)
+            }
+        }
+
+        // MARK: - Import Workout Domain
+
+        // Muscle Groups
+        var muscleGroupMap: [UUID: MuscleGroup] = [:]
+        if let mgDTOs = package.muscleGroups {
+            for dto in mgDTOs {
+                let mg = MuscleGroup(name: dto.name, parentID: dto.parentID,
+                                     sortOrder: dto.sortOrder, mevSets: dto.mevSets,
+                                     mavSets: dto.mavSets, mrvSets: dto.mrvSets,
+                                     isPreSeeded: dto.isPreSeeded)
+                mg.id = dto.id
+                context.insert(mg)
+                muscleGroupMap[dto.id] = mg
+            }
+        }
+
+        // Exercises
+        var exerciseMap: [UUID: Exercise] = [:]
+        if let exDTOs = package.exercises {
+            for dto in exDTOs {
+                let ex = Exercise(name: dto.name, equipment: dto.equipment,
+                                  type: ExerciseType(rawValue: dto.exerciseTypeRaw) ?? .strength,
+                                  isPreSeeded: dto.isPreSeeded)
+                ex.id = dto.id
+                ex.aliasesData = dto.aliasesData
+                ex.videoURLsData = dto.videoURLsData
+                ex.notes = dto.notes
+                ex.distanceUnit = dto.distanceUnit
+                ex.paceUnit = dto.paceUnit
+                ex.availableMetricsData = dto.availableMetricsData
+                ex.createdAt = dto.createdAt
+                context.insert(ex)
+                exerciseMap[dto.id] = ex
+            }
+        }
+
+        // Exercise-Muscle links
+        if let emDTOs = package.exerciseMuscles {
+            for dto in emDTOs {
+                guard let ex = exerciseMap[dto.exerciseID] else { continue }
+                let em = ExerciseMuscle(muscleGroupID: dto.muscleGroupID ?? UUID(),
+                                        score: dto.involvementScore)
+                em.id = dto.id
+                em.exercise = ex
+                em.muscleGroupID = dto.muscleGroupID
+                context.insert(em)
+            }
+        }
+
+        // Workout Plans
+        var planMap: [UUID: WorkoutPlan] = [:]
+        if let planDTOs = package.workoutPlans {
+            for dto in planDTOs {
+                let p = WorkoutPlan(name: dto.name,
+                                    planType: ExerciseType(rawValue: dto.planTypeRaw) ?? .strength)
+                p.id = dto.id
+                p.statusRaw = dto.statusRaw
+                p.containerActivityID = dto.containerActivityID
+                p.createdAt = dto.createdAt
+                context.insert(p)
+                planMap[dto.id] = p
+            }
+        }
+
+        // Workout Plan Days
+        var dayMap: [UUID: WorkoutPlanDay] = [:]
+        if let dayDTOs = package.workoutPlanDays {
+            for dto in dayDTOs {
+                let d = WorkoutPlanDay(weekday: dto.weekday, plan: planMap[dto.planID])
+                d.id = dto.id
+                d.dayLabel = dto.dayLabel
+                d.isLabelOverridden = dto.isLabelOverridden
+                d.isRest = dto.isRest
+                d.colorGroup = dto.colorGroup
+                context.insert(d)
+                dayMap[dto.id] = d
+            }
+        }
+
+        // Strength Plan Exercises
+        if let speDTOs = package.strengthPlanExercises {
+            for dto in speDTOs {
+                guard let day = dayMap[dto.planDayID] else { continue }
+                let ex = dto.exerciseID.flatMap { exerciseMap[$0] }
+                let spe = StrengthPlanExercise(exercise: ex ?? Exercise(name: "Unknown", equipment: "?"),
+                                               targetSets: dto.targetSets, rir: dto.rir,
+                                               sortOrder: dto.sortOrder)
+                spe.id = dto.id
+                spe.supersetGroup = dto.supersetGroup
+                spe.exercise = ex
+                spe.planDay = day
+                context.insert(spe)
+            }
+        }
+
+        // Cardio Plan Exercises
+        if let cpeDTOs = package.cardioPlanExercises {
+            for dto in cpeDTOs {
+                guard let day = dayMap[dto.planDayID] else { continue }
+                let ex = dto.exerciseID.flatMap { exerciseMap[$0] }
+                let cpe = CardioPlanExercise(exercise: ex ?? Exercise(name: "Unknown", equipment: "?"),
+                                             sessionType: CardioSessionType(rawValue: dto.sessionTypeRaw) ?? .free,
+                                             sortOrder: dto.sortOrder)
+                cpe.id = dto.id
+                cpe.targetDistance = dto.targetDistance
+                cpe.targetDurationMin = dto.targetDurationMin
+                cpe.sessionParamsData = dto.sessionParamsData
+                cpe.exercise = ex
+                cpe.planDay = day
+                context.insert(cpe)
+            }
+        }
+
+        // Strength Sessions
+        var strSessionMap: [UUID: StrengthSession] = [:]
+        if let ssDTOs = package.strengthSessions {
+            for dto in ssDTOs {
+                let s = StrengthSession(planName: dto.planName, dayLabel: dto.dayLabel,
+                                        weekday: dto.weekday,
+                                        planDay: dto.planDayID.flatMap { dayMap[$0] })
+                s.id = dto.id
+                s.date = dto.date
+                s.startedAt = dto.startedAt
+                s.pausedAt = dto.pausedAt
+                s.endedAt = dto.endedAt
+                s.totalPausedSeconds = dto.totalPausedSeconds
+                s.statusRaw = dto.statusRaw
+                s.notes = dto.notes
+                s.resumedAtSetCount = dto.resumedAtSetCount
+                s.resumedAtEndedAt = dto.resumedAtEndedAt
+                s.resumedAtPausedSeconds = dto.resumedAtPausedSeconds
+                context.insert(s)
+                strSessionMap[dto.id] = s
+            }
+        }
+
+        // Workout Set Logs
+        if let slDTOs = package.workoutSetLogs {
+            for dto in slDTOs {
+                guard let session = strSessionMap[dto.sessionID] else { continue }
+                let ex = dto.exerciseID.flatMap { exerciseMap[$0] }
+                    ?? Exercise(name: "Unknown", equipment: "?")
+                let sl = WorkoutSetLog(exercise: ex, setNumber: dto.setNumber,
+                                       reps: dto.reps, weight: dto.weight,
+                                       isWarmup: dto.isWarmup)
+                sl.id = dto.id
+                sl.durationSeconds = dto.durationSeconds
+                sl.completedAt = dto.completedAt
+                sl.session = session
+                context.insert(sl)
+            }
+        }
+
+        // Cardio Sessions
+        var cardioSessionMap: [UUID: CardioSession] = [:]
+        if let csDTOs = package.cardioSessions {
+            for dto in csDTOs {
+                let cs = CardioSession(planName: dto.planName, dayLabel: dto.dayLabel,
+                                       weekday: dto.weekday,
+                                       sessionType: CardioSessionType(rawValue: dto.sessionTypeRaw) ?? .free,
+                                       planDay: dto.planDayID.flatMap { dayMap[$0] })
+                cs.id = dto.id
+                cs.date = dto.date
+                cs.startedAt = dto.startedAt
+                cs.pausedAt = dto.pausedAt
+                cs.endedAt = dto.endedAt
+                cs.totalPausedSeconds = dto.totalPausedSeconds
+                cs.statusRaw = dto.statusRaw
+                cs.notes = dto.notes
+                cs.hkWorkoutID = dto.hkWorkoutID
+                context.insert(cs)
+                cardioSessionMap[dto.id] = cs
+            }
+        }
+
+        // Cardio Session Logs
+        if let clDTOs = package.cardioSessionLogs {
+            for dto in clDTOs {
+                guard let session = cardioSessionMap[dto.sessionID] else { continue }
+                let cl = CardioSessionLog(exerciseID: dto.exerciseID)
+                cl.id = dto.id
+                cl.distance = dto.distance
+                cl.durationSeconds = dto.durationSeconds
+                cl.avgPace = dto.avgPace
+                cl.avgSpeed = dto.avgSpeed
+                cl.calories = dto.calories
+                cl.elevationGain = dto.elevationGain
+                cl.avgHeartRate = dto.avgHeartRate
+                cl.maxHeartRate = dto.maxHeartRate
+                cl.heartRateZonesData = dto.heartRateZonesData
+                cl.avgCadence = dto.avgCadence
+                cl.strokeCount = dto.strokeCount
+                cl.strokeType = dto.strokeType
+                cl.swolf = dto.swolf
+                cl.laps = dto.laps
+                cl.session = session
+                context.insert(cl)
             }
         }
 

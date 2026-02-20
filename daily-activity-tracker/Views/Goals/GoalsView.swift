@@ -166,77 +166,90 @@ struct GoalCardView: View {
     let vacationDays: [VacationDay]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Header
-            HStack {
-                Image(systemName: goal.icon)
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(goal.isPaused ? .secondary : Color(hex: goal.hexColor))
-                    .frame(width: 32, height: 32)
-                    .background((goal.isPaused ? Color.gray : Color(hex: goal.hexColor)).opacity(0.15))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+        HStack(spacing: 0) {
+            // Colored accent bar
+            RoundedRectangle(cornerRadius: 2)
+                .fill(goal.isPaused ? Color.orange : Color(hex: goal.hexColor))
+                .frame(width: 4)
+                .padding(.vertical, 8)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text(goal.title)
-                            .font(.headline)
-                            .foregroundStyle(goal.isPaused ? .secondary : .primary)
-                        if goal.isPaused {
-                            Text("PAUSED")
-                                .font(.caption2.weight(.bold))
-                                .foregroundStyle(.orange)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color.orange.opacity(0.12))
-                                .clipShape(Capsule())
-                        }
-                    }
-                    HStack(spacing: 8) {
-                        Label("\(goal.activityLinks.count)", systemImage: "figure.run")
-                        if !goal.metricLinks.isEmpty {
-                            Label("\(goal.metricLinks.count)", systemImage: "chart.line.uptrend.xyaxis")
-                        }
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
-
-                Spacer()
-
-                Image(systemName: "chevron.right")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            }
-
-            // Consistency bar — skip for on-hold goals
-            if goal.isPaused {
+            VStack(alignment: .leading, spacing: 12) {
+                // Header
                 HStack {
-                    Text("7-Day Consistency")
+                    Image(systemName: goal.icon)
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(goal.isPaused ? Color.secondary : Color.white)
+                        .frame(width: 30, height: 30)
+                        .background(
+                            Circle().fill(
+                                goal.isPaused ? Color.gray.opacity(0.3) : Color(hex: goal.hexColor)
+                            )
+                        )
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text(goal.title)
+                                .font(.headline)
+                                .foregroundStyle(goal.isPaused ? .secondary : .primary)
+                            if goal.isPaused {
+                                Text("PAUSED")
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundStyle(.orange)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Color.orange.opacity(0.12))
+                                    .clipShape(Capsule())
+                            }
+                        }
+                        HStack(spacing: 8) {
+                            Label("\(goal.activityLinks.count)", systemImage: "figure.run")
+                            if !goal.metricLinks.isEmpty {
+                                Label("\(goal.metricLinks.count)", systemImage: "chart.line.uptrend.xyaxis")
+                            }
+                        }
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    }
+
                     Spacer()
-                    Text("—")
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
-                        .foregroundStyle(.secondary)
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.quaternary)
                 }
-            } else {
-                consistencyBar(score: score)
-            }
 
-            // Metric summaries (compact)
-            if !goal.metricLinks.isEmpty {
-                metricSummaries
-            }
+                // Consistency bar — skip for on-hold goals
+                if goal.isPaused {
+                    HStack {
+                        Text("7-Day Consistency")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text("—")
+                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    consistencyBar(score: score)
+                }
 
-            // Deadline
-            if let deadline = goal.deadline {
-                let daysLeft = Calendar.current.dateComponents([.day], from: Date(), to: deadline).day ?? 0
-                Label(daysLeft > 0 ? "\(daysLeft)d left" : "Overdue", systemImage: "calendar")
-                    .font(.caption)
-                    .foregroundStyle(daysLeft > 0 ? Color.secondary : Color.red)
+                // Metric summaries (compact)
+                if !goal.metricLinks.isEmpty {
+                    metricSummaries
+                }
+
+                // Deadline
+                if let deadline = goal.deadline {
+                    let daysLeft = Calendar.current.dateComponents([.day], from: Date(), to: deadline).day ?? 0
+                    Label(daysLeft > 0 ? "\(daysLeft)d left" : "Overdue", systemImage: "calendar")
+                        .font(.caption)
+                        .foregroundStyle(daysLeft > 0 ? Color.secondary : Color.red)
+                }
             }
+            .padding(.leading, 10)
+            .padding(.trailing, 16)
+            .padding(.vertical, 16)
         }
-        .padding(16)
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: WDS.cardRadius, style: .continuous))
         .shadow(color: .black.opacity(0.06), radius: 6, y: 3)
@@ -256,14 +269,20 @@ struct GoalCardView: View {
             }
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 4)
+                    RoundedRectangle(cornerRadius: 5)
                         .fill(Color(.systemGray5))
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(scoreColor(score).gradient)
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(
+                            LinearGradient(
+                                colors: [scoreColor(score).opacity(0.6), scoreColor(score)],
+                                startPoint: .leading, endPoint: .trailing
+                            )
+                        )
                         .frame(width: geo.size.width * score)
+                        .animation(.spring(response: 0.4, dampingFraction: 0.7), value: score)
                 }
             }
-            .frame(height: 8)
+            .frame(height: 10)
         }
     }
 

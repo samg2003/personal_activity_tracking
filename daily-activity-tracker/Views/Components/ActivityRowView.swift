@@ -13,6 +13,46 @@ struct ActivityRowView: View {
     private var accentColor: Color { Color(hex: activity.hexColor) }
 
     var body: some View {
+        rowContent
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                    .shadow(color: .black.opacity(isCompleted ? 0.02 : 0.06), radius: 6, y: 3)
+            )
+            .opacity(isCompleted ? 0.65 : 1.0)
+            .contentShape(RoundedRectangle(cornerRadius: 14))
+            // UX-2: Tap anywhere on the row to toggle completion
+            .onTapGesture {
+                guard !isSkipped else { return }
+                triggerComplete()
+            }
+            .contextMenu { contextMenuContent }
+            .swipeActions(edge: .trailing) {
+                Button {
+                    withAnimation { onComplete() }
+                } label: {
+                    Label("Done", systemImage: "checkmark")
+                }
+                .tint(.green)
+            }
+            .swipeActions(edge: .leading) {
+                Button { showSkipSheet = true } label: {
+                    Label("Skip", systemImage: "forward.fill")
+                }
+                .tint(.orange)
+            }
+            .confirmationDialog("Reason for skipping", isPresented: $showSkipSheet) {
+                ForEach(SkipReasons.defaults, id: \.self) { reason in
+                    Button(reason) { onSkip(reason) }
+                }
+                Button("Cancel", role: .cancel) { }
+            }
+    }
+
+    // MARK: - Sub-views
+
+    private var rowContent: some View {
         HStack(spacing: 0) {
             // Colored accent bar
             RoundedRectangle(cornerRadius: 2)
@@ -31,38 +71,8 @@ struct ActivityRowView: View {
                             .fill(isCompleted ? Color(.systemGray5) : accentColor.opacity(0.12))
                     )
 
-                // Animated checkbox
-                Button {
-                    guard !isSkipped else { return }
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.5)) {
-                        checkScale = 1.3
-                        onComplete()
-                    }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                        withAnimation(.spring(response: 0.2)) { checkScale = 1.0 }
-                    }
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                } label: {
-                    ZStack {
-                        Circle()
-                            .stroke(isCompleted ? Color.clear : Color(.systemGray3), lineWidth: 2)
-                            .frame(width: 24, height: 24)
-
-                        if isCompleted {
-                            Circle()
-                                .fill(.green)
-                                .frame(width: 24, height: 24)
-                                .overlay(
-                                    Image(systemName: "checkmark")
-                                        .font(.system(size: 11, weight: .bold))
-                                        .foregroundStyle(.white)
-                                )
-                                .transition(.scale.combined(with: .opacity))
-                        }
-                    }
-                    .scaleEffect(checkScale)
-                }
-                .buttonStyle(.plain)
+                // Animated checkbox (visual indicator only — tapping anywhere works)
+                checkboxIndicator
 
                 // Activity name
                 Text(activity.name)
@@ -86,53 +96,62 @@ struct ActivityRowView: View {
             .padding(.leading, 10)
             .padding(.trailing, 14)
         }
-        .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .shadow(color: .black.opacity(isCompleted ? 0.02 : 0.06), radius: 6, y: 3)
-        )
-        .opacity(isCompleted ? 0.65 : 1.0)
-        .contextMenu {
-            if isCompleted {
-                Button(role: .destructive) {
-                    onComplete()
-                } label: {
-                    Label("Undo Completion", systemImage: "arrow.uturn.backward")
-                }
-            } else {
-                Button {
-                    onComplete()
-                } label: {
-                    Label("Complete", systemImage: "checkmark")
-                }
+    }
 
-                Button {
-                    showSkipSheet = true
-                } label: {
-                    Label("Skip", systemImage: "forward")
-                }
+    private var checkboxIndicator: some View {
+        ZStack {
+            Circle()
+                .stroke(isCompleted ? Color.clear : Color(.systemGray3), lineWidth: 2)
+                .frame(width: 24, height: 24)
+
+            if isCompleted {
+                Circle()
+                    .fill(.green)
+                    .frame(width: 24, height: 24)
+                    .overlay(
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(.white)
+                    )
+                    .transition(.scale.combined(with: .opacity))
             }
         }
-        .swipeActions(edge: .trailing) {
-            Button {
-                withAnimation { onComplete() }
+        .scaleEffect(checkScale)
+    }
+
+    @ViewBuilder
+    private var contextMenuContent: some View {
+        if isCompleted {
+            Button(role: .destructive) {
+                onComplete()
             } label: {
-                Label("Done", systemImage: "checkmark")
+                Label("Undo Completion", systemImage: "arrow.uturn.backward")
             }
-            .tint(.green)
-        }
-        .swipeActions(edge: .leading) {
-            Button { showSkipSheet = true } label: {
-                Label("Skip", systemImage: "forward.fill")
+        } else {
+            Button {
+                onComplete()
+            } label: {
+                Label("Complete", systemImage: "checkmark")
             }
-            .tint(.orange)
-        }
-        .confirmationDialog("Reason for skipping", isPresented: $showSkipSheet) {
-            ForEach(SkipReasons.defaults, id: \.self) { reason in
-                Button(reason) { onSkip(reason) }
+
+            Button {
+                showSkipSheet = true
+            } label: {
+                Label("Skip", systemImage: "forward")
             }
-            Button("Cancel", role: .cancel) { }
         }
+    }
+
+    // MARK: - Helpers
+
+    private func triggerComplete() {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.5)) {
+            checkScale = 1.3
+            onComplete()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            withAnimation(.spring(response: 0.2)) { checkScale = 1.0 }
+        }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
 }

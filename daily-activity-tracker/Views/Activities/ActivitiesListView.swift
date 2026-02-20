@@ -599,13 +599,17 @@ struct ActivitiesListView: View {
 
             HStack(spacing: 10) {
                 Image(systemName: child.icon)
-                    .font(.system(size: 14))
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(Color(hex: child.hexColor))
-                    .frame(width: 24)
+                    .frame(width: 26, height: 26)
+                    .background(
+                        Circle()
+                            .fill(Color(hex: child.hexColor).opacity(0.12))
+                    )
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(child.name)
-                        .font(.subheadline)
+                        .font(.subheadline.weight(.medium))
                         .foregroundStyle(.primary)
 
                     infoTags(for: child)
@@ -614,7 +618,7 @@ struct ActivitiesListView: View {
                 Spacer()
 
                 Image(systemName: "chevron.right")
-                    .font(.caption2)
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.quaternary)
             }
             .padding(.vertical, 6)
@@ -690,15 +694,20 @@ struct ActivitiesListView: View {
             editingActivity = activity
         } label: {
             HStack(spacing: 12) {
+                // Circle icon badge
                 Image(systemName: activity.icon)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(Color(hex: activity.hexColor))
-                    .frame(width: 28)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(activity.isStopped ? .secondary : Color(hex: activity.hexColor))
+                    .frame(width: 30, height: 30)
+                    .background(
+                        Circle()
+                            .fill((activity.isStopped ? Color.gray : Color(hex: activity.hexColor)).opacity(0.12))
+                    )
 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
                         Text(activity.name)
-                            .font(.body)
+                            .font(.subheadline.weight(.medium))
                             .foregroundStyle(activity.isStopped ? .secondary : .primary)
 
                         if activity.isStopped {
@@ -718,8 +727,8 @@ struct ActivitiesListView: View {
                 Spacer()
 
                 Image(systemName: "chevron.right")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.quaternary)
             }
         }
         .buttonStyle(.plain)
@@ -999,16 +1008,38 @@ struct ActivitiesListView: View {
     @ViewBuilder
     private func categoryHeader(_ category: Category?) -> some View {
         if let cat = category {
-            HStack(spacing: 6) {
+            HStack(spacing: 8) {
                 Image(systemName: cat.icon)
-                    .font(.caption)
-                    .foregroundStyle(Color(hex: cat.hexColor))
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 20, height: 20)
+                    .background(Circle().fill(Color(hex: cat.hexColor)))
+
                 Text(cat.name.uppercased())
                     .font(.system(size: 12, weight: .bold, design: .rounded))
+
+                let count = (groupedByCategory.first { $0.category?.id == cat.id }?.activities.count) ?? 0
+                if count > 0 {
+                    Text("\(count)")
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .foregroundStyle(Color(hex: cat.hexColor))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Color(hex: cat.hexColor).opacity(0.15))
+                        .clipShape(Capsule())
+                }
             }
         } else {
-            Text("UNCATEGORIZED")
-                .font(.system(size: 12, weight: .bold, design: .rounded))
+            HStack(spacing: 8) {
+                Image(systemName: "tray")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 20, height: 20)
+                    .background(Circle().fill(Color.gray))
+
+                Text("UNCATEGORIZED")
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+            }
         }
     }
 

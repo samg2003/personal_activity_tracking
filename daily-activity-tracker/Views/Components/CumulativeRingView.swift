@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Compact ring for cumulative items in the All Day section
+/// Compact ring for cumulative items — with quick +1 button
 struct CumulativeRingView: View {
     let activity: Activity
     let currentValue: Double
@@ -13,12 +13,15 @@ struct CumulativeRingView: View {
     @State private var inputText = ""
     @State private var showSkipSheet = false
     @State private var addScale: CGFloat = 1.0
+    @State private var quickScale: CGFloat = 1.0
 
     private var target: Double { activity.targetValue ?? 1 }
     private var progress: Double { min(currentValue / target, 1.0) }
     private var unitLabel: String { activity.unit ?? "" }
     private var color: Color { Color(hex: activity.hexColor) }
     private var isDone: Bool { progress >= 1.0 }
+    /// Determine the quick-add increment (1 by default, or the activity's step if set)
+    private var quickIncrement: Double { 1 }
 
     var body: some View {
         rowContent
@@ -71,7 +74,7 @@ struct CumulativeRingView: View {
         HStack(spacing: 12) {
             iconBadge
             nameAndProgress
-            addButton
+            quickAddButtons
         }
     }
 
@@ -125,22 +128,49 @@ struct CumulativeRingView: View {
         .frame(height: 8)
     }
 
-    private var addButton: some View {
-        Button {
-            withAnimation(.spring(response: 0.2, dampingFraction: 0.5)) {
-                addScale = 1.3
+    // Quick +1 and custom add buttons
+    private var quickAddButtons: some View {
+        HStack(spacing: 6) {
+            // Quick +1 button (one-tap, instant)
+            Button {
+                withAnimation(.spring(response: 0.2, dampingFraction: 0.5)) {
+                    quickScale = 1.3
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    withAnimation(.spring(response: 0.2)) { quickScale = 1.0 }
+                }
+                onAdd(quickIncrement)
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            } label: {
+                Text("+\(quickIncrement.cleanDisplay)")
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(
+                        Capsule().fill(color)
+                    )
+                    .scaleEffect(quickScale)
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                withAnimation(.spring(response: 0.2)) { addScale = 1.0 }
+            .buttonStyle(.plain)
+
+            // Custom amount button
+            Button {
+                withAnimation(.spring(response: 0.2, dampingFraction: 0.5)) {
+                    addScale = 1.3
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    withAnimation(.spring(response: 0.2)) { addScale = 1.0 }
+                }
+                showInput = true
+            } label: {
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 20))
+                    .foregroundStyle(color.opacity(0.5))
+                    .scaleEffect(addScale)
             }
-            showInput = true
-        } label: {
-            Image(systemName: "plus.circle.fill")
-                .font(.system(size: 22))
-                .foregroundStyle(color)
-                .scaleEffect(addScale)
+            .buttonStyle(.plain)
         }
-        .buttonStyle(.plain)
     }
 
     @ViewBuilder

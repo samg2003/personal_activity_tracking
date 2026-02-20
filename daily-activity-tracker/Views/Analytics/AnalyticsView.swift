@@ -355,11 +355,14 @@ struct AnalyticsView: View {
 
     // MARK: - Sub-views
 
-    private func sectionHeader(_ title: String, icon: String) -> some View {
-        HStack {
+    private func sectionHeader(_ title: String, icon: String, color: Color = Color(hex: 0x10B981)) -> some View {
+        HStack(spacing: 8) {
             Image(systemName: icon)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 22, height: 22)
+                .background(Circle().fill(color))
+
             Text(title.uppercased())
                 .font(.system(size: 13, weight: .bold, design: .rounded))
                 .foregroundStyle(.secondary)
@@ -368,136 +371,188 @@ struct AnalyticsView: View {
     }
 
     private func streakRow(_ activity: Activity, streak: Int) -> some View {
-        HStack {
-            Image(systemName: activity.icon)
-                .font(.system(size: 14))
-                .foregroundStyle(Color(hex: activity.hexColor))
-                .frame(width: 24)
+        HStack(spacing: 0) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(Color(hex: activity.hexColor))
+                .frame(width: 4)
+                .padding(.vertical, 6)
 
-            Text(activity.name)
-                .font(.subheadline)
+            HStack(spacing: 10) {
+                Image(systemName: activity.icon)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color(hex: activity.hexColor))
+                    .frame(width: 26, height: 26)
+                    .background(Circle().fill(Color(hex: activity.hexColor).opacity(0.12)))
 
-            Spacer()
+                Text(activity.name)
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
 
-            if streak > 0 {
-                HStack(spacing: 4) {
-                    Image(systemName: "flame.fill")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.orange)
-                    Text("\(streak)d")
-                        .font(.system(.caption, design: .rounded, weight: .bold))
-                        .foregroundStyle(.orange)
+                Spacer()
+
+                if streak > 0 {
+                    HStack(spacing: 4) {
+                        Image(systemName: "flame.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.orange)
+                        Text("\(streak)d")
+                            .font(.system(.caption, design: .rounded, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(.orange))
+                    }
+                } else {
+                    Text("—")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
                 }
-            } else {
-                Text("—")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
             }
+            .padding(.leading, 8)
+            .padding(.trailing, 12)
         }
         .padding(.vertical, 6)
-        .padding(.horizontal, 12)
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: WDS.cardRadius, style: .continuous))
         .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
     }
 
     private func behindRow(_ activity: Activity, rate: Double) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: activity.icon)
-                .font(.system(size: 14))
-                .foregroundStyle(Color(hex: activity.hexColor))
-                .frame(width: 24)
+        let barColor: Color = rate < 0.25 ? .red : .orange
+        return HStack(spacing: 0) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(barColor)
+                .frame(width: 4)
+                .padding(.vertical, 6)
 
-            Text(activity.name)
-                .font(.subheadline)
-                .lineLimit(1)
+            HStack(spacing: 10) {
+                Image(systemName: activity.icon)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color(hex: activity.hexColor))
+                    .frame(width: 26, height: 26)
+                    .background(Circle().fill(Color(hex: activity.hexColor).opacity(0.12)))
 
-            Spacer()
+                Text(activity.name)
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
 
-            // Mini progress bar
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(Color(.systemGray5))
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(rate < 0.25 ? Color.red.opacity(0.7) : Color.orange.opacity(0.7))
-                        .frame(width: geo.size.width * rate)
+                Spacer()
+
+                // Gradient mini progress bar
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(Color(.systemGray5))
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(
+                                LinearGradient(
+                                    colors: [barColor.opacity(0.5), barColor],
+                                    startPoint: .leading, endPoint: .trailing
+                                )
+                            )
+                            .frame(width: geo.size.width * rate)
+                    }
                 }
-            }
-            .frame(width: 60, height: 6)
+                .frame(width: 60, height: 8)
 
-            Text("\(Int(rate * 100))%")
-                .font(.system(.caption, design: .rounded, weight: .bold))
-                .foregroundStyle(rate < 0.25 ? .red : .orange)
-                .frame(width: 32, alignment: .trailing)
+                Text("\(Int(rate * 100))%")
+                    .font(.system(.caption, design: .rounded, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(barColor))
+                    .frame(width: 44, alignment: .trailing)
+            }
+            .padding(.leading, 8)
+            .padding(.trailing, 12)
         }
         .padding(.vertical, 8)
-        .padding(.horizontal, 12)
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: WDS.cardRadius, style: .continuous))
         .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
     }
 
     private func winRow(_ activity: Activity, delta: String) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: activity.icon)
-                .font(.system(size: 14))
-                .foregroundStyle(Color(hex: activity.hexColor))
-                .frame(width: 24)
+        HStack(spacing: 0) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(Color.green)
+                .frame(width: 4)
+                .padding(.vertical, 6)
 
-            Text(activity.name)
-                .font(.subheadline)
-                .lineLimit(1)
+            HStack(spacing: 10) {
+                Image(systemName: activity.icon)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color(hex: activity.hexColor))
+                    .frame(width: 26, height: 26)
+                    .background(Circle().fill(Color(hex: activity.hexColor).opacity(0.12)))
 
-            Spacer()
+                Text(activity.name)
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
 
-            Text(delta)
-                .font(.system(.caption, design: .rounded, weight: .bold))
-                .foregroundStyle(.green)
+                Spacer()
+
+                Text(delta)
+                    .font(.system(.caption, design: .rounded, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill(.green))
+            }
+            .padding(.leading, 8)
+            .padding(.trailing, 12)
         }
         .padding(.vertical, 8)
-        .padding(.horizontal, 12)
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: WDS.cardRadius, style: .continuous))
         .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
     }
 
     private func deepDiveRow(_ activity: Activity) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: activity.icon)
-                .font(.system(size: 14))
-                .foregroundStyle(Color(hex: activity.hexColor))
-                .frame(width: 24)
+        HStack(spacing: 0) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(Color(hex: activity.hexColor))
+                .frame(width: 4)
+                .padding(.vertical, 6)
 
-            Text(activity.name)
-                .font(.subheadline)
-                .lineLimit(1)
+            HStack(spacing: 10) {
+                Image(systemName: activity.icon)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color(hex: activity.hexColor))
+                    .frame(width: 26, height: 26)
+                    .background(Circle().fill(Color(hex: activity.hexColor).opacity(0.12)))
 
-            if activity.isStopped {
-                Text("Paused")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.orange)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(.orange.opacity(0.12))
-                    .clipShape(Capsule())
+                Text(activity.name)
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+
+                if activity.isStopped {
+                    Text("Paused")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(.orange.opacity(0.12))
+                        .clipShape(Capsule())
+                }
+
+                Spacer()
+
+                // Last logged date
+                if let lastLog = allLogs.first(where: { $0.activity?.id == activity.id }) {
+                    Text(lastLog.date, format: .dateTime.month(.abbreviated).day().year())
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                }
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.quaternary)
             }
-
-            Spacer()
-
-            // Last logged date
-            if let lastLog = allLogs.first(where: { $0.activity?.id == activity.id }) {
-                Text(lastLog.date, format: .dateTime.month(.abbreviated).day().year())
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
-            }
-
-            Image(systemName: "chevron.right")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+            .padding(.leading, 8)
+            .padding(.trailing, 12)
         }
         .padding(.vertical, 8)
-        .padding(.horizontal, 12)
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: WDS.cardRadius, style: .continuous))
         .shadow(color: .black.opacity(0.04), radius: 4, y: 2)

@@ -48,17 +48,28 @@ struct ValueInputRow: View {
 
                 Spacer()
 
-                // Logged value or prompt
+                // Logged value (tap to re-log same) or prompt
                 if let val = currentValue {
-                    Text("\(val.cleanDisplay) \(unitLabel)")
-                        .font(.system(.callout, design: .rounded, weight: .semibold))
+                    Button {
+                        // Quick re-log: instantly log the same value
+                        onLog(val)
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.counterclockwise")
+                                .font(.system(size: 9, weight: .bold))
+                            Text("\(val.cleanDisplay) \(unitLabel)")
+                                .font(.system(.callout, design: .rounded, weight: .semibold))
+                        }
                         .foregroundStyle(accentColor)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 4)
                         .background(accentColor.opacity(0.12))
                         .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
                 } else {
-                    Text("Log \(unitLabel)")
+                    Text("Tap to log")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
