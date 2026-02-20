@@ -56,8 +56,27 @@ struct CumulativeLogSheet: View {
                         Text("No entries")
                             .foregroundStyle(.secondary)
                     } else {
+                        // Source summary when mixed
+                        let hkCount = visibleLogs.filter { $0.isFromHealthKit }.count
+                        let manualCount = visibleLogs.count - hkCount
+                        if hkCount > 0 && manualCount > 0 {
+                            HStack(spacing: 4) {
+                                Image(systemName: "heart.fill")
+                                    .foregroundStyle(.red)
+                                    .font(.caption2)
+                                Text("\(hkCount) from Apple Health, \(manualCount) manual")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        
                         ForEach(visibleLogs) { log in
                             HStack {
+                                if log.isFromHealthKit {
+                                    Image(systemName: "heart.fill")
+                                        .foregroundStyle(.red)
+                                        .font(.caption)
+                                }
                                 Text(log.completedAt ?? log.date, style: .time)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
@@ -68,7 +87,10 @@ struct CumulativeLogSheet: View {
                         }
                         .onDelete { indexSet in
                             for index in indexSet {
-                                pendingDeletions.insert(visibleLogs[index].id)
+                                let log = visibleLogs[index]
+                                // Don't allow deletion of HK-sourced entries (they'll be re-synced)
+                                guard !log.isFromHealthKit else { continue }
+                                pendingDeletions.insert(log.id)
                             }
                         }
                     }

@@ -1373,44 +1373,98 @@ struct DashboardView: View {
             guard !typesToRead.isEmpty else { return }
             try? await HealthKitService.shared.requestAuthorization(for: typesToRead)
             
-            // 2. Read and Update
+            // 2. Read and update per activity type
             for activity in todayActivities {
                 guard let typeID = activity.healthKitTypeID,
                       let hkType = HealthKitService.identifierFrom(typeID),
                       activity.healthKitMode == .read || activity.healthKitMode == .both
                 else { continue }
                 
-                // Determine unit
                 let unit: HKUnit = HealthKitService.unitFor(type: hkType)
+                // When mode is .both, exclude samples our app wrote to avoid double-counting
+                let excludeOwn = activity.healthKitMode == .both
                 
-                let value = try? await HealthKitService.shared.readTotalToday(for: hkType, unit: unit)
-                if let val = value, val > 0 {
-                    // Compare against existing HK-tagged log (not full cumulative, which includes manual entries)
-                    let existingHKValue = await MainActor.run {
-                        todayLogs.first {
-                            $0.activity?.id == activity.id &&
-                            $0.status == .completed &&
-                            $0.note == "Synced from HealthKit"
-                        }?.value ?? 0
-                    }
-                    if abs(existingHKValue - val) > 0.1 {
-                        await MainActor.run {
-                            // Upsert: find existing HK-tagged log and update, otherwise insert
-                            let hkTaggedLog = todayLogs.first {
-                                $0.activity?.id == activity.id &&
-                                $0.status == .completed &&
-                                $0.note == "Synced from HealthKit"
-                            }
-                            if let existing = hkTaggedLog {
-                                existing.value = val
-                            } else {
-                                let log = ActivityLog(activity: activity, date: today, status: .completed, value: val)
-                                log.note = "Synced from HealthKit"
-                                modelContext.insert(log)
-                            }
-                        }
-                    }
+                switch activity.type {
+                case .checkbox:
+                    await syncCheckboxFromHK(activity: activity, hkType: hkType, unit: unit, excludeOwn: excludeOwn)
+                case .value:
+                    await syncValueFromHK(activity: activity, hkType: hkType, unit: unit, excludeOwn: excludeOwn)
+                case .cumulative:
+                    await syncCumulativeFromHK(activity: activity, hkType: hkType, unit: unit, excludeOwn: excludeOwn)
+                case .metric:
+                    await syncValueFromHK(activity: activity, hkType: hkType, unit: unit, excludeOwn: excludeOwn)
+                case .container:
+                    break
                 }
+            }
+        }
+    }
+    
+    /// Checkbox: auto-complete if any HK data exists today
+    private func syncCheckboxFromHK(activity: Activity, hkType: HKQuantityTypeIdentifier, unit: HKUnit, excludeOwn: Bool) async {
+        guard let total = try? await HealthKitService.shared.readTotalToday(for: hkType, unit: unit, excludingOwnApp: excludeOwn),
+              total > 0 else { return }
+        
+        await MainActor.run {
+            let alreadyCompleted = todayLogs.contains {
+                $0.activity?.id == activity.id && $0.status == .completed
+            }
+            guard !alreadyCompleted else { return }
+            
+            let log = ActivityLog(activity: activity, date: today, status: .completed, value: total)
+            log.source = "healthkit"
+            log.note = "Auto-completed from Apple Health"
+            modelContext.insert(log)
+        }
+    }
+    
+    /// Value/Metric: store latest HK sample
+    private func syncValueFromHK(activity: Activity, hkType: HKQuantityTypeIdentifier, unit: HKUnit, excludeOwn: Bool) async {
+        guard let latestValue = try? await HealthKitService.shared.readLatestValue(for: hkType, unit: unit, excludingOwnApp: excludeOwn),
+              latestValue > 0 else { return }
+        
+        await MainActor.run {
+            let hkLog = todayLogs.first {
+                $0.activity?.id == activity.id &&
+                $0.status == .completed &&
+                $0.isFromHealthKit
+            }
+            
+            if let existing = hkLog {
+                if abs((existing.value ?? 0) - latestValue) > 0.01 {
+                    existing.value = latestValue
+                }
+            } else {
+                let log = ActivityLog(activity: activity, date: today, status: .completed, value: latestValue)
+                log.source = "healthkit"
+                log.note = "Synced from Apple Health"
+                modelContext.insert(log)
+            }
+        }
+    }
+    
+    /// Cumulative: store daily total from HK as a single synced entry
+    private func syncCumulativeFromHK(activity: Activity, hkType: HKQuantityTypeIdentifier, unit: HKUnit, excludeOwn: Bool) async {
+        let value = try? await HealthKitService.shared.readTotalToday(for: hkType, unit: unit, excludingOwnApp: excludeOwn)
+        guard let val = value, val > 0 else { return }
+        
+        await MainActor.run {
+            let hkTaggedLog = todayLogs.first {
+                $0.activity?.id == activity.id &&
+                $0.status == .completed &&
+                ($0.isFromHealthKit || $0.note == "Synced from HealthKit")
+            }
+            
+            if let existing = hkTaggedLog {
+                if abs((existing.value ?? 0) - val) > 0.1 {
+                    existing.value = val
+                    if existing.source == nil { existing.source = "healthkit" }
+                }
+            } else {
+                let log = ActivityLog(activity: activity, date: today, status: .completed, value: val)
+                log.source = "healthkit"
+                log.note = "Synced from Apple Health"
+                modelContext.insert(log)
             }
         }
     }
@@ -1422,7 +1476,6 @@ struct DashboardView: View {
         else { return }
         
         Task {
-            // Simple unit mapping
             let unit: HKUnit = HealthKitService.unitFor(type: hkType)
             try? await HealthKitService.shared.writeSample(type: hkType, value: value, unit: unit, date: Date())
         }

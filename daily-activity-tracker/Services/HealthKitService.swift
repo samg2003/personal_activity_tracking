@@ -4,8 +4,8 @@ import HealthKit
 /// Protocol for HealthKit operations — enables mocking for tests
 protocol HealthKitServiceProtocol {
     func requestAuthorization(for types: Set<HKQuantityTypeIdentifier>) async throws
-    func readLatestValue(for type: HKQuantityTypeIdentifier, unit: HKUnit) async throws -> Double?
-    func readTotalToday(for type: HKQuantityTypeIdentifier, unit: HKUnit) async throws -> Double
+    func readLatestValue(for type: HKQuantityTypeIdentifier, unit: HKUnit, excludingOwnApp: Bool) async throws -> Double?
+    func readTotalToday(for type: HKQuantityTypeIdentifier, unit: HKUnit, excludingOwnApp: Bool) async throws -> Double
     func writeSample(type: HKQuantityTypeIdentifier, value: Double, unit: HKUnit, date: Date) async throws
     var isAvailable: Bool { get }
 }
@@ -32,12 +32,21 @@ final class HealthKitService: HealthKitServiceProtocol {
 
     // MARK: - Read
 
-    func readLatestValue(for type: HKQuantityTypeIdentifier, unit: HKUnit) async throws -> Double? {
+    func readLatestValue(for type: HKQuantityTypeIdentifier, unit: HKUnit, excludingOwnApp: Bool = false) async throws -> Double? {
         guard isAvailable,
               let quantityType = HKQuantityType.quantityType(forIdentifier: type)
         else { return nil }
 
-        let predicate = HKQuery.predicateForSamples(withStart: Date().startOfDay, end: Date(), options: .strictStartDate)
+        var subPredicates: [NSPredicate] = [
+            HKQuery.predicateForSamples(withStart: Date().startOfDay, end: Date(), options: .strictStartDate)
+        ]
+        if excludingOwnApp, let bundleId = Bundle.main.bundleIdentifier {
+            let source = HKSource.default()
+            subPredicates.append(NSCompoundPredicate(notPredicateWithSubpredicate:
+                HKQuery.predicateForObjects(from: Set([source]))
+            ))
+        }
+        let predicate = NSCompoundPredicate(andPredicateWithSubpredicates: subPredicates)
         let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
 
         return try await withCheckedThrowingContinuation { continuation in
@@ -58,16 +67,25 @@ final class HealthKitService: HealthKitServiceProtocol {
         }
     }
 
-    func readTotalToday(for type: HKQuantityTypeIdentifier, unit: HKUnit) async throws -> Double {
+    func readTotalToday(for type: HKQuantityTypeIdentifier, unit: HKUnit, excludingOwnApp: Bool = false) async throws -> Double {
         guard isAvailable,
               let quantityType = HKQuantityType.quantityType(forIdentifier: type)
         else { return 0 }
 
-        let predicate = HKQuery.predicateForSamples(
-            withStart: Date().startOfDay,
-            end: Date(),
-            options: .strictStartDate
-        )
+        var subPredicates: [NSPredicate] = [
+            HKQuery.predicateForSamples(
+                withStart: Date().startOfDay,
+                end: Date(),
+                options: .strictStartDate
+            )
+        ]
+        if excludingOwnApp, let bundleId = Bundle.main.bundleIdentifier {
+            let source = HKSource.default()
+            subPredicates.append(NSCompoundPredicate(notPredicateWithSubpredicate:
+                HKQuery.predicateForObjects(from: Set([source]))
+            ))
+        }
+        let predicate = NSCompoundPredicate(andPredicateWithSubpredicates: subPredicates)
 
         return try await withCheckedThrowingContinuation { continuation in
             let query = HKStatisticsQuery(
@@ -106,27 +124,94 @@ final class HealthKitService: HealthKitServiceProtocol {
 
     // MARK: - Mapping helpers
 
-    /// Maps a HealthKit type identifier string to HKQuantityTypeIdentifier
+    /// Maps a short HealthKit type name (from picker) to the proper HKQuantityTypeIdentifier.
+    /// The picker stores short names like "dietaryWater" but HK needs "HKQuantityTypeIdentifierDietaryWater".
     static func identifierFrom(_ raw: String) -> HKQuantityTypeIdentifier? {
-        HKQuantityTypeIdentifier(rawValue: raw)
+        if let match = allTypes.first(where: { $0.key == raw }) {
+            return match.id
+        }
+        // Fall back to direct rawValue (for full HK identifiers)
+        let id = HKQuantityTypeIdentifier(rawValue: raw)
+        guard HKQuantityType.quantityType(forIdentifier: id) != nil else { return nil }
+        return id
     }
 
-    /// Returns the correct HKUnit for a given type identifier by looking up commonTypes.
+    /// Returns the correct HKUnit for a given type identifier.
     static func unitFor(type: HKQuantityTypeIdentifier) -> HKUnit {
-        commonTypes.first { $0.id == type }?.unit ?? .count()
+        allTypes.first { $0.id == type }?.unit ?? .count()
     }
 
-    /// Common types for the picker
-    static let commonTypes: [(name: String, id: HKQuantityTypeIdentifier, unit: HKUnit)] = [
-        ("Steps", .stepCount, .count()),
-        ("Water (ml)", .dietaryWater, .literUnit(with: .milli)),
-        ("Weight (kg)", .bodyMass, .gramUnit(with: .kilo)),
-        ("Body Fat (%)", .bodyFatPercentage, .percent()),
-        ("Heart Rate", .heartRate, HKUnit.count().unitDivided(by: .minute())),
-        ("Sleep (hrs)", .appleExerciseTime, .hour()), // placeholder until SleepAnalysis
-        ("Calories Burned", .activeEnergyBurned, .kilocalorie()),
-        ("Walking Distance (km)", .distanceWalkingRunning, .meterUnit(with: .kilo)),
+    /// Single source of truth for all supported HealthKit types.
+    /// `key` is the short string stored in Activity.healthKitTypeID.
+    /// `category` groups them in the picker UI.
+    struct HKTypeInfo {
+        let key: String
+        let name: String
+        let category: String
+        let id: HKQuantityTypeIdentifier
+        let unit: HKUnit
+    }
+
+    static let allTypes: [HKTypeInfo] = [
+        // Activity & Fitness
+        HKTypeInfo(key: "stepCount",              name: "Steps",                   category: "Activity",    id: .stepCount,              unit: .count()),
+        HKTypeInfo(key: "distanceWalkingRunning",  name: "Walking + Running (km)",  category: "Activity",    id: .distanceWalkingRunning, unit: .meterUnit(with: .kilo)),
+        HKTypeInfo(key: "distanceCycling",         name: "Cycling Distance (km)",   category: "Activity",    id: .distanceCycling,        unit: .meterUnit(with: .kilo)),
+        HKTypeInfo(key: "distanceSwimming",        name: "Swimming Distance (m)",   category: "Activity",    id: .distanceSwimming,       unit: .meter()),
+        HKTypeInfo(key: "activeEnergyBurned",      name: "Active Calories",         category: "Activity",    id: .activeEnergyBurned,     unit: .kilocalorie()),
+        HKTypeInfo(key: "basalEnergyBurned",       name: "Resting Calories",        category: "Activity",    id: .basalEnergyBurned,      unit: .kilocalorie()),
+        HKTypeInfo(key: "appleExerciseTime",       name: "Exercise Minutes",        category: "Activity",    id: .appleExerciseTime,      unit: .minute()),
+        HKTypeInfo(key: "appleStandTime",          name: "Stand Minutes",           category: "Activity",    id: .appleStandTime,         unit: .minute()),
+        HKTypeInfo(key: "flightsClimbed",          name: "Flights Climbed",         category: "Activity",    id: .flightsClimbed,         unit: .count()),
+        HKTypeInfo(key: "appleWalkingSteadiness",  name: "Walking Steadiness (%)",  category: "Activity",    id: .appleWalkingSteadiness, unit: .percent()),
+        HKTypeInfo(key: "walkingSpeed",            name: "Walking Speed (km/h)",    category: "Activity",    id: .walkingSpeed,           unit: HKUnit.meter().unitDivided(by: .second())),
+        HKTypeInfo(key: "walkingStepLength",       name: "Step Length (cm)",        category: "Activity",    id: .walkingStepLength,      unit: .meterUnit(with: .centi)),
+
+        // Body Measurements
+        HKTypeInfo(key: "bodyMass",                name: "Weight (kg)",             category: "Body",        id: .bodyMass,               unit: .gramUnit(with: .kilo)),
+        HKTypeInfo(key: "bodyFatPercentage",       name: "Body Fat (%)",            category: "Body",        id: .bodyFatPercentage,      unit: .percent()),
+        HKTypeInfo(key: "bodyMassIndex",           name: "BMI",                     category: "Body",        id: .bodyMassIndex,          unit: .count()),
+        HKTypeInfo(key: "leanBodyMass",            name: "Lean Body Mass (kg)",     category: "Body",        id: .leanBodyMass,           unit: .gramUnit(with: .kilo)),
+        HKTypeInfo(key: "height",                  name: "Height (cm)",             category: "Body",        id: .height,                 unit: .meterUnit(with: .centi)),
+        HKTypeInfo(key: "waistCircumference",      name: "Waist (cm)",              category: "Body",        id: .waistCircumference,     unit: .meterUnit(with: .centi)),
+
+        // Heart
+        HKTypeInfo(key: "heartRate",               name: "Heart Rate (bpm)",        category: "Heart",       id: .heartRate,              unit: HKUnit.count().unitDivided(by: .minute())),
+        HKTypeInfo(key: "restingHeartRate",         name: "Resting Heart Rate",      category: "Heart",       id: .restingHeartRate,       unit: HKUnit.count().unitDivided(by: .minute())),
+        HKTypeInfo(key: "walkingHeartRateAverage",  name: "Walking HR Average",      category: "Heart",       id: .walkingHeartRateAverage, unit: HKUnit.count().unitDivided(by: .minute())),
+        HKTypeInfo(key: "heartRateVariabilitySDNN", name: "HRV (ms)",               category: "Heart",       id: .heartRateVariabilitySDNN, unit: .secondUnit(with: .milli)),
+        HKTypeInfo(key: "vo2Max",                  name: "VO₂ Max",                 category: "Heart",       id: .vo2Max,                 unit: HKUnit.literUnit(with: .milli).unitDivided(by: HKUnit.gramUnit(with: .kilo).unitMultiplied(by: .minute()))),
+        HKTypeInfo(key: "oxygenSaturation",        name: "Blood Oxygen (%)",        category: "Heart",       id: .oxygenSaturation,       unit: .percent()),
+        HKTypeInfo(key: "bloodPressureSystolic",   name: "Blood Pressure (sys)",    category: "Heart",       id: .bloodPressureSystolic,  unit: .millimeterOfMercury()),
+        HKTypeInfo(key: "bloodPressureDiastolic",  name: "Blood Pressure (dia)",    category: "Heart",       id: .bloodPressureDiastolic, unit: .millimeterOfMercury()),
+
+        // Nutrition
+        HKTypeInfo(key: "dietaryWater",            name: "Water (ml)",              category: "Nutrition",   id: .dietaryWater,           unit: .literUnit(with: .milli)),
+        HKTypeInfo(key: "dietaryEnergyConsumed",   name: "Calories Eaten",          category: "Nutrition",   id: .dietaryEnergyConsumed,  unit: .kilocalorie()),
+        HKTypeInfo(key: "dietaryProtein",          name: "Protein (g)",             category: "Nutrition",   id: .dietaryProtein,         unit: .gram()),
+        HKTypeInfo(key: "dietaryCarbohydrates",    name: "Carbs (g)",               category: "Nutrition",   id: .dietaryCarbohydrates,   unit: .gram()),
+        HKTypeInfo(key: "dietaryFatTotal",         name: "Fat (g)",                 category: "Nutrition",   id: .dietaryFatTotal,        unit: .gram()),
+        HKTypeInfo(key: "dietaryCaffeine",         name: "Caffeine (mg)",           category: "Nutrition",   id: .dietaryCaffeine,        unit: .gramUnit(with: .milli)),
+        HKTypeInfo(key: "dietaryFiber",            name: "Fiber (g)",               category: "Nutrition",   id: .dietaryFiber,           unit: .gram()),
+        HKTypeInfo(key: "dietarySugar",            name: "Sugar (g)",               category: "Nutrition",   id: .dietarySugar,           unit: .gram()),
+
+        // Respiratory
+        HKTypeInfo(key: "respiratoryRate",         name: "Respiratory Rate",        category: "Respiratory", id: .respiratoryRate,        unit: HKUnit.count().unitDivided(by: .minute())),
+
+        // Other
+        HKTypeInfo(key: "bloodGlucose",            name: "Blood Glucose (mg/dL)",   category: "Other",       id: .bloodGlucose,           unit: HKUnit.gramUnit(with: .milli).unitDivided(by: .literUnit(with: .deci))),
+        HKTypeInfo(key: "bodyTemperature",         name: "Body Temperature (°C)",   category: "Other",       id: .bodyTemperature,        unit: .degreeCelsius()),
     ]
+
+    /// Grouped by category for the picker UI
+    static var typesByCategory: [(category: String, types: [HKTypeInfo])] {
+        let grouped = Dictionary(grouping: allTypes, by: \.category)
+        let order = ["Activity", "Body", "Heart", "Nutrition", "Respiratory", "Other"]
+        return order.compactMap { cat in
+            guard let types = grouped[cat] else { return nil }
+            return (category: cat, types: types)
+        }
+    }
 
     // MARK: - Workout Builder (Cardio Sessions)
 

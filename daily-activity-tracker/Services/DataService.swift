@@ -127,18 +127,21 @@ final class DataService {
         let skipReason: String?
         let timeSlotRaw: String?
         let completedAt: Date?
+        let source: String?
         let activityID: UUID
 
         init(id: UUID, date: Date, statusRaw: String, value: Double?,
              photoFilename: String?, photoFilenamesData: Data? = nil,
              note: String?, skipReason: String?,
-             timeSlotRaw: String?, completedAt: Date?, activityID: UUID) {
+             timeSlotRaw: String?, completedAt: Date?,
+             source: String? = nil, activityID: UUID) {
             self.id = id; self.date = date; self.statusRaw = statusRaw
             self.value = value; self.photoFilename = photoFilename
             self.photoFilenamesData = photoFilenamesData
             self.note = note
             self.skipReason = skipReason; self.timeSlotRaw = timeSlotRaw
-            self.completedAt = completedAt; self.activityID = activityID
+            self.completedAt = completedAt; self.source = source
+            self.activityID = activityID
         }
 
         init(from decoder: Decoder) throws {
@@ -153,6 +156,7 @@ final class DataService {
             skipReason = try c.decodeIfPresent(String.self, forKey: .skipReason)
             timeSlotRaw = try c.decodeIfPresent(String.self, forKey: .timeSlotRaw)
             completedAt = try c.decodeIfPresent(Date.self, forKey: .completedAt)
+            source = try c.decodeIfPresent(String.self, forKey: .source)
             activityID = try c.decode(UUID.self, forKey: .activityID)
         }
     }
@@ -455,7 +459,8 @@ final class DataService {
                 photoFilenamesData: log.photoFilenamesData,
                 note: log.note, skipReason: log.skipReason,
                 timeSlotRaw: log.timeSlotRaw,
-                completedAt: log.completedAt, activityID: actID
+                completedAt: log.completedAt,
+                source: log.source, activityID: actID
             )
         }
         
@@ -755,6 +760,7 @@ final class DataService {
             log.skipReason = dto.skipReason
             log.timeSlotRaw = dto.timeSlotRaw
             log.completedAt = dto.completedAt
+            log.source = dto.source
             context.insert(log)
         }
         

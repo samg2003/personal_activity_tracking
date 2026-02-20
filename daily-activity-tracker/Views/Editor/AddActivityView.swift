@@ -892,17 +892,18 @@ struct AddActivityView: View {
 
 
     private var healthKitSection: some View {
-        Section("HealthKit") {
+        Section("Apple Health") {
             Toggle("Link to Health", isOn: $enableHealthKit)
 
             if enableHealthKit {
                 Picker("Data Type", selection: $hkType) {
-                    Text("Steps").tag("stepCount")
-                    Text("Walking Check").tag("appleWalkingSteadiness") 
-                    Text("Water").tag("dietaryWater")
-                    Text("Weight").tag("bodyMass")
-                    Text("Sleep").tag("sleepAnalysis")
-                    Text("Workout").tag("workout")
+                    ForEach(HealthKitService.typesByCategory, id: \.category) { group in
+                        Section(group.category) {
+                            ForEach(group.types, id: \.key) { info in
+                                Text(info.name).tag(info.key)
+                            }
+                        }
+                    }
                 }
                 
                 Picker("Mode", selection: $hkMode) {

@@ -101,6 +101,7 @@ erDiagram
         String skipReason "optional"
         String timeSlotRaw "session slot (optional)"
         Date completedAt "optional"
+        String source "optional: nil=manual, healthkit"
     }
 
     VacationDay {
@@ -207,7 +208,7 @@ enum ReminderPreset: Codable {
 | **ScheduleEngine**        | `shouldShow`, `activitiesForToday`, carry-forward, `completionRate`, `currentStreak`, `longestStreak`, `isContainerCompleted`, `applicableChildren` | Activity, ActivityLog, Calendar |
 | **ActivityStatusService** | Daily status queries: `isFullyCompleted`, `isSkipped`, `isSessionCompleted`, `isSessionSkipped`, `completionFraction`, `skipReason`, vacation check | ActivityLog, ScheduleEngine     |
 | **AnalyticsEngine**       | Streaks, scores, heatmap data, insight summary                                                                                                      | ActivityLog                     |
-| **HealthKitService**      | Read/write HK, observe changes                                                                                                                      | HealthKit framework             |
+| **HealthKitService**      | Read/write HK; type-aware sync: checkbox→auto-complete, value/metric→latest sample, cumulative→daily total. Logs tagged with `source="healthkit"`   | HealthKit framework             |
 | **NotificationService**   | Schedule/cancel local notifications                                                                                                                 | UserNotifications               |
 | **CalendarService**       | Create/read EventKit events                                                                                                                         | EventKit                        |
 | **MediaService**          | Save/load photos, cleanup orphans                                                                                                                   | FileManager                     |

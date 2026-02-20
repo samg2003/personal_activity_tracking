@@ -13,8 +13,12 @@ final class ActivityLog {
     var skipReason: String?
     var timeSlotRaw: String?
     var completedAt: Date?
+    /// nil = manual entry, "healthkit" = synced from Apple Health
+    var source: String?
 
     var activity: Activity?
+
+    var isFromHealthKit: Bool { source == "healthkit" }
 
     var status: LogStatus {
         get { LogStatus(rawValue: statusRaw) ?? .completed }

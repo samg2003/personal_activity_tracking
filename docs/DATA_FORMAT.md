@@ -127,7 +127,8 @@ Records of activity completion.
   "photoFilename": null,
   "photoFilenamesData": null,
   "skipReason": null,
-  "timeSlotRaw": "morning"
+  "timeSlotRaw": "morning",
+  "source": "healthkit"
 }
 ```
 
@@ -141,6 +142,7 @@ Records of activity completion.
 | `photoFilename`      | String  | (Optional) Legacy single photo filename.                                   |
 | `photoFilenamesData` | Data    | (Optional) JSON-encoded `{"slot": "filename"}` dict for multi-slot photos. |
 | `timeSlotRaw`        | String  | (Optional) Session slot: `"morning"`, `"afternoon"`, `"evening"`.          |
+| `source`             | String  | (Optional) `nil` = manual, `"healthkit"` = synced from Apple Health.       |
 
 ---
 
