@@ -228,7 +228,7 @@ struct DashboardView: View {
                 }
                 .padding()
             }
-            .background(Color(.systemBackground))
+            .background(Color(.systemGroupedBackground))
             .onChange(of: allLogs.count) {
                 if allDone { completedExpanded = true }
             }
@@ -359,9 +359,14 @@ struct DashboardView: View {
                     .font(.title2.weight(.bold))
                     .foregroundStyle(.white)
                     .frame(width: 56, height: 56)
-                    .background(Color.accentColor)
+                    .background(
+                        LinearGradient(
+                            colors: [Color(hex: 0x10B981), Color(hex: 0x0D9488)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        )
+                    )
                     .clipShape(Circle())
-                    .shadow(radius: 4, y: 4)
+                    .shadow(color: Color(hex: 0x10B981).opacity(0.4), radius: 8, y: 4)
             }
             .padding()
             .alert("Add to \(quickAddActivity?.name ?? "")", isPresented: $showQuickAdd) {
@@ -387,18 +392,57 @@ struct DashboardView: View {
         return total.truncatingRemainder(dividingBy: 1) == 0 ? String(format: "%.0f", total) : String(format: "%.1f", total)
     }
 
+    // MARK: - Greeting Helpers
+
+    private var greetingEmoji: String {
+        let hour = Calendar.current.component(.hour, from: Date())
+        if hour < 12 { return "☀️" }
+        if hour < 17 { return "🔥" }
+        return "🌙"
+    }
+
+    private var greetingText: String {
+        let hour = Calendar.current.component(.hour, from: Date())
+        if hour < 12 { return "Good morning" }
+        if hour < 17 { return "Good afternoon" }
+        return "Good evening"
+    }
+
+    private var motivationSubtitle: String {
+        let pending = pendingTimed.count + stickyPending.count
+        if todayActivities.isEmpty { return "No activities scheduled" }
+        if pending == 0 { return "All done — enjoy your day! 🎉" }
+        if pending <= 3 { return "Almost there — \(pending) left!" }
+        return "\(pending) tasks ahead — you got this!" 
+    }
+
     // MARK: - Sections
 
     @ViewBuilder
     private var headerSection: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 12) {
+            // Greeting
+            if selectedDate.isSameDay(as: Date()) {
+                VStack(spacing: 4) {
+                    Text("\(greetingText) \(greetingEmoji)")
+                        .font(.title2.weight(.bold))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Text(motivationSubtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+
+            // Hero ring
             ProgressRingView(progress: completionFraction)
+                .padding(.vertical, 4)
 
             if todayActivities.isEmpty {
                 Text("No activities for today")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                    .padding(.top, 8)
             }
         }
     }
@@ -415,25 +459,42 @@ struct DashboardView: View {
         )
     }
 
+    private func slotColor(_ slot: TimeSlot) -> Color {
+        switch slot {
+        case .allDay:    return WDS.infoAccent
+        case .morning:   return Color(hex: 0xF59E0B)
+        case .afternoon: return Color(hex: 0x10B981)
+        case .evening:   return Color(hex: 0x8B5CF6)
+        }
+    }
+
     @ViewBuilder
     private var timeBucketSections: some View {
         ForEach(groupedBySlot, id: \.slot) { group in
-            VStack(alignment: .leading, spacing: 8) {
-                // Bucket header
-                Button {
-                    // Collapse handled inside TimeBucketSection
-                } label: {
-                    HStack {
-                        Image(systemName: group.slot.icon)
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                        Text(group.slot.displayName.uppercased())
-                            .font(.system(size: 13, weight: .bold, design: .rounded))
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                    }
+            VStack(alignment: .leading, spacing: 10) {
+                // Colored section pill
+                HStack(spacing: 6) {
+                    Image(systemName: group.slot.icon)
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(slotColor(group.slot))
+                        .frame(width: 22, height: 22)
+                        .background(slotColor(group.slot).opacity(0.12))
+                        .clipShape(Circle())
+
+                    Text(group.slot.displayName.uppercased())
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .foregroundStyle(slotColor(group.slot))
+
+                    Spacer()
+
+                    Text("\(group.activities.count)")
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .foregroundStyle(slotColor(group.slot))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(slotColor(group.slot).opacity(0.1))
+                        .clipShape(Capsule())
                 }
-                .buttonStyle(.plain)
 
                 ForEach(group.activities) { activity in
                     activityView(for: activity, inSlot: group.slot)
@@ -445,15 +506,28 @@ struct DashboardView: View {
     @ViewBuilder
     private var backlogSection: some View {
         if !stickyPending.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 6) {
                     Image(systemName: "bell.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.orange)
+                        .frame(width: 22, height: 22)
+                        .background(Color.orange.opacity(0.12))
+                        .clipShape(Circle())
+
                     Text("REMINDERS")
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .foregroundStyle(.orange)
+
                     Spacer()
+
+                    Text("\(stickyPending.count)")
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(Color.orange.opacity(0.1))
+                        .clipShape(Capsule())
                 }
 
                 ForEach(stickyPending) { activity in
@@ -489,19 +563,30 @@ struct DashboardView: View {
                     }
                 }
             } label: {
-                HStack {
+                HStack(spacing: 6) {
                     Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(.green)
+                        .frame(width: 22, height: 22)
+                        .background(Color.green.opacity(0.12))
+                        .clipShape(Circle())
+
                     Text("COMPLETED")
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
-                        .foregroundStyle(.secondary)
-                    Text("(\(completedItemCount))")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .foregroundStyle(.green)
+
+                    Text("\(completedItemCount)")
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .foregroundStyle(.green)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(Color.green.opacity(0.1))
+                        .clipShape(Capsule())
+
                     if allDone {
                         Spacer()
                         Text("All done! 🎉")
-                            .font(.caption)
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
                             .foregroundStyle(.green)
                     }
                 }
@@ -594,15 +679,25 @@ struct DashboardView: View {
                     }
                 }
             } label: {
-                HStack {
+                HStack(spacing: 6) {
                     Image(systemName: "forward.fill")
+                        .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(.orange)
+                        .frame(width: 22, height: 22)
+                        .background(Color.orange.opacity(0.12))
+                        .clipShape(Circle())
+
                     Text("SKIPPED")
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
-                        .foregroundStyle(.secondary)
-                    Text("(\(skippedItemCount))")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .foregroundStyle(.orange)
+
+                    Text("\(skippedItemCount)")
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(Color.orange.opacity(0.1))
+                        .clipShape(Capsule())
                 }
             }
             .tint(.secondary)
@@ -692,8 +787,9 @@ struct DashboardView: View {
         }
         .padding(.vertical, 6)
         .padding(.horizontal, 14)
-        .background(Color(.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: WDS.cardRadius, style: .continuous))
+        .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
     }
 
     /// Skipped slots for a multi-session activity (sessions that are skipped and not completed)
@@ -1102,10 +1198,6 @@ struct DashboardView: View {
     }
 
     private func skipActivity(_ activity: Activity, reason: String, slot: TimeSlot? = nil) {
-        if activity.isManagedByWorkout {
-            withAnimation { switchToTab = 3 }
-            return
-        }
         // For multi-session with a slot, skip that specific session
         if let slot, activity.isMultiSession {
             guard !isSessionSkipped(activity, slot: slot) && !isSessionCompleted(activity, slot: slot) else { return }

@@ -140,7 +140,7 @@ struct BarChartView: View {
             }
         }
         .padding(14)
-        .background(Color(.secondarySystemBackground))
+        .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 

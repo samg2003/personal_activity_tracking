@@ -151,7 +151,7 @@ struct WorkoutAnalyticsView: View {
         }
         .frame(width: 130, alignment: .leading)
         .padding(14)
-        .background(Color(.secondarySystemBackground))
+        .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
@@ -235,7 +235,7 @@ struct WorkoutAnalyticsView: View {
                         .frame(height: 100)
                     }
                     .padding(12)
-                    .background(Color(.secondarySystemBackground))
+                    .background(.ultraThinMaterial)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
             }
@@ -307,7 +307,7 @@ struct WorkoutAnalyticsView: View {
             }
         }
         .padding(14)
-        .background(Color(.secondarySystemBackground))
+        .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
@@ -367,7 +367,7 @@ struct WorkoutAnalyticsView: View {
             }
         }
         .padding(14)
-        .background(Color(.secondarySystemBackground))
+        .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
@@ -439,7 +439,7 @@ struct WorkoutAnalyticsView: View {
             }
         }
         .padding(14)
-        .background(Color(.secondarySystemBackground))
+        .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
@@ -501,7 +501,7 @@ struct WorkoutAnalyticsView: View {
             }
         }
         .padding(14)
-        .background(Color(.secondarySystemBackground))
+        .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 

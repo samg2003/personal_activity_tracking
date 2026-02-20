@@ -6,27 +6,25 @@ enum PlanEditorComponents {
 
     // MARK: - Week Strip
 
-    /// Horizontal row of 7 tappable day pills. Long-press cycles color group.
+    /// Horizontal row of 7 tappable day pills. Long-press shows link color menu.
     struct WeekStrip: View {
         let days: [WorkoutPlanDay]
         @Binding var selectedIndex: Int
         var accentColor: Color = .orange
         let modelContext: ModelContext
-        /// Called after a color change that does NOT conflict (no exercises to resolve).
         var onColorChange: ((WorkoutPlanDay) -> Void)? = nil
-        /// Called when linking would merge two days that both have exercises.
-        /// Parameters: (day being changed, new colorGroup, existing day in that group)
         var onLinkConflict: ((_ day: WorkoutPlanDay, _ newGroup: Int, _ existingDay: WorkoutPlanDay) -> Void)? = nil
 
         var body: some View {
-            HStack(spacing: 6) {
+            HStack(spacing: 5) {
                 ForEach(Array(days.enumerated()), id: \.element.id) { index, day in
                     DayPill(
                         day: day,
                         isSelected: index == selectedIndex,
                         accentColor: accentColor,
                         onTap: {
-                            withAnimation(.easeInOut(duration: 0.2)) {
+                            WDS.hapticSelection()
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                                 selectedIndex = index
                             }
                         },
@@ -36,11 +34,11 @@ enum PlanEditorComponents {
                     )
                 }
             }
+            .padding(.vertical, 4)
         }
 
         @ViewBuilder
         private func colorMenuItems(for day: WorkoutPlanDay) -> some View {
-            // Color choices
             ForEach(0..<WorkoutPlanDay.linkColors.count, id: \.self) { group in
                 let color = WorkoutPlanDay.linkColors[group]
                 Button {
@@ -68,13 +66,11 @@ enum PlanEditorComponents {
         private func setColor(_ day: WorkoutPlanDay, group: Int) {
             let oldGroup = day.colorGroup
 
-            // Check for conflict: day has exercises AND target group already has days with exercises
             if group >= 0 && day.hasExercises {
                 let existingInGroup = days.first {
                     $0.id != day.id && $0.colorGroup == group && $0.hasExercises
                 }
                 if let existingDay = existingInGroup {
-                    // Conflict: let the parent handle it
                     onLinkConflict?(day, group, existingDay)
                     return
                 }
@@ -86,11 +82,7 @@ enum PlanEditorComponents {
         }
     }
 
-    /// Single day pill in the week strip.
-    /// - Tap: selects this day in the detail view
-    /// - Long-press: shows context menu with link color options
-    /// - Selected: hollow outline with the day's link color (or accent)
-    /// - Non-selected linked: filled background tint
+    /// Single day pill with premium styling — shadow on selected, spring animation.
     struct DayPill<Menu: View>: View {
         let day: WorkoutPlanDay
         let isSelected: Bool
@@ -106,47 +98,51 @@ enum PlanEditorComponents {
         }
 
         var body: some View {
-            VStack(spacing: 2) {
+            VStack(spacing: 3) {
                 Text(day.weekdayName)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 11, weight: isSelected ? .heavy : .semibold))
+                    .foregroundStyle(isSelected ? dayColor : .primary)
 
                 if day.isRest {
                     Text("Rest")
-                        .font(.system(size: 9))
+                        .font(.system(size: 9, weight: .medium))
                         .foregroundStyle(.tertiary)
                 } else {
                     if !day.dayLabel.isEmpty {
                         Text(day.dayLabel)
-                            .font(.system(size: 9))
+                            .font(.system(size: 9, weight: .medium))
                             .lineLimit(1)
+                            .foregroundStyle(isSelected ? dayColor : .secondary)
                     }
                     let count = day.totalSets > 0 ? "\(day.totalSets)s" :
                                !day.cardioExercises.isEmpty ? "\(day.cardioExercises.count)ex" : nil
                     if let count {
                         Text(count)
-                            .font(.system(size: 9, design: .monospaced))
-                            .foregroundStyle(.secondary)
+                            .font(.system(size: 9, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.tertiary)
                     }
                 }
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 8)
+            .padding(.vertical, 10)
             .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(isSelected ? Color.clear : pillFill)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(isSelected ? dayColor.opacity(0.1) : pillFill)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 8)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .stroke(isSelected ? dayColor : .clear, lineWidth: 2)
             )
+            .shadow(color: isSelected ? dayColor.opacity(0.2) : .clear, radius: 6, y: 2)
+            .scaleEffect(isSelected ? 1.05 : 1.0)
             .onTapGesture(perform: onTap)
             .contextMenu { colorMenu() }
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSelected)
         }
 
-        /// Non-selected: linked days get a tinted fill, unlinked get gray.
         private var pillFill: Color {
             guard day.isLinked else { return Color(.systemGray6) }
-            return dayColor.opacity(0.12)
+            return dayColor.opacity(0.08)
         }
 
         static func linkColor(_ group: Int) -> Color {
@@ -165,7 +161,6 @@ enum PlanEditorComponents {
 
     // MARK: - Swipable Day Container
 
-    /// Container that renders a single day's content with swipe-to-navigate gesture.
     struct SwipableDayContainer<Content: View>: View {
         @Binding var selectedIndex: Int
         let dayCount: Int
@@ -185,7 +180,8 @@ enum PlanEditorComponents {
                     .onEnded { value in
                         let horizontal = value.translation.width
                         guard abs(horizontal) > abs(value.translation.height) else { return }
-                        withAnimation(.easeInOut(duration: 0.25)) {
+                        WDS.hapticSelection()
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                             if horizontal < 0, selectedIndex < dayCount - 1 {
                                 selectedIndex += 1
                             } else if horizontal > 0, selectedIndex > 0 {
@@ -205,33 +201,41 @@ enum PlanEditorComponents {
         var accentColor: Color = .orange
 
         var body: some View {
-            HStack {
-                Image(systemName: icon)
-                    .foregroundStyle(accentColor)
-                Text(plan.name)
-                    .font(.headline)
+            HStack(spacing: 10) {
+                IconBadge(icon: icon, color: accentColor, size: 40)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(plan.name)
+                        .font(.title3.weight(.bold))
+                    Text("\(plan.trainingDays.count) training days · \(plan.days.count - plan.trainingDays.count) rest")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Spacer()
-                StatusBadge(plan: plan, accentColor: accentColor)
+
+                PlanStatusBadge(plan: plan, accentColor: accentColor)
             }
         }
     }
 
-    struct StatusBadge: View {
+    struct PlanStatusBadge: View {
         let plan: WorkoutPlan
         var accentColor: Color = .orange
 
         var body: some View {
             HStack(spacing: 4) {
-                Image(systemName: plan.status.icon)
-                    .font(.caption2)
+                Circle()
+                    .fill(plan.isActive ? .green : .secondary)
+                    .frame(width: 6, height: 6)
                 Text(plan.status.displayName)
-                    .font(.caption)
+                    .font(.caption.weight(.semibold))
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(plan.isActive ? accentColor.opacity(0.15) : Color(.systemGray5))
-            .foregroundStyle(plan.isActive ? accentColor : .secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(.ultraThinMaterial)
             .clipShape(Capsule())
+            .overlay(Capsule().strokeBorder(plan.isActive ? accentColor.opacity(0.2) : Color(.systemGray4), lineWidth: 0.5))
         }
     }
 
@@ -244,23 +248,28 @@ enum PlanEditorComponents {
 
         var body: some View {
             HStack {
-                Text(day.weekdayFullName)
-                    .font(.title3.weight(.semibold))
-
-                if let subtitle {
-                    Text("· \(subtitle)")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(day.weekdayFullName)
+                        .font(.title3.weight(.bold))
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 Spacer()
 
-                Button(action: onToggleRest) {
+                Button {
+                    WDS.hapticSelection()
+                    onToggleRest()
+                } label: {
                     Text(day.isRest ? "Train" : "Rest")
-                        .font(.caption.weight(.medium))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .background(Color(.systemGray5))
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(day.isRest ? Color.green.opacity(0.12) : Color(.systemGray5))
+                        .foregroundStyle(day.isRest ? .green : .secondary)
                         .clipShape(Capsule())
                 }
                 .buttonStyle(.plain)
@@ -279,7 +288,7 @@ enum PlanEditorComponents {
             HStack {
                 if !day.dayLabel.isEmpty {
                     Text(day.dayLabel)
-                        .font(.subheadline.weight(.medium))
+                        .font(.subheadline.weight(.semibold))
                         .foregroundStyle(accentColor)
                 } else {
                     Text("No label")
@@ -288,8 +297,9 @@ enum PlanEditorComponents {
                 }
                 Spacer()
                 Button(action: onEdit) {
-                    Image(systemName: "pencil")
-                        .font(.caption)
+                    Image(systemName: "pencil.circle.fill")
+                        .font(.body)
+                        .symbolRenderingMode(.hierarchical)
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
@@ -301,16 +311,19 @@ enum PlanEditorComponents {
 
     struct RestDayView: View {
         var body: some View {
-            HStack {
-                Image(systemName: "bed.double.fill")
-                    .font(.title2)
-                    .foregroundStyle(.tertiary)
+            VStack(spacing: 8) {
+                Image(systemName: "moon.zzz.fill")
+                    .font(.system(size: 32))
+                    .foregroundStyle(.secondary.opacity(0.4))
                 Text("Rest Day")
-                    .font(.subheadline)
+                    .font(.subheadline.weight(.medium))
                     .foregroundStyle(.secondary)
+                Text("Recovery is part of the plan")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
             }
             .frame(maxWidth: .infinity, alignment: .center)
-            .padding(.vertical, 16)
+            .padding(.vertical, 24)
         }
     }
 
@@ -322,18 +335,20 @@ enum PlanEditorComponents {
 
         var body: some View {
             Button(action: action) {
-                HStack {
+                HStack(spacing: 6) {
                     Image(systemName: "plus.circle.fill")
                     Text("Add Exercise")
                 }
-                .font(.subheadline.weight(.medium))
+                .font(.subheadline.weight(.semibold))
                 .foregroundStyle(accentColor)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
-                .background(accentColor.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .padding(.vertical, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: WDS.buttonRadius, style: .continuous)
+                        .strokeBorder(accentColor.opacity(0.3), style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
+                )
             }
-            .buttonStyle(.plain)
+            .buttonStyle(ScaleButtonStyle())
         }
     }
 
@@ -347,21 +362,23 @@ enum PlanEditorComponents {
 
         var body: some View {
             if plan.isDraft || plan.isInactive {
-                Button(action: onActivate) {
-                    Text(plan.isDraft ? "Activate Plan" : "Reactivate Plan")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(accentColor)
-                        .foregroundStyle(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                GradientButton(
+                    title: plan.isDraft ? "Activate Plan" : "Reactivate Plan",
+                    icon: "bolt.fill",
+                    gradient: accentColor == WDS.cardioAccent ? WDS.cardioGradient : WDS.strengthGradient
+                ) {
+                    onActivate()
                 }
             } else if plan.isActive {
-                Button(role: .destructive, action: onDeactivate) {
+                Button(role: .destructive) {
+                    WDS.hapticMedium()
+                    onDeactivate()
+                } label: {
                     Text("Deactivate Plan")
                         .font(.subheadline.weight(.medium))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
+                        .foregroundStyle(.red.opacity(0.8))
                 }
             }
         }
@@ -370,8 +387,6 @@ enum PlanEditorComponents {
     // MARK: - Plan Editor Scaffold
 
     /// Shared editor structure used by both Strength and Cardio plan editors.
-    /// Each editor provides its unique content via closures, while the scaffold
-    /// handles all shared state, navigation, and modifiers.
     struct PlanEditorScaffold<TrainingContent: View, ExtraSections: View>: View {
         @Environment(\.modelContext) private var modelContext
         @Bindable var plan: WorkoutPlan
@@ -380,16 +395,11 @@ enum PlanEditorComponents {
         let accentColor: Color
         let exerciseType: ExerciseType
 
-        /// Provides the exercise IDs to exclude from the picker for a given day.
         let excludedIDs: (WorkoutPlanDay) -> Set<UUID>
-        /// Called when user picks an exercise from the sheet.
         let onAddExercise: (Exercise, WorkoutPlanDay) -> Void
-        /// Returns an auto-detected label for non-rest days (strength uses muscle detection, cardio returns nil).
         var autoLabelProvider: ((WorkoutPlanDay) -> String?)?
 
-        /// Builds the training day content (exercise cards + add button). Receives an `openPicker` action to trigger the exercise picker sheet.
         @ViewBuilder let trainingContent: (_ day: WorkoutPlanDay, _ openPicker: @escaping () -> Void) -> TrainingContent
-        /// Extra sections below the day detail (volume, junk alerts, weekly load, etc.).
         @ViewBuilder let extraSections: () -> ExtraSections
 
         @State private var selectedDayIndex: Int = 0
@@ -414,7 +424,7 @@ enum PlanEditorComponents {
 
         var body: some View {
             ScrollView {
-                VStack(spacing: 16) {
+                VStack(spacing: 20) {
                     PlanHeader(plan: plan, icon: icon, accentColor: accentColor)
 
                     WeekStrip(
@@ -446,6 +456,7 @@ enum PlanEditorComponents {
                 }
                 .padding()
             }
+            .background(Color(.systemGroupedBackground))
             .navigationTitle(plan.name)
             .navigationBarTitleDisplayMode(.inline)
             .sheet(item: $dayForPicker) { day in
@@ -495,7 +506,7 @@ enum PlanEditorComponents {
 
         @ViewBuilder
         private func dayEditorContent(_ day: WorkoutPlanDay) -> some View {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 14) {
                 DayEditorHeader(
                     day: day,
                     subtitle: daySummary(day),
@@ -514,9 +525,7 @@ enum PlanEditorComponents {
                     trainingContent(day, { dayForPicker = day })
                 }
             }
-            .padding()
-            .background(Color(.systemGray6))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .premiumCard(accent: accentColor)
         }
 
         // MARK: - Actions
@@ -541,7 +550,6 @@ enum PlanEditorComponents {
             planManager.propagateLinkedDays(from: keepDay)
         }
 
-        /// Generates the subtitle for the day editor header.
         private func daySummary(_ day: WorkoutPlanDay) -> String? {
             guard !day.isRest else { return nil }
             if day.totalSets > 0 { return "\(day.totalSets) sets" }

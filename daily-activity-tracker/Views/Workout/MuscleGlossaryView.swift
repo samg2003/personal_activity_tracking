@@ -1,7 +1,7 @@
 import SwiftUI
 import SwiftData
 
-/// Hierarchical muscle glossary with volume benchmarks (MEV/MAV/MRV).
+/// Hierarchical muscle glossary with volume benchmarks (MEV/MAV/MRV) — premium styled.
 struct MuscleGlossaryView: View {
     @Query(sort: \MuscleGroup.sortOrder) private var muscles: [MuscleGroup]
 
@@ -14,108 +14,134 @@ struct MuscleGlossaryView: View {
     }
 
     var body: some View {
-        List {
-            Section {
-                Text("Volume benchmarks per muscle group (sets/week)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .listRowBackground(Color.clear)
+        ScrollView {
+            VStack(spacing: 12) {
+                // Info banner
+                HStack(spacing: 8) {
+                    Image(systemName: "info.circle.fill")
+                        .foregroundStyle(WDS.infoAccent)
+                    Text("Volume benchmarks per muscle group (sets/week)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(WDS.infoAccent.opacity(0.06))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .padding(.horizontal)
 
-            ForEach(parentMuscles) { parent in
-                Section {
-                    // Parent row with benchmarks
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text(parent.name)
-                                .font(.headline)
-                            Spacer()
-                        }
-
-                        // Volume benchmark bar
-                        HStack(spacing: 12) {
-                            benchmarkPill("MEV", value: parent.mevSets, color: .red)
-                            benchmarkPill("MAV", value: parent.mavSets, color: .green)
-                            benchmarkPill("MRV", value: parent.mrvSets, color: .orange)
-                        }
-
-                        // Volume range visualization
-                        volumeBar(mev: parent.mevSets, mav: parent.mavSets, mrv: parent.mrvSets)
+                // Muscle groups
+                LazyVStack(spacing: 10) {
+                    ForEach(parentMuscles) { parent in
+                        muscleGroupCard(parent)
                     }
-                    .padding(.vertical, 4)
+                }
+                .padding(.horizontal)
+            }
+            .padding(.vertical)
+        }
+        .background(Color(.systemGroupedBackground))
+        .navigationTitle("Muscle Glossary")
+    }
 
-                    // Sub-groups
-                    let kids = children(of: parent)
-                    if !kids.isEmpty {
-                        ForEach(kids) { child in
-                            HStack {
-                                Text("  ├─ \(child.name)")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                                Spacer()
-                            }
+    // MARK: - Muscle Group Card
+
+    private func muscleGroupCard(_ parent: MuscleGroup) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // Header
+            HStack {
+                IconBadge(icon: "figure.strengthtraining.traditional", color: WDS.strengthAccent, size: 32)
+                Text(parent.name)
+                    .font(.headline)
+                Spacer()
+            }
+
+            // Benchmark pills
+            HStack(spacing: 8) {
+                benchmarkPill("MEV", value: parent.mevSets, color: WDS.dangerAccent)
+                benchmarkPill("MAV", value: parent.mavSets, color: WDS.cardioAccent)
+                benchmarkPill("MRV", value: parent.mrvSets, color: WDS.strengthAccent)
+            }
+
+            // Volume bar
+            volumeBar(mev: parent.mevSets, mav: parent.mavSets, mrv: parent.mrvSets)
+
+            // Sub-groups
+            let kids = children(of: parent)
+            if !kids.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(kids) { child in
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(WDS.strengthAccent.opacity(0.3))
+                                .frame(width: 5, height: 5)
+                            Text(child.name)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }
+                .padding(.leading, 8)
             }
         }
-        .navigationTitle("Muscle Glossary")
+        .premiumCard(accent: WDS.strengthAccent)
     }
+
+    // MARK: - Components
 
     private func benchmarkPill(_ label: String, value: Int, color: Color) -> some View {
         HStack(spacing: 4) {
             Text(label)
-                .font(.caption2.weight(.semibold))
+                .font(.system(size: 10, weight: .bold))
                 .foregroundStyle(color)
             Text("\(value)")
-                .font(.caption.monospacedDigit())
+                .font(.caption.monospacedDigit().weight(.medium))
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, 3)
-        .background(color.opacity(0.12))
+        .padding(.vertical, 4)
+        .background(color.opacity(0.1))
         .clipShape(Capsule())
     }
 
     @ViewBuilder
     private func volumeBar(mev: Int, mav: Int, mrv: Int) -> some View {
-        let maxVal = Double(mrv + 5) // Give breathing room
+        let maxVal = Double(mrv + 5)
 
         GeometryReader { geo in
             let width = geo.size.width
 
             ZStack(alignment: .leading) {
-                // Background
                 RoundedRectangle(cornerRadius: 4)
-                    .fill(Color(.systemGray6))
+                    .fill(Color(.systemGray5))
 
-                // Below MEV zone (red)
+                // MEV zone
                 RoundedRectangle(cornerRadius: 4)
-                    .fill(Color.red.opacity(0.15))
+                    .fill(WDS.dangerAccent.opacity(0.15))
                     .frame(width: width * (Double(mev) / maxVal))
 
-                // MAV zone (green) — overlaid
+                // MAV zone
                 RoundedRectangle(cornerRadius: 4)
-                    .fill(Color.green.opacity(0.2))
-                    .frame(width: width * (Double(mav) / maxVal))
-                    .offset(x: width * (Double(mev) / maxVal))
+                    .fill(WDS.cardioAccent.opacity(0.2))
                     .frame(width: width * (Double(mav - mev) / maxVal))
+                    .offset(x: width * (Double(mev) / maxVal))
 
-                // Above MRV (orange)
+                // Above MRV
                 Rectangle()
-                    .fill(Color.orange.opacity(0.15))
+                    .fill(WDS.strengthAccent.opacity(0.15))
                     .frame(width: width * (1 - Double(mrv) / maxVal))
                     .offset(x: width * (Double(mrv) / maxVal))
 
                 // Markers
-                marker(at: Double(mev) / maxVal, width: width, label: "\(mev)", color: .red)
-                marker(at: Double(mav) / maxVal, width: width, label: "\(mav)", color: .green)
-                marker(at: Double(mrv) / maxVal, width: width, label: "\(mrv)", color: .orange)
+                marker(at: Double(mev) / maxVal, width: width, color: WDS.dangerAccent)
+                marker(at: Double(mav) / maxVal, width: width, color: WDS.cardioAccent)
+                marker(at: Double(mrv) / maxVal, width: width, color: WDS.strengthAccent)
             }
         }
         .frame(height: 20)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
     }
 
-    private func marker(at fraction: Double, width: CGFloat, label: String, color: Color) -> some View {
+    private func marker(at fraction: Double, width: CGFloat, color: Color) -> some View {
         Rectangle()
             .fill(color)
             .frame(width: 2, height: 20)

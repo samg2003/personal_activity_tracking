@@ -162,7 +162,7 @@ struct ActivityDetailView: View {
                     }
                     .padding(.vertical, 6)
                     .padding(.horizontal, 12)
-                    .background(Color(.secondarySystemBackground))
+                    .background(.ultraThinMaterial)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
             }

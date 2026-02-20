@@ -8,60 +8,95 @@ struct ActivityRowView: View {
     let onSkip: (String) -> Void
 
     @State private var showSkipSheet = false
+    @State private var checkScale: CGFloat = 1.0
 
-
+    private var accentColor: Color { Color(hex: activity.hexColor) }
 
     var body: some View {
-        HStack(spacing: 14) {
-            // Activity icon
-            Image(systemName: activity.icon)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(Color(hex: activity.hexColor))
-                .frame(width: 28)
+        HStack(spacing: 0) {
+            // Colored accent bar
+            RoundedRectangle(cornerRadius: 2)
+                .fill(isSkipped ? Color.orange : accentColor)
+                .frame(width: 4)
+                .padding(.vertical, 6)
 
-            // Checkbox circle
-            Button {
-                if !isSkipped {
-                    withAnimation(.spring(response: 0.3)) {
+            HStack(spacing: 12) {
+                // Icon badge
+                Image(systemName: activity.icon)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(isCompleted ? .secondary : accentColor)
+                    .frame(width: 30, height: 30)
+                    .background(
+                        Circle()
+                            .fill(isCompleted ? Color(.systemGray5) : accentColor.opacity(0.12))
+                    )
+
+                // Animated checkbox
+                Button {
+                    guard !isSkipped else { return }
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.5)) {
+                        checkScale = 1.3
                         onComplete()
                     }
-                    let generator = UIImpactFeedbackGenerator(style: .light)
-                    generator.impactOccurred()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                        withAnimation(.spring(response: 0.2)) { checkScale = 1.0 }
+                    }
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                } label: {
+                    ZStack {
+                        Circle()
+                            .stroke(isCompleted ? Color.clear : Color(.systemGray3), lineWidth: 2)
+                            .frame(width: 24, height: 24)
+
+                        if isCompleted {
+                            Circle()
+                                .fill(.green)
+                                .frame(width: 24, height: 24)
+                                .overlay(
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 11, weight: .bold))
+                                        .foregroundStyle(.white)
+                                )
+                                .transition(.scale.combined(with: .opacity))
+                        }
+                    }
+                    .scaleEffect(checkScale)
                 }
-            } label: {
-                Image(systemName: isCompleted ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 22))
-                    .foregroundStyle(isCompleted ? .green : Color(.systemGray3))
+                .buttonStyle(.plain)
+
+                // Activity name
+                Text(activity.name)
+                    .font(.subheadline.weight(.medium))
+                    .strikethrough(isCompleted, color: .secondary.opacity(0.5))
+                    .foregroundStyle(isCompleted ? .secondary : .primary)
+
+                Spacer()
+
+                // Category pill
+                if let cat = activity.category {
+                    Text(cat.name)
+                        .font(.system(size: 10, weight: .semibold))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Color(hex: cat.hexColor).opacity(0.15))
+                        .foregroundStyle(Color(hex: cat.hexColor))
+                        .clipShape(Capsule())
+                }
             }
-            .buttonStyle(.plain)
-
-            // Activity name
-            Text(activity.name)
-                .font(.body)
-                .strikethrough(isCompleted, color: .secondary)
-                .foregroundStyle(isCompleted ? .secondary : .primary)
-
-            Spacer()
-
-            // Category badge
-            if let cat = activity.category {
-                Text(cat.name)
-                    .font(.caption2)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color(hex: cat.hexColor).opacity(0.2))
-                    .foregroundStyle(Color(hex: cat.hexColor))
-                    .clipShape(Capsule())
-            }
+            .padding(.leading, 10)
+            .padding(.trailing, 14)
         }
         .padding(.vertical, 8)
-        .padding(.horizontal, 14)
-        .background(Color(.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .shadow(color: .black.opacity(isCompleted ? 0.02 : 0.06), radius: 6, y: 3)
+        )
+        .opacity(isCompleted ? 0.65 : 1.0)
         .contextMenu {
             if isCompleted {
                 Button(role: .destructive) {
-                    onComplete() // Toggles off
+                    onComplete()
                 } label: {
                     Label("Undo Completion", systemImage: "arrow.uturn.backward")
                 }
@@ -71,7 +106,7 @@ struct ActivityRowView: View {
                 } label: {
                     Label("Complete", systemImage: "checkmark")
                 }
-                
+
                 Button {
                     showSkipSheet = true
                 } label: {

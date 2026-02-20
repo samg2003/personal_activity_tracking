@@ -11,15 +11,28 @@ struct AllDaySection: View {
 
     var body: some View {
         if !activities.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 6) {
                     Image(systemName: "arrow.2.circlepath")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(WDS.infoAccent)
+                        .frame(width: 22, height: 22)
+                        .background(WDS.infoAccent.opacity(0.12))
+                        .clipShape(Circle())
+
                     Text("ALL DAY")
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .foregroundStyle(WDS.infoAccent)
+
                     Spacer()
+
+                    Text("\(activities.count)")
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .foregroundStyle(WDS.infoAccent)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(WDS.infoAccent.opacity(0.1))
+                        .clipShape(Capsule())
                 }
 
                 ForEach(activities) { activity in

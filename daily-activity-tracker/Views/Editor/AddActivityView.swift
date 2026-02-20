@@ -232,7 +232,7 @@ struct AddActivityView: View {
                 }
             }
             .scrollContentBackground(.hidden)
-            .background(Color(.systemBackground))
+            .background(Color(.systemGroupedBackground))
             .navigationTitle({
                 if let _ = activityToEdit {
                     return entityMode == .reminder ? "Edit Reminder" : "Edit Activity"
@@ -249,6 +249,7 @@ struct AddActivityView: View {
                     Button("Save") { save() }
                         .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
                         .fontWeight(.semibold)
+                        .tint(Color(hex: selectedColor))
                 }
             }
             .onAppear {

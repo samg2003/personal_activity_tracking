@@ -27,11 +27,10 @@ struct StrengthSessionView: View {
     var body: some View {
         VStack(spacing: 0) {
             sessionHeader
-            Divider()
             exerciseList
-            Divider()
             bottomBar
         }
+        .background(Color(.systemGroupedBackground))
         .navigationBarBackButtonHidden(true)
         .onReceive(timer) { _ in
             updateTimer()
@@ -62,54 +61,69 @@ struct StrengthSessionView: View {
         }
     }
 
-    // MARK: - Header (Timer + Status)
+    // MARK: - Header
 
     private var sessionHeader: some View {
-        VStack(spacing: 6) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
+        VStack(spacing: 10) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text(session.dayLabel)
                         .font(.title2.weight(.bold))
-                    Text(session.planName)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                // Timer
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(elapsedDisplay)
-                        .font(.system(.title, design: .monospaced).weight(.semibold))
-                        .foregroundStyle(isPaused ? .orange : .primary)
-                    if isPaused {
-                        Text("PAUSED")
-                            .font(.caption2.weight(.bold))
-                            .foregroundStyle(.orange)
+                    HStack(spacing: 6) {
+                        Text(session.planName)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        if isPaused {
+                            StatusBadge(text: "Paused", style: .warning)
+                        }
                     }
                 }
+
+                Spacer()
+
+                // Timer display
+                Text(elapsedDisplay)
+                    .font(.system(.title, design: .monospaced).weight(.bold))
+                    .foregroundStyle(isPaused ? WDS.strengthAccent : .primary)
             }
 
-            // Progress bar: completed sets vs planned
+            // Progress ring + set count
             if let planDay = session.planDay, planDay.totalSets > 0 {
                 let completed = session.completedSets.count
                 let planned = planDay.totalSets
-                VStack(spacing: 2) {
-                    ProgressView(value: Double(min(completed, planned)), total: Double(planned))
-                        .tint(completed >= planned ? .green : .orange)
-                    Text("\(completed) / \(planned) sets")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                let progress = Double(min(completed, planned)) / Double(planned)
+
+                HStack(spacing: 12) {
+                    ProgressRing(
+                        progress: progress,
+                        lineWidth: 5,
+                        gradient: completed >= planned
+                            ? LinearGradient(colors: [.green, .green], startPoint: .leading, endPoint: .trailing)
+                            : WDS.strengthGradient,
+                        size: 36
+                    )
+
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("\(completed) / \(planned) sets")
+                            .font(.subheadline.weight(.semibold).monospacedDigit())
+                        Text(completed >= planned ? "All sets done!" : "\(planned - completed) remaining")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
                 }
             }
         }
         .padding()
-        .background(Color(.systemBackground))
+        .background(.ultraThinMaterial)
     }
 
     // MARK: - Exercise List
 
     private var exerciseList: some View {
         ScrollView {
-            LazyVStack(spacing: 12) {
+            LazyVStack(spacing: 14) {
                 if let planDay = session.planDay {
                     ForEach(planDay.sortedStrengthExercises) { planEx in
                         if let exercise = planEx.exercise {
@@ -129,52 +143,55 @@ struct StrengthSessionView: View {
             .sorted { $0.setNumber < $1.setNumber }
         let workingSets = exerciseSets.filter { !$0.isWarmup }
 
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             // Exercise header
             HStack {
                 Text(exercise.displayName)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.subheadline.weight(.bold))
                 Spacer()
-                Text("\(workingSets.count)/\(targetSets) sets")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(workingSets.count >= targetSets ? .green : .secondary)
-                Text("RIR \(rir)")
-                    .font(.caption2)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color(.systemGray5))
-                    .clipShape(Capsule())
+
+                HStack(spacing: 8) {
+                    Text("\(workingSets.count)/\(targetSets)")
+                        .font(.caption.weight(.bold).monospacedDigit())
+                        .foregroundStyle(workingSets.count >= targetSets ? .green : WDS.strengthAccent)
+
+                    Text("RIR \(rir)")
+                        .font(.system(size: 10, weight: .semibold))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(WDS.strengthAccent.opacity(0.1))
+                        .foregroundStyle(WDS.strengthAccent)
+                        .clipShape(Capsule())
+                }
             }
 
             // Logged sets
             if !exerciseSets.isEmpty {
-                VStack(spacing: 4) {
-                    ForEach(exerciseSets) { setLog in
-                        setRow(setLog: setLog)
+                VStack(spacing: 2) {
+                    ForEach(Array(exerciseSets.enumerated()), id: \.element.id) { index, setLog in
+                        setRow(setLog: setLog, isEven: index % 2 == 0)
                     }
                 }
             }
 
-            // Input row for new set
+            // Input row
             newSetInput(exercise: exercise)
         }
-        .padding()
-        .background(Color(.systemGray6))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .premiumCard(accent: workingSets.count >= targetSets ? .green : .clear)
     }
 
     @ViewBuilder
-    private func setRow(setLog: WorkoutSetLog) -> some View {
+    private func setRow(setLog: WorkoutSetLog, isEven: Bool) -> some View {
         HStack(spacing: 8) {
             if setLog.isWarmup {
                 Text("W")
-                    .font(.caption2.weight(.bold))
+                    .font(.caption2.weight(.heavy))
                     .foregroundStyle(.orange)
-                    .frame(width: 20)
+                    .frame(width: 22)
             } else {
                 Text("\(setLog.setNumber)")
-                    .font(.caption.monospacedDigit().weight(.medium))
-                    .frame(width: 20)
+                    .font(.caption.monospacedDigit().weight(.semibold))
+                    .frame(width: 22)
             }
 
             if let dur = setLog.durationSeconds {
@@ -188,25 +205,24 @@ struct StrengthSessionView: View {
             Spacer()
 
             if let e1rm = setLog.estimated1RM {
-                Text("e1RM: \(String(format: "%.0f", e1rm))")
-                    .font(.system(size: 9))
+                Text("e1RM \(String(format: "%.0f", e1rm))")
+                    .font(.system(size: 9, weight: .medium))
                     .foregroundStyle(.tertiary)
             }
 
-            // Delete button
             Button {
                 sessionManager.deleteSet(setLog)
             } label: {
                 Image(systemName: "xmark.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.red.opacity(0.6))
+                    .font(.caption2)
+                    .foregroundStyle(.red.opacity(0.5))
             }
             .buttonStyle(.plain)
         }
-        .padding(.vertical, 2)
-        .padding(.horizontal, 4)
-        .background(setLog.isWarmup ? Color.orange.opacity(0.05) : Color.clear)
-        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .padding(.vertical, 4)
+        .padding(.horizontal, 6)
+        .background(isEven ? Color(.systemGray6).opacity(0.5) : .clear)
+        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
     }
 
     // MARK: - New Set Input
@@ -217,58 +233,62 @@ struct StrengthSessionView: View {
         let currentReps = inputState[exID]?.reps ?? 0
         let currentWeight = inputState[exID]?.weight ?? 0
 
-        HStack(spacing: 8) {
-            // Reps stepper
-            VStack(spacing: 0) {
+        HStack(spacing: 6) {
+            // Reps
+            VStack(spacing: 2) {
                 Text("Reps")
-                    .font(.system(size: 9))
+                    .font(.system(size: 9, weight: .medium))
                     .foregroundStyle(.tertiary)
-                HStack(spacing: 4) {
-                    Button {
-                        adjustInput(exerciseID: exID, repsDelta: -1)
-                    } label: {
-                        Image(systemName: "minus.circle")
-                            .font(.caption)
+                HStack(spacing: 3) {
+                    Button { adjustInput(exerciseID: exID, repsDelta: -1) } label: {
+                        Image(systemName: "minus")
+                            .font(.system(size: 10, weight: .bold))
+                            .frame(width: 26, height: 26)
+                            .background(Color(.systemGray5))
+                            .clipShape(Circle())
                     }
                     .buttonStyle(.plain)
 
                     Text("\(currentReps)")
-                        .font(.body.monospacedDigit().weight(.medium))
-                        .frame(width: 30)
+                        .font(.body.monospacedDigit().weight(.semibold))
+                        .frame(width: 28)
 
-                    Button {
-                        adjustInput(exerciseID: exID, repsDelta: 1)
-                    } label: {
-                        Image(systemName: "plus.circle")
-                            .font(.caption)
+                    Button { adjustInput(exerciseID: exID, repsDelta: 1) } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 10, weight: .bold))
+                            .frame(width: 26, height: 26)
+                            .background(Color(.systemGray5))
+                            .clipShape(Circle())
                     }
                     .buttonStyle(.plain)
                 }
             }
 
-            // Weight stepper
-            VStack(spacing: 0) {
+            // Weight
+            VStack(spacing: 2) {
                 Text("Weight")
-                    .font(.system(size: 9))
+                    .font(.system(size: 9, weight: .medium))
                     .foregroundStyle(.tertiary)
-                HStack(spacing: 4) {
-                    Button {
-                        adjustInput(exerciseID: exID, weightDelta: -2.5)
-                    } label: {
-                        Image(systemName: "minus.circle")
-                            .font(.caption)
+                HStack(spacing: 3) {
+                    Button { adjustInput(exerciseID: exID, weightDelta: -2.5) } label: {
+                        Image(systemName: "minus")
+                            .font(.system(size: 10, weight: .bold))
+                            .frame(width: 26, height: 26)
+                            .background(Color(.systemGray5))
+                            .clipShape(Circle())
                     }
                     .buttonStyle(.plain)
 
                     Text(String(format: "%.1f", currentWeight))
-                        .font(.body.monospacedDigit().weight(.medium))
-                        .frame(width: 50)
+                        .font(.body.monospacedDigit().weight(.semibold))
+                        .frame(width: 46)
 
-                    Button {
-                        adjustInput(exerciseID: exID, weightDelta: 2.5)
-                    } label: {
-                        Image(systemName: "plus.circle")
-                            .font(.caption)
+                    Button { adjustInput(exerciseID: exID, weightDelta: 2.5) } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 10, weight: .bold))
+                            .frame(width: 26, height: 26)
+                            .background(Color(.systemGray5))
+                            .clipShape(Circle())
                     }
                     .buttonStyle(.plain)
                 }
@@ -276,90 +296,97 @@ struct StrengthSessionView: View {
 
             Spacer()
 
-            // Log set button
-            Button {
-                logCurrentSet(exerciseID: exID, exercise: exercise, isWarmup: false)
-            } label: {
-                Text("Log")
-                    .font(.caption.weight(.semibold))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(Color.orange)
-                    .foregroundStyle(.white)
-                    .clipShape(Capsule())
-            }
-            .buttonStyle(.plain)
-            .disabled(currentReps <= 0)
+            VStack(spacing: 4) {
+                // Log button
+                Button {
+                    WDS.hapticMedium()
+                    logCurrentSet(exerciseID: exID, exercise: exercise, isWarmup: false)
+                } label: {
+                    Text("Log")
+                        .font(.caption.weight(.bold))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .background(WDS.strengthGradient)
+                        .foregroundStyle(.white)
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(ScaleButtonStyle())
+                .disabled(currentReps <= 0)
 
-            // Warmup button
-            Button {
-                logCurrentSet(exerciseID: exID, exercise: exercise, isWarmup: true)
-            } label: {
-                Text("W")
-                    .font(.caption.weight(.semibold))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
-                    .background(Color.orange.opacity(0.2))
-                    .foregroundStyle(.orange)
-                    .clipShape(Capsule())
+                // Warmup
+                Button {
+                    WDS.hapticLight()
+                    logCurrentSet(exerciseID: exID, exercise: exercise, isWarmup: true)
+                } label: {
+                    Text("W")
+                        .font(.caption2.weight(.bold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(WDS.strengthAccent.opacity(0.15))
+                        .foregroundStyle(WDS.strengthAccent)
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(currentReps <= 0)
             }
-            .buttonStyle(.plain)
-            .disabled(currentReps <= 0)
         }
-        .padding(.top, 4)
+        .padding(.top, 6)
     }
 
     // MARK: - Bottom Bar
 
     private var bottomBar: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 12) {
             // Pause / Resume
             Button {
+                WDS.hapticMedium()
                 if isPaused {
                     sessionManager.resumeSession(session)
                 } else {
                     sessionManager.pauseSession(session)
                 }
             } label: {
-                HStack(spacing: 4) {
+                HStack(spacing: 5) {
                     Image(systemName: isPaused ? "play.fill" : "pause.fill")
                     Text(isPaused ? "Resume" : "Pause")
-                }
-                .font(.subheadline.weight(.medium))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .background(Color(.systemGray5))
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-            }
-
-            // Finish
-            Button {
-                sessionManager.finishSession(session)
-                showSummary = true
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "checkmark.circle.fill")
-                    Text("Finish")
                 }
                 .font(.subheadline.weight(.semibold))
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 12)
-                .background(Color.green)
-                .foregroundStyle(.white)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .background(.ultraThinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: WDS.buttonRadius, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: WDS.buttonRadius, style: .continuous)
+                        .strokeBorder(Color(.systemGray4), lineWidth: 0.5)
+                )
+            }
+            .buttonStyle(ScaleButtonStyle())
+
+            // Finish
+            GradientButton(
+                title: "Finish",
+                icon: "checkmark.circle.fill",
+                gradient: LinearGradient(colors: [.green, Color(hex: 0x059669)], startPoint: .leading, endPoint: .trailing),
+                size: .compact
+            ) {
+                WDS.hapticSuccess()
+                sessionManager.finishSession(session)
+                showSummary = true
             }
 
             // Abandon
             Button {
                 showAbandonAlert = true
             } label: {
-                Image(systemName: "xmark.circle")
+                Image(systemName: "xmark.circle.fill")
                     .font(.title3)
+                    .symbolRenderingMode(.hierarchical)
                     .foregroundStyle(.red.opacity(0.7))
             }
+            .buttonStyle(ScaleButtonStyle())
         }
         .padding()
-        .background(Color(.systemBackground))
+        .background(.ultraThinMaterial)
     }
 
     // MARK: - Helpers

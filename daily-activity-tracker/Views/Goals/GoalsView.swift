@@ -47,7 +47,7 @@ struct GoalsView: View {
                 }
                 .padding()
             }
-            .background(Color(.systemBackground))
+            .background(Color(.systemGroupedBackground))
             .navigationTitle("Goals")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -92,9 +92,16 @@ struct GoalsView: View {
                     .font(.subheadline.bold())
                     .padding(.horizontal, 20)
                     .padding(.vertical, 10)
-                    .background(.blue)
+                    .background(
+                        LinearGradient(
+                            colors: [WDS.strengthAccent, WDS.cardioAccent],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
                     .foregroundStyle(.white)
                     .clipShape(Capsule())
+                    .shadow(color: WDS.strengthAccent.opacity(0.3), radius: 8, y: 4)
             }
         }
         .padding(.top, 60)
@@ -230,8 +237,9 @@ struct GoalCardView: View {
             }
         }
         .padding(16)
-        .background(Color(.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: WDS.cardRadius, style: .continuous))
+        .shadow(color: .black.opacity(0.06), radius: 6, y: 3)
         .opacity(goal.isPaused ? 0.7 : 1.0)
     }
 

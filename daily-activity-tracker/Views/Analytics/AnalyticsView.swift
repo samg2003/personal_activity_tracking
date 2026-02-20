@@ -168,7 +168,7 @@ struct AnalyticsView: View {
                     WorkoutAnalyticsView()
                 }
             }
-            .background(Color(.systemBackground))
+            .background(Color(.systemGroupedBackground))
             .navigationTitle("Analytics")
         }
     }
@@ -396,8 +396,9 @@ struct AnalyticsView: View {
         }
         .padding(.vertical, 6)
         .padding(.horizontal, 12)
-        .background(Color(.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: WDS.cardRadius, style: .continuous))
+        .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
     }
 
     private func behindRow(_ activity: Activity, rate: Double) -> some View {
@@ -432,8 +433,9 @@ struct AnalyticsView: View {
         }
         .padding(.vertical, 8)
         .padding(.horizontal, 12)
-        .background(Color(.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: WDS.cardRadius, style: .continuous))
+        .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
     }
 
     private func winRow(_ activity: Activity, delta: String) -> some View {
@@ -455,8 +457,9 @@ struct AnalyticsView: View {
         }
         .padding(.vertical, 8)
         .padding(.horizontal, 12)
-        .background(Color(.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: WDS.cardRadius, style: .continuous))
+        .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
     }
 
     private func deepDiveRow(_ activity: Activity) -> some View {
@@ -495,8 +498,9 @@ struct AnalyticsView: View {
         }
         .padding(.vertical, 8)
         .padding(.horizontal, 12)
-        .background(Color(.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: WDS.cardRadius, style: .continuous))
+        .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
     }
 }
 

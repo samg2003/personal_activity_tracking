@@ -264,7 +264,8 @@ private extension View {
         self
             .padding()
             .frame(maxWidth: .infinity)
-            .background(Color(.systemGray6))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: WDS.cardRadius, style: .continuous))
+            .shadow(color: .black.opacity(0.06), radius: 6, y: 3)
     }
 }

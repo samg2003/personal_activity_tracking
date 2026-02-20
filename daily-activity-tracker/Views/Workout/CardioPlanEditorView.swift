@@ -14,7 +14,7 @@ struct CardioPlanEditorView: View {
         PlanEditorComponents.PlanEditorScaffold(
             plan: plan,
             icon: "figure.run",
-            accentColor: .green,
+            accentColor: WDS.cardioAccent,
             exerciseType: .cardio,
             excludedIDs: { day in
                 Set(day.sortedCardioExercises.compactMap { $0.exercise?.id })
@@ -39,18 +39,18 @@ struct CardioPlanEditorView: View {
             cardioExerciseCard(cardioEx, day: day)
         }
 
-        PlanEditorComponents.AddExerciseButton(accentColor: .green, action: openPicker)
+        PlanEditorComponents.AddExerciseButton(accentColor: WDS.cardioAccent, action: openPicker)
     }
 
     // MARK: - Cardio Exercise Card
 
     private func cardioExerciseCard(_ cardioEx: CardioPlanExercise, day: WorkoutPlanDay) -> some View {
-        VStack(spacing: 8) {
-            // Name + session type + delete
+        VStack(spacing: 10) {
+            // Header
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(cardioEx.exercise?.name ?? "Unknown")
-                        .font(.subheadline.weight(.medium))
+                        .font(.subheadline.weight(.semibold))
                     Text(cardioEx.sessionType.displayName)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -58,25 +58,29 @@ struct CardioPlanEditorView: View {
 
                 Spacer()
 
-                // Target label
                 Text(cardioEx.targetLabel)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.caption.weight(.medium))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(WDS.cardioAccent.opacity(0.1))
+                    .clipShape(Capsule())
+                    .foregroundStyle(WDS.cardioAccent)
 
                 Button {
                     deleteExercise(cardioEx, from: day)
                 } label: {
-                    Image(systemName: "trash")
-                        .font(.caption)
-                        .foregroundStyle(.red.opacity(0.7))
+                    Image(systemName: "trash.circle.fill")
+                        .font(.body)
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(.red.opacity(0.6))
                 }
                 .buttonStyle(.plain)
             }
 
-            // Session type picker
-            HStack(spacing: 12) {
+            // Session type picker — styled segmented
+            HStack(spacing: 10) {
                 Text("Type")
-                    .font(.caption)
+                    .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
 
                 Picker("", selection: Binding(
@@ -93,52 +97,235 @@ struct CardioPlanEditorView: View {
                 .pickerStyle(.segmented)
             }
 
-            // Target inputs
-            HStack(spacing: 12) {
-                // Distance
-                HStack(spacing: 4) {
-                    Text("Dist")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    TextField("—", value: Binding(
+            // Type-specific parameter editors
+            typeSpecificInputs(cardioEx, day: day)
+
+            // Shared target inputs (distance + duration)
+            HStack(spacing: 16) {
+                targetInput(
+                    label: "Distance",
+                    unit: cardioEx.exercise?.distanceUnit ?? "km",
+                    value: Binding(
                         get: { cardioEx.targetDistance ?? 0 },
                         set: {
                             cardioEx.targetDistance = $0 > 0 ? $0 : nil
                             savePlanChange(day)
                         }
-                    ), format: .number)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 55)
-                    Text(cardioEx.exercise?.distanceUnit ?? "km")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
+                    )
+                )
 
-                Spacer()
-
-                // Duration
-                HStack(spacing: 4) {
-                    Text("Dur")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    TextField("—", value: Binding(
-                        get: { cardioEx.targetDuration ?? 0 },
+                targetInput(
+                    label: "Duration",
+                    unit: "min",
+                    value: Binding(
+                        get: { Double(cardioEx.targetDurationMin ?? 0) },
                         set: {
-                            cardioEx.targetDuration = $0 > 0 ? $0 : nil
+                            cardioEx.targetDurationMin = $0 > 0 ? Int($0) : nil
+                            savePlanChange(day)
+                        }
+                    )
+                )
+            }
+        }
+        .padding(14)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
+    }
+
+    private func targetInput(label: String, unit: String, value: Binding<Double>) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.tertiary)
+            HStack(spacing: 4) {
+                TextField("—", value: value, format: .number)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 60)
+                    .font(.subheadline.monospacedDigit())
+                Text(unit)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    // MARK: - Type-Specific Parameter Editors
+
+    @ViewBuilder
+    private func typeSpecificInputs(_ cardioEx: CardioPlanExercise, day: WorkoutPlanDay) -> some View {
+        switch cardioEx.sessionType {
+        case .steadyState:
+            let params = cardioEx.steadyStateParams ?? SteadyStateParams(targetHRZone: 2)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Target HR Zone")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.tertiary)
+                Picker("HR Zone", selection: Binding(
+                    get: { params.targetHRZone },
+                    set: {
+                        cardioEx.steadyStateParams = SteadyStateParams(targetHRZone: $0)
+                        savePlanChange(day)
+                    }
+                )) {
+                    ForEach(1...5, id: \.self) { zone in
+                        Text("Z\(zone)").tag(zone)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+            .padding(10)
+            .background(WDS.cardioAccent.opacity(0.05))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+        case .hiit:
+            let params = cardioEx.hiitParams ?? HIITParams(rounds: 8, workSeconds: 30, restSeconds: 15)
+            VStack(spacing: 6) {
+                paramStepper("Rounds", value: params.rounds, range: 1...30, icon: "repeat") {
+                    cardioEx.hiitParams = HIITParams(rounds: $0, workSeconds: params.workSeconds, restSeconds: params.restSeconds)
+                    savePlanChange(day)
+                }
+                paramStepper("Work", value: params.workSeconds, range: 5...300, step: 5, unit: "sec", icon: "flame.fill") {
+                    cardioEx.hiitParams = HIITParams(rounds: params.rounds, workSeconds: $0, restSeconds: params.restSeconds)
+                    savePlanChange(day)
+                }
+                paramStepper("Rest", value: params.restSeconds, range: 5...300, step: 5, unit: "sec", icon: "pause.circle") {
+                    cardioEx.hiitParams = HIITParams(rounds: params.rounds, workSeconds: params.workSeconds, restSeconds: $0)
+                    savePlanChange(day)
+                }
+            }
+            .padding(10)
+            .background(WDS.cardioAccent.opacity(0.05))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+        case .tempo:
+            let params = cardioEx.tempoParams ?? TempoParams(warmupMin: 5, tempoMin: 20, cooldownMin: 5, targetHRZone: 3)
+            VStack(spacing: 6) {
+                paramStepper("Warmup", value: params.warmupMin, range: 0...30, unit: "min", icon: "sun.max.fill") {
+                    cardioEx.tempoParams = TempoParams(warmupMin: $0, tempoMin: params.tempoMin, cooldownMin: params.cooldownMin, targetHRZone: params.targetHRZone)
+                    savePlanChange(day)
+                }
+                paramStepper("Tempo", value: params.tempoMin, range: 1...90, unit: "min", icon: "bolt.fill") {
+                    cardioEx.tempoParams = TempoParams(warmupMin: params.warmupMin, tempoMin: $0, cooldownMin: params.cooldownMin, targetHRZone: params.targetHRZone)
+                    savePlanChange(day)
+                }
+                paramStepper("Cooldown", value: params.cooldownMin, range: 0...30, unit: "min", icon: "snowflake") {
+                    cardioEx.tempoParams = TempoParams(warmupMin: params.warmupMin, tempoMin: params.tempoMin, cooldownMin: $0, targetHRZone: params.targetHRZone)
+                    savePlanChange(day)
+                }
+                HStack {
+                    Text("Tempo HR Zone")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.tertiary)
+                    Spacer()
+                    Picker("", selection: Binding(
+                        get: { params.targetHRZone },
+                        set: {
+                            cardioEx.tempoParams = TempoParams(warmupMin: params.warmupMin, tempoMin: params.tempoMin, cooldownMin: params.cooldownMin, targetHRZone: $0)
+                            savePlanChange(day)
+                        }
+                    )) {
+                        ForEach(1...5, id: \.self) { z in Text("Z\(z)").tag(z) }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 200)
+                }
+            }
+            .padding(10)
+            .background(WDS.cardioAccent.opacity(0.05))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+        case .intervals:
+            let params = cardioEx.intervalParams ?? IntervalParams(reps: 6, distancePerRep: 400, restSeconds: 90)
+            VStack(spacing: 6) {
+                paramStepper("Reps", value: params.reps, range: 1...30, icon: "arrow.clockwise") {
+                    cardioEx.intervalParams = IntervalParams(reps: $0, distancePerRep: params.distancePerRep, restSeconds: params.restSeconds)
+                    savePlanChange(day)
+                }
+                HStack(spacing: 8) {
+                    Text("Distance/rep")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.tertiary)
+                    Spacer()
+                    TextField("—", value: Binding(
+                        get: { params.distancePerRep },
+                        set: {
+                            cardioEx.intervalParams = IntervalParams(reps: params.reps, distancePerRep: $0, restSeconds: params.restSeconds)
                             savePlanChange(day)
                         }
                     ), format: .number)
                     .textFieldStyle(.roundedBorder)
-                    .frame(width: 55)
-                    Text("min")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                    .frame(width: 70)
+                    .font(.subheadline.monospacedDigit())
+                    Text(cardioEx.exercise?.distanceUnit ?? "m")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.secondary)
+                }
+                paramStepper("Rest", value: params.restSeconds, range: 10...600, step: 10, unit: "sec", icon: "pause.circle") {
+                    cardioEx.intervalParams = IntervalParams(reps: params.reps, distancePerRep: params.distancePerRep, restSeconds: $0)
+                    savePlanChange(day)
                 }
             }
+            .padding(10)
+            .background(WDS.cardioAccent.opacity(0.05))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+        case .free:
+            EmptyView()
         }
-        .padding(12)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    /// Reusable integer stepper row for type-specific params
+    private func paramStepper(
+        _ label: String,
+        value: Int,
+        range: ClosedRange<Int>,
+        step: Int = 1,
+        unit: String? = nil,
+        icon: String,
+        onChange: @escaping (Int) -> Void
+    ) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.caption)
+                .foregroundStyle(WDS.cardioAccent)
+                .frame(width: 16)
+            Text(label)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.tertiary)
+            Spacer()
+
+            Button {
+                WDS.hapticLight()
+                let newVal = max(range.lowerBound, value - step)
+                onChange(newVal)
+            } label: {
+                Image(systemName: "minus.circle.fill")
+                    .font(.body)
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(WDS.cardioAccent)
+            }
+            .buttonStyle(.plain)
+            .disabled(value <= range.lowerBound)
+
+            Text("\(value)\(unit.map { " \($0)" } ?? "")")
+                .font(.subheadline.monospacedDigit().weight(.medium))
+                .frame(minWidth: 50)
+                .multilineTextAlignment(.center)
+
+            Button {
+                WDS.hapticLight()
+                let newVal = min(range.upperBound, value + step)
+                onChange(newVal)
+            } label: {
+                Image(systemName: "plus.circle.fill")
+                    .font(.body)
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(WDS.cardioAccent)
+            }
+            .buttonStyle(.plain)
+            .disabled(value >= range.upperBound)
+        }
     }
 
     // MARK: - Weekly Load Summary
@@ -149,24 +336,20 @@ struct CardioPlanEditorView: View {
         let totalExercises = plan.trainingDays.reduce(0) { $0 + $1.cardioExercises.count }
 
         if totalExercises > 0 {
-            HStack(spacing: 20) {
-                loadStat("\(sessions)", label: "Sessions/wk")
-                loadStat("\(totalExercises)", label: "Exercises/wk")
+            HStack(spacing: 12) {
+                MetricChip(
+                    icon: "calendar",
+                    value: "\(sessions)",
+                    label: "Sessions/wk",
+                    color: WDS.cardioAccent
+                )
+                MetricChip(
+                    icon: "figure.run",
+                    value: "\(totalExercises)",
+                    label: "Exercises/wk",
+                    color: WDS.cardioAccent
+                )
             }
-            .padding()
-            .background(Color(.systemGray6))
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-        }
-    }
-
-    private func loadStat(_ value: String, label: String) -> some View {
-        VStack(spacing: 2) {
-            Text(value)
-                .font(.headline.monospacedDigit())
-                .foregroundStyle(.green)
-            Text(label)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
         }
     }
 

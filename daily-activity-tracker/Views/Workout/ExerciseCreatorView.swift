@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 
 /// Create a new exercise — muscle involvement sliders (strength) or cardio config.
+/// Premium styled with WDS design system.
 struct ExerciseCreatorView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
@@ -30,33 +31,48 @@ struct ExerciseCreatorView: View {
         allMuscles.filter { !$0.isParent }
     }
 
+    private var accentColor: Color {
+        switch exerciseType {
+        case .strength: return WDS.strengthAccent
+        case .cardio: return WDS.cardioAccent
+        case .timed: return WDS.infoAccent
+        }
+    }
+
     var body: some View {
         Form {
             // Basic info
-            Section("Exercise Info") {
+            Section {
                 TextField("Name (e.g. Bench Press)", text: $name)
                 TextField("Equipment (e.g. Barbell)", text: $equipment)
 
                 Picker("Type", selection: $exerciseType) {
                     ForEach(ExerciseType.allCases) { type in
-                        Text(type.displayName).tag(type)
+                        Label(type.displayName, systemImage: typeIcon(type))
+                            .tag(type)
                     }
                 }
+                .tint(accentColor)
+            } header: {
+                Label("Exercise Info", systemImage: "info.circle.fill")
+                    .foregroundStyle(accentColor)
             }
 
-            Section("Aliases (one per line)") {
+            Section {
                 TextEditor(text: $aliasesText)
                     .frame(minHeight: 60)
+            } header: {
+                Label("Aliases (one per line)", systemImage: "text.badge.plus")
+                    .foregroundStyle(accentColor)
             }
 
             // Muscle involvements (strength / timed)
             if exerciseType == .strength || exerciseType == .timed {
-                Section("Muscle Involvements") {
+                Section {
                     ForEach(parentMuscles) { parent in
                         VStack(alignment: .leading, spacing: 4) {
                             muscleSlider(muscle: parent)
 
-                            // Show children indented
                             let children = childMuscles.filter { $0.parentID == parent.id }
                             if !children.isEmpty {
                                 ForEach(children) { child in
@@ -65,12 +81,15 @@ struct ExerciseCreatorView: View {
                             }
                         }
                     }
+                } header: {
+                    Label("Muscle Involvements", systemImage: "figure.strengthtraining.traditional")
+                        .foregroundStyle(WDS.strengthAccent)
                 }
             }
 
             // Cardio config
             if exerciseType == .cardio {
-                Section("Cardio Config") {
+                Section {
                     Picker("Distance Unit", selection: $distanceUnit) {
                         Text("km").tag("km")
                         Text("miles").tag("miles")
@@ -85,9 +104,12 @@ struct ExerciseCreatorView: View {
                         Text("/500m").tag("/500m")
                         Text("km/h").tag("km/h")
                     }
+                } header: {
+                    Label("Cardio Config", systemImage: "figure.run")
+                        .foregroundStyle(WDS.cardioAccent)
                 }
 
-                Section("Available Metrics") {
+                Section {
                     ForEach(CardioMetric.allCases) { metric in
                         Toggle(isOn: Binding(
                             get: { selectedMetrics.contains(metric) },
@@ -98,16 +120,23 @@ struct ExerciseCreatorView: View {
                         )) {
                             Label(metric.displayName, systemImage: metric.icon)
                         }
+                        .tint(WDS.cardioAccent)
                     }
+                } header: {
+                    Label("Available Metrics", systemImage: "chart.bar.fill")
+                        .foregroundStyle(WDS.cardioAccent)
                 }
             }
 
-            Section("Notes") {
+            Section {
                 TextEditor(text: $notes)
                     .frame(minHeight: 60)
+            } header: {
+                Label("Notes", systemImage: "note.text")
+                    .foregroundStyle(accentColor)
             }
 
-            Section("Video URLs (one per line)") {
+            Section {
                 TextEditor(text: $videoURLsText)
                     .frame(minHeight: 60)
                     .autocapitalization(.none)
@@ -115,8 +144,12 @@ struct ExerciseCreatorView: View {
                 Text("YouTube links will be embedded inline")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
+            } header: {
+                Label("Video URLs (one per line)", systemImage: "play.rectangle.fill")
+                    .foregroundStyle(accentColor)
             }
         }
+        .tint(accentColor)
         .navigationTitle("New Exercise")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -124,11 +157,17 @@ struct ExerciseCreatorView: View {
                 Button("Cancel") { dismiss() }
             }
             ToolbarItem(placement: .confirmationAction) {
-                Button("Save") { save() }
-                    .disabled(name.isEmpty || equipment.isEmpty)
+                Button("Save") {
+                    WDS.hapticSuccess()
+                    save()
+                }
+                .disabled(name.isEmpty || equipment.isEmpty)
+                .fontWeight(.semibold)
             }
         }
     }
+
+    // MARK: - Muscle Slider
 
     @ViewBuilder
     private func muscleSlider(muscle: MuscleGroup, indent: Bool = false) -> some View {
@@ -144,12 +183,23 @@ struct ExerciseCreatorView: View {
                 set: { muscleScores[muscle.id] = $0 }
             ), in: 0...1, step: 0.1)
             .frame(width: 120)
+            .tint(WDS.strengthAccent)
             Text(score > 0 ? String(format: "%.0f%%", score * 100) : "–")
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
                 .frame(width: 32, alignment: .trailing)
         }
     }
+
+    private func typeIcon(_ type: ExerciseType) -> String {
+        switch type {
+        case .strength: return "dumbbell.fill"
+        case .cardio: return "figure.run"
+        case .timed: return "timer"
+        }
+    }
+
+    // MARK: - Save
 
     private func save() {
         let exercise = Exercise(name: name, equipment: equipment, type: exerciseType, isPreSeeded: false)

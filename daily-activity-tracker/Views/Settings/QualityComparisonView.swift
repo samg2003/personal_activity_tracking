@@ -210,7 +210,7 @@ struct QualityComparisonView: View {
                             .font(.subheadline.weight(.medium))
                             .padding(.horizontal, 20)
                             .padding(.vertical, 10)
-                            .background(Color(.secondarySystemBackground))
+                            .background(.ultraThinMaterial)
                             .clipShape(Capsule())
                     }
 

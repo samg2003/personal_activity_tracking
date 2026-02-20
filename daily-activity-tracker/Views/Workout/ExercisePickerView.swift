@@ -2,13 +2,13 @@ import SwiftUI
 import SwiftData
 
 /// 3-tier exercise picker: inline search → library browser → create new.
-/// Used by plan editors when adding exercises to a day.
+/// Uses premium styling with material rows and haptic feedback.
 struct ExercisePickerView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \Exercise.name) private var exercises: [Exercise]
 
-    let exerciseType: ExerciseType  // Filter: .strength or .cardio
+    let exerciseType: ExerciseType
     var excludedExerciseIDs: Set<UUID> = []
     let onSelect: (Exercise) -> Void
 
@@ -16,45 +16,87 @@ struct ExercisePickerView: View {
     @State private var showingCreator = false
 
     var body: some View {
-        List {
-            // Quick search results
-            if !searchText.isEmpty {
-                Section("Results") {
+        ScrollView {
+            VStack(spacing: 12) {
+                // Quick search results
+                if !searchText.isEmpty {
                     if matchingExercises.isEmpty {
                         Button {
                             showingCreator = true
                         } label: {
-                            Label("Create \"\(searchText)\"…", systemImage: "plus.circle")
-                                .foregroundStyle(Color.accentColor)
+                            HStack(spacing: 8) {
+                                Image(systemName: "plus.circle.fill")
+                                    .foregroundStyle(WDS.cardioAccent)
+                                Text("Create \"\(searchText)\"…")
+                                    .font(.subheadline.weight(.medium))
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(14)
+                            .background(.ultraThinMaterial)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                         }
+                        .buttonStyle(ScaleButtonStyle())
+                        .padding(.horizontal)
                     } else {
-                        ForEach(matchingExercises) { exercise in
-                            Button { select(exercise) } label: {
-                                ExerciseRowView(exercise: exercise)
+                        LazyVStack(spacing: 8) {
+                            SectionTitle(title: "Results", trailing: "\(matchingExercises.count) found")
+                                .padding(.horizontal)
+                            ForEach(matchingExercises) { exercise in
+                                Button {
+                                    WDS.hapticSelection()
+                                    select(exercise)
+                                } label: {
+                                    ExerciseRowView(exercise: exercise)
+                                }
+                                .buttonStyle(ScaleButtonStyle())
+                                .padding(.horizontal)
                             }
                         }
                     }
                 }
-            }
 
-            // Browse all
-            Section(searchText.isEmpty ? "All \(exerciseType.displayName) Exercises" : "All") {
-                ForEach(typeFilteredExercises) { exercise in
-                    Button { select(exercise) } label: {
-                        ExerciseRowView(exercise: exercise)
+                // Browse all
+                LazyVStack(spacing: 8) {
+                    SectionTitle(
+                        title: searchText.isEmpty ? "All \(exerciseType.displayName)" : "All",
+                        trailing: "\(typeFilteredExercises.count)"
+                    )
+                    .padding(.horizontal)
+
+                    ForEach(typeFilteredExercises) { exercise in
+                        Button {
+                            WDS.hapticSelection()
+                            select(exercise)
+                        } label: {
+                            ExerciseRowView(exercise: exercise)
+                        }
+                        .buttonStyle(ScaleButtonStyle())
+                        .padding(.horizontal)
                     }
                 }
-            }
 
-            // Create new
-            Section {
+                // Create new
                 Button {
                     showingCreator = true
                 } label: {
-                    Label("Create New Exercise", systemImage: "plus.circle.fill")
+                    HStack(spacing: 8) {
+                        Image(systemName: "plus.circle.fill")
+                            .symbolRenderingMode(.hierarchical)
+                        Text("Create New Exercise")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .foregroundStyle(WDS.strengthAccent)
+                    .frame(maxWidth: .infinity)
+                    .padding(14)
+                    .background(WDS.strengthAccent.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
+                .buttonStyle(ScaleButtonStyle())
+                .padding(.horizontal)
             }
+            .padding(.vertical)
         }
+        .background(Color(.systemGroupedBackground))
         .searchable(text: $searchText, prompt: "Search exercises…")
         .navigationTitle("Pick Exercise")
         .navigationBarTitleDisplayMode(.inline)

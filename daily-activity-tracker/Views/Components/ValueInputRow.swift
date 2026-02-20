@@ -14,60 +14,76 @@ struct ValueInputRow: View {
     @State private var inputText = ""
     @State private var showSkipSheet = false
 
-
-
     private var unitLabel: String { activity.unit ?? "" }
     private var isLogged: Bool { currentValue != nil }
+    private var accentColor: Color { Color(hex: activity.hexColor) }
 
     var body: some View {
-        HStack(spacing: 14) {
-            Image(systemName: activity.icon)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(Color(hex: activity.hexColor))
-                .frame(width: 28)
+        HStack(spacing: 0) {
+            // Colored accent bar
+            RoundedRectangle(cornerRadius: 2)
+                .fill(accentColor)
+                .frame(width: 4)
+                .padding(.vertical, 6)
 
-            // Status indicator
-            Image(systemName: isLogged ? "checkmark.circle.fill" : "pencil.circle")
-                .font(.system(size: 22))
-                .foregroundStyle(isLogged ? .green : Color(hex: activity.hexColor))
+            HStack(spacing: 12) {
+                // Icon badge
+                Image(systemName: activity.icon)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(isLogged ? .secondary : accentColor)
+                    .frame(width: 30, height: 30)
+                    .background(
+                        Circle()
+                            .fill(isLogged ? Color(.systemGray5) : accentColor.opacity(0.12))
+                    )
 
-            Text(activity.name)
-                .font(.body)
-                .foregroundStyle(isLogged ? .secondary : .primary)
+                // Status indicator
+                Image(systemName: isLogged ? "checkmark.circle.fill" : "pencil.circle")
+                    .font(.system(size: 22))
+                    .foregroundStyle(isLogged ? .green : accentColor)
 
-            Spacer()
+                Text(activity.name)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(isLogged ? .secondary : .primary)
 
-            // Logged value display or prompt
-            if let val = currentValue {
-                Text("\(val.cleanDisplay) \(unitLabel)")
-                    .font(.system(.callout, design: .rounded, weight: .semibold))
-                    .foregroundStyle(Color(hex: activity.hexColor))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(Color(hex: activity.hexColor).opacity(0.15))
-                    .clipShape(Capsule())
-            } else {
-                Text("Log \(unitLabel)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+                Spacer()
 
-            // Camera shortcut for photo-enabled activities
-            if let onTakePhoto {
-                Button {
-                    onTakePhoto()
-                } label: {
-                    Image(systemName: "camera")
-                        .font(.system(size: 14))
-                        .foregroundStyle(Color(hex: activity.hexColor).opacity(0.7))
+                // Logged value or prompt
+                if let val = currentValue {
+                    Text("\(val.cleanDisplay) \(unitLabel)")
+                        .font(.system(.callout, design: .rounded, weight: .semibold))
+                        .foregroundStyle(accentColor)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(accentColor.opacity(0.12))
+                        .clipShape(Capsule())
+                } else {
+                    Text("Log \(unitLabel)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                .buttonStyle(.plain)
+
+                if let onTakePhoto {
+                    Button {
+                        onTakePhoto()
+                    } label: {
+                        Image(systemName: "camera")
+                            .font(.system(size: 14))
+                            .foregroundStyle(accentColor.opacity(0.7))
+                    }
+                    .buttonStyle(.plain)
+                }
             }
+            .padding(.leading, 10)
+            .padding(.trailing, 14)
         }
         .padding(.vertical, 8)
-        .padding(.horizontal, 14)
-        .background(Color(.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .shadow(color: .black.opacity(isLogged ? 0.02 : 0.06), radius: 6, y: 3)
+        )
+        .opacity(isLogged ? 0.65 : 1.0)
         .onTapGesture {
             if let val = currentValue { inputText = val.cleanDisplay }
             showInput = true

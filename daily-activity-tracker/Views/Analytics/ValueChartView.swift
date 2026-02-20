@@ -194,7 +194,7 @@ struct ValueChartView: View {
             }
         }
         .padding(14)
-        .background(Color(.secondarySystemBackground))
+        .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 

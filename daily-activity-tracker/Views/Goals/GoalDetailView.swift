@@ -129,7 +129,7 @@ struct GoalDetailView: View {
             }
         }
         .padding(16)
-        .background(Color(.secondarySystemBackground))
+        .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
@@ -146,7 +146,7 @@ struct GoalDetailView: View {
             }
         }
         .padding(16)
-        .background(Color(.secondarySystemBackground))
+        .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
@@ -426,7 +426,7 @@ struct GoalDetailView: View {
             }
         }
         .padding(16)
-        .background(Color(.secondarySystemBackground))
+        .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
@@ -486,7 +486,7 @@ struct GoalDetailView: View {
             }
         }
         .padding(16)
-        .background(Color(.secondarySystemBackground))
+        .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 

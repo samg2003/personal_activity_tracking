@@ -335,7 +335,7 @@ struct ActivityAnalyticsView: View {
             streakStat(label: "Longest Streak", value: longestStreakValue, icon: "trophy.fill", color: .yellow)
         }
         .padding(14)
-        .background(Color(.secondarySystemBackground))
+        .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 
@@ -405,7 +405,7 @@ struct ActivityAnalyticsView: View {
         }
         .padding(.vertical, 6)
         .padding(.horizontal, 12)
-        .background(Color(.secondarySystemBackground))
+        .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 

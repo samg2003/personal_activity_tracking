@@ -7,13 +7,15 @@ struct SessionSummaryView: View {
     @Environment(\.modelContext) private var modelContext
     let session: StrengthSession
 
+    @State private var animateCheck = false
+
     private var sessionManager: StrengthSessionManager {
         StrengthSessionManager(modelContext: modelContext)
     }
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 20) {
+            VStack(spacing: 24) {
                 completionBadge
                 statsGrid
                 exerciseBreakdown
@@ -21,11 +23,17 @@ struct SessionSummaryView: View {
             }
             .padding()
         }
+        .background(Color(.systemGroupedBackground))
         .navigationTitle("Session Complete")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Done") { dismiss() }
+            }
+        }
+        .onAppear {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.6).delay(0.2)) {
+                animateCheck = true
             }
         }
     }
@@ -36,10 +44,12 @@ struct SessionSummaryView: View {
         let ratio = sessionManager.completionRatio(for: session)
         let isComplete = ratio >= 0.8
 
-        return VStack(spacing: 8) {
+        return VStack(spacing: 10) {
             Image(systemName: isComplete ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
-                .font(.system(size: 48))
+                .font(.system(size: 56))
                 .foregroundStyle(isComplete ? .green : .orange)
+                .scaleEffect(animateCheck ? 1.0 : 0.3)
+                .opacity(animateCheck ? 1.0 : 0)
 
             Text(isComplete ? "Workout Complete!" : "Partial Workout")
                 .font(.title3.weight(.bold))
@@ -48,7 +58,7 @@ struct SessionSummaryView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
-        .padding(.top, 8)
+        .padding(.top, 12)
     }
 
     // MARK: - Stats Grid
@@ -57,90 +67,79 @@ struct SessionSummaryView: View {
         let volume = sessionManager.totalVolume(for: session)
         let completedSets = session.completedSets.count
 
-        return HStack(spacing: 16) {
-            statCard(title: "Duration", value: session.durationFormatted, icon: "timer")
-            statCard(title: "Sets", value: "\(completedSets)", icon: "number")
-            statCard(title: "Volume", value: formatVolume(volume), icon: "scalemass")
+        return HStack(spacing: 10) {
+            MetricChip(icon: "timer", value: session.durationFormatted, label: "Duration", color: WDS.infoAccent)
+            MetricChip(icon: "number", value: "\(completedSets)", label: "Sets", color: WDS.strengthAccent)
+            MetricChip(icon: "scalemass", value: formatVolume(volume), label: "Volume", color: .purple)
         }
     }
 
-    private func statCard(title: String, value: String, icon: String) -> some View {
-        VStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(.title3)
-                .foregroundStyle(.orange)
-            Text(value)
-                .font(.headline.monospacedDigit())
-            Text(title)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 12)
-        .background(Color(.systemGray6))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-    }
-
-    // MARK: - Per-Exercise Breakdown
+    // MARK: - Exercise Breakdown
 
     private var exerciseBreakdown: some View {
         let grouped = sessionManager.setsGroupedByExercise(for: session)
 
         return VStack(alignment: .leading, spacing: 12) {
-            Text("EXERCISE BREAKDOWN")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+            Text("Exercise Breakdown")
+                .font(.headline)
 
             ForEach(grouped, id: \.exercise.id) { item in
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 8) {
+                    // Exercise header
                     HStack {
                         Text(item.exercise.displayName)
-                            .font(.subheadline.weight(.medium))
+                            .font(.subheadline.weight(.semibold))
                         Spacer()
                         Text("\(item.sets.filter { !$0.isWarmup }.count) sets")
-                            .font(.caption)
+                            .font(.caption.weight(.medium))
                             .foregroundStyle(.secondary)
                     }
 
-                    // Set details
-                    ForEach(item.sets) { setLog in
-                        HStack(spacing: 8) {
-                            Text(setLog.isWarmup ? "W" : "\(setLog.setNumber)")
-                                .font(.caption2.monospacedDigit().weight(.medium))
-                                .foregroundStyle(setLog.isWarmup ? .orange : .primary)
-                                .frame(width: 18)
+                    // Set details with zebra striping
+                    VStack(spacing: 0) {
+                        ForEach(Array(item.sets.enumerated()), id: \.element.id) { index, setLog in
+                            HStack(spacing: 8) {
+                                Text(setLog.isWarmup ? "W" : "\(setLog.setNumber)")
+                                    .font(.caption2.monospacedDigit().weight(.bold))
+                                    .foregroundStyle(setLog.isWarmup ? .orange : .primary)
+                                    .frame(width: 18)
 
-                            Text("\(setLog.reps) × \(String(format: "%.1f", setLog.weight))kg")
-                                .font(.caption.monospacedDigit())
+                                Text("\(setLog.reps) × \(String(format: "%.1f", setLog.weight))kg")
+                                    .font(.caption.monospacedDigit())
 
-                            Spacer()
+                                Spacer()
 
-                            if let e1rm = setLog.estimated1RM {
-                                Text("e1RM: \(String(format: "%.0f", e1rm))")
-                                    .font(.system(size: 9))
-                                    .foregroundStyle(.tertiary)
+                                if let e1rm = setLog.estimated1RM {
+                                    Text("e1RM \(String(format: "%.0f", e1rm))")
+                                        .font(.system(size: 9, weight: .medium))
+                                        .foregroundStyle(.tertiary)
+                                }
                             }
+                            .padding(.vertical, 5)
+                            .padding(.horizontal, 8)
+                            .background(index % 2 == 0 ? Color(.systemGray6).opacity(0.5) : .clear)
                         }
                     }
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
 
                     // Best set highlight
                     if let bestSet = item.sets
                         .filter({ !$0.isWarmup })
                         .compactMap({ set in set.estimated1RM.map { (set: set, e1rm: $0) } })
                         .max(by: { $0.e1rm < $1.e1rm }) {
-                        HStack(spacing: 4) {
+                        HStack(spacing: 5) {
                             Image(systemName: "star.fill")
-                                .font(.system(size: 9))
-                                .foregroundStyle(.yellow)
-                            Text("Best: \(bestSet.set.reps) × \(String(format: "%.1f", bestSet.set.weight))kg (e1RM: \(String(format: "%.0f", bestSet.e1rm)))")
                                 .font(.system(size: 10))
+                                .foregroundStyle(.yellow)
+                            Text("Best: \(bestSet.set.reps) × \(String(format: "%.1f", bestSet.set.weight))kg")
+                                .font(.caption.weight(.medium))
+                            Text("(e1RM: \(String(format: "%.0f", bestSet.e1rm)))")
+                                .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                     }
                 }
-                .padding()
-                .background(Color(.systemGray6))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .premiumCard(accent: WDS.strengthAccent)
             }
         }
     }
@@ -148,16 +147,8 @@ struct SessionSummaryView: View {
     // MARK: - Done Button
 
     private var doneButton: some View {
-        Button {
+        GradientButton(title: "Done", icon: "checkmark", gradient: WDS.strengthGradient) {
             dismiss()
-        } label: {
-            Text("Done")
-                .font(.headline)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
-                .background(Color.orange)
-                .foregroundStyle(.white)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
         }
         .padding(.top, 8)
     }

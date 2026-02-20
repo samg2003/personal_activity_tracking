@@ -78,22 +78,28 @@ struct AddGoalView: View {
     // MARK: - Sections
 
     private var titleSection: some View {
-        Section("Goal") {
+        Section {
             TextField("Title (e.g., \"Get Fit\")", text: $title)
+        } header: {
+            Label("Goal", systemImage: "target")
+                .foregroundStyle(Color(hex: hexColor))
         }
     }
 
     private var deadlineSection: some View {
-        Section("Deadline") {
+        Section {
             Toggle("Set Deadline", isOn: $hasDeadline)
             if hasDeadline {
                 DatePicker("Deadline", selection: $deadline, displayedComponents: .date)
             }
+        } header: {
+            Label("Deadline", systemImage: "calendar.badge.clock")
+                .foregroundStyle(.orange)
         }
     }
 
     private var appearanceSection: some View {
-        Section("Appearance") {
+        Section {
             // Icon picker
             VStack(alignment: .leading, spacing: 8) {
                 Text("Icon")
@@ -143,11 +149,14 @@ struct AddGoalView: View {
                     }
                 }
             }
+        } header: {
+            Label("Appearance", systemImage: "paintpalette.fill")
+                .foregroundStyle(WDS.infoAccent)
         }
     }
 
     private var activitiesSection: some View {
-        Section("Add Activities") {
+        Section {
             if linkableActivities.isEmpty {
                 Text("No activities available. Create activities first.")
                     .font(.caption)
@@ -200,6 +209,9 @@ struct AddGoalView: View {
                     }
                 }
             }
+        } header: {
+            Label("Add Activities", systemImage: "plus.circle.fill")
+                .foregroundStyle(Color(hex: hexColor))
         }
     }
 

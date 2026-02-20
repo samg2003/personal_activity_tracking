@@ -53,8 +53,9 @@ struct InsightSummaryCard: View {
         .frame(maxWidth: .infinity)
         .padding(16)
         .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Color(.secondarySystemBackground))
+            RoundedRectangle(cornerRadius: WDS.cardRadius, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .shadow(color: .black.opacity(0.06), radius: 6, y: 3)
         )
     }
 

@@ -180,49 +180,80 @@ struct ContainerRowView: View {
         }
     }
 
+    @State private var chevronRotation: Double = 0
+
     var body: some View {
         VStack(spacing: 4) {
             // Parent header row
             Button {
-                withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() }
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    isExpanded.toggle()
+                    chevronRotation = isExpanded ? 180 : 0
+                }
             } label: {
-                HStack(spacing: 14) {
-                    Image(systemName: activity.icon)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(Color(hex: activity.hexColor))
-                        .frame(width: 28)
+                HStack(spacing: 0) {
+                    // Accent bar
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(Color(hex: activity.hexColor))
+                        .frame(width: 4)
+                        .padding(.vertical, 6)
 
-                    // Mini progress ring
-                    ZStack {
-                        Circle()
-                            .stroke(Color(.systemGray5), lineWidth: 3)
-                        Circle()
-                            .trim(from: 0, to: completionScore)
-                            .stroke(Color(hex: activity.hexColor), style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                            .rotationEffect(.degrees(-90))
+                    HStack(spacing: 12) {
+                        // Icon badge
+                        Image(systemName: activity.icon)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(completionScore >= 1.0 ? .secondary : Color(hex: activity.hexColor))
+                            .frame(width: 30, height: 30)
+                            .background(
+                                Circle()
+                                    .fill(completionScore >= 1.0 ? Color(.systemGray5) : Color(hex: activity.hexColor).opacity(0.12))
+                            )
+
+                        // Gradient progress ring
+                        ZStack {
+                            Circle()
+                                .stroke(Color(.systemGray5), lineWidth: 3.5)
+                            Circle()
+                                .trim(from: 0, to: completionScore)
+                                .stroke(
+                                    AngularGradient(
+                                        colors: [Color(hex: activity.hexColor), Color(hex: activity.hexColor).opacity(0.6)],
+                                        center: .center
+                                    ),
+                                    style: StrokeStyle(lineWidth: 3.5, lineCap: .round)
+                                )
+                                .rotationEffect(.degrees(-90))
+                                .animation(.spring(response: 0.5), value: completionScore)
+                        }
+                        .frame(width: 22, height: 22)
+
+                        Text(activity.name)
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(completionScore >= 1.0 ? .secondary : .primary)
+
+                        Spacer()
+
+                        Text("\(doneCount)/\(totalCount)")
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.secondary)
+
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.tertiary)
+                            .rotationEffect(.degrees(chevronRotation))
                     }
-                    .frame(width: 22, height: 22)
-
-                    Text(activity.name)
-                        .font(.body)
-                        .foregroundStyle(completionScore >= 1.0 ? .secondary : .primary)
-
-                    Spacer()
-
-                    Text("\(doneCount)/\(totalCount)")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-
-                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                    .padding(.leading, 10)
+                    .padding(.trailing, 14)
                 }
             }
             .buttonStyle(.plain)
             .padding(.vertical, 8)
-            .padding(.horizontal, 14)
-            .background(Color(.secondarySystemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                    .shadow(color: .black.opacity(0.06), radius: 6, y: 3)
+            )
+            .opacity(completionScore >= 1.0 ? 0.65 : 1.0)
             .contextMenu {
                 if !pendingChildren.isEmpty {
                     Button {

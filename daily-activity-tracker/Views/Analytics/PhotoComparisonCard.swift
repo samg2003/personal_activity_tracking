@@ -82,7 +82,7 @@ struct PhotoComparisonCard: View {
             }
         }
         .padding(12)
-        .background(Color(.secondarySystemBackground))
+        .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .onAppear {
             if selectedSlot.isEmpty, let first = slots.first {

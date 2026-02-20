@@ -50,22 +50,26 @@ struct SettingsView: View {
                         enabled: $eveningEnabled, time: $eveningTime
                     )
                 } header: {
-                    Text("Reminders")
+                    Label("Reminders", systemImage: "bell.badge.fill")
+                        .foregroundStyle(.orange)
                 } footer: {
                     Text("Get a daily nudge to check your activities.")
                 }
 
                 categoriesSection
 
-                Section("Photos") {
+                Section {
                     NavigationLink {
                         PhotoBankView()
                     } label: {
                         Label("Photo Bank", systemImage: "photo.on.rectangle.angled")
                     }
+                } header: {
+                    Label("Photos", systemImage: "photo.fill")
+                        .foregroundStyle(WDS.cardioAccent)
                 }
 
-                Section("Data Management") {
+                Section {
                     Button {
                         exportData()
                     } label: {
@@ -84,6 +88,9 @@ struct SettingsView: View {
                         Label("Clear All Data", systemImage: "trash")
                             .foregroundStyle(.red)
                     }
+                } header: {
+                    Label("Data Management", systemImage: "externaldrive.fill")
+                        .foregroundStyle(WDS.strengthAccent)
                 }
                 
                 Section {
