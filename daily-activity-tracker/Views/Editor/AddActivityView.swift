@@ -203,7 +203,7 @@ struct AddActivityView: View {
                     typeSpecificSection
                     scheduleSection
                     categorySection
-                    if selectedType != .container {
+                    if selectedType != .container && selectedType != .cumulative {
                         timeWindowSection
                     }
 
@@ -470,7 +470,11 @@ struct AddActivityView: View {
             }
             .pickerStyle(.segmented)
             .onChange(of: selectedType) { _, newType in
-                if newType == .cumulative { selectedSlot = .allDay }
+                if newType == .cumulative {
+                    selectedSlot = .allDay
+                    isMultiSession = false
+                    selectedSlots.removeAll()
+                }
                 // Re-fire appearance auto-suggest on type change
                 if appearanceAutoSet {
                     let suggestion = ActivityAppearance.suggest(

@@ -57,7 +57,7 @@ struct CumulativeLogSheet: View {
                     } else {
                         ForEach(visibleLogs) { log in
                             HStack {
-                                Text(log.date, style: .time)
+                                Text(log.completedAt ?? log.date, style: .time)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                 Spacer()

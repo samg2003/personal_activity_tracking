@@ -43,6 +43,7 @@ struct DashboardView: View {
     @State private var cachedRecentLogs: [ActivityLog] = []
     @State private var cachedTodayActivities: [Activity] = []
     @State private var cachedAllDayActivities: [Activity] = []
+    @State private var cachedQuickIncrements: [UUID: Double] = [:]
     @State private var cachedPendingTimed: [Activity] = []
     @State private var cachedStickyPending: [Activity] = []
     @State private var cachedCompleted: [Activity] = []
@@ -177,6 +178,30 @@ struct DashboardView: View {
         }
 
         cachedAllDayActivities = allDay
+        // Compute smart quick-add increments once (avoids flicker on each log add)
+        var increments: [UUID: Double] = [:]
+        for act in allDay {
+            let recent = allLogs
+                .filter { $0.activity?.id == act.id }
+                .prefix(20)
+            if !recent.isEmpty {
+                var freq: [Double: Int] = [:]
+                for log in recent {
+                    if let val = log.value, val > 0 { freq[val, default: 0] += 1 }
+                }
+                if let best = freq.max(by: { $0.value < $1.value }) {
+                    increments[act.id] = best.key
+                    continue
+                }
+            }
+            // Fallback: round(goal/8), or 1 if no goal
+            if let target = act.targetValue, target > 0 {
+                increments[act.id] = max(1, (target / 8).rounded())
+            } else {
+                increments[act.id] = 1
+            }
+        }
+        cachedQuickIncrements = increments
         cachedCompleted = done
         cachedSkippedActivities = skipped
         cachedStickyPending = sticky
@@ -512,10 +537,16 @@ struct DashboardView: View {
             activities: allDayActivities,
             cumulativeValues: { cumulativeValue(for: $0) },
             onAdd: { activity, value in addCumulativeLog(activity, value: value) },
+            quickIncrements: { smartQuickIncrement(for: $0) },
             isSkipped: { isSkipped($0) },
             onSkip: { activity, reason in skipActivity(activity, reason: reason) },
             onShowLogs: { activity in logSheetActivity = activity }
         )
+    }
+
+    /// Smart quick-add: cached mode of last 20 log values, fallback to round(goal/8) or 1
+    private func smartQuickIncrement(for activity: Activity) -> Double {
+        cachedQuickIncrements[activity.id] ?? 1
     }
 
     private func slotColor(_ slot: TimeSlot) -> Color {

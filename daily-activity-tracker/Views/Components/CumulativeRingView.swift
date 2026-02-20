@@ -1,10 +1,11 @@
 import SwiftUI
 
-/// Compact ring for cumulative items — with quick +1 button
+/// Compact ring for cumulative items — with quick-add button
 struct CumulativeRingView: View {
     let activity: Activity
     let currentValue: Double
     let onAdd: (Double) -> Void
+    var quickIncrement: Double = 1
     var isSkipped: Bool = false
     var onSkip: ((String) -> Void)?
     var onShowLogs: (() -> Void)?
@@ -20,8 +21,7 @@ struct CumulativeRingView: View {
     private var unitLabel: String { activity.unit ?? "" }
     private var color: Color { Color(hex: activity.hexColor) }
     private var isDone: Bool { progress >= 1.0 }
-    /// Determine the quick-add increment (1 by default, or the activity's step if set)
-    private var quickIncrement: Double { 1 }
+
 
     var body: some View {
         rowContent

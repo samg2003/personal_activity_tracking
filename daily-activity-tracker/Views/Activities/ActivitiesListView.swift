@@ -71,11 +71,20 @@ struct ActivitiesListView: View {
             if acts.isEmpty {
                 empty.append((category: category, activities: []))
             } else {
-                populated.append((category: category, activities: acts.sorted { $0.sortOrder < $1.sortOrder }))
+                populated.append((category: category, activities: acts.sorted {
+                    // Cumulative activities always pin to top of the section
+                    if $0.type == .cumulative && $1.type != .cumulative { return true }
+                    if $0.type != .cumulative && $1.type == .cumulative { return false }
+                    return $0.sortOrder < $1.sortOrder
+                }))
             }
         }
         if let acts = dict[nil], !acts.isEmpty {
-            populated.append((category: nil, activities: acts.sorted { $0.sortOrder < $1.sortOrder }))
+            populated.append((category: nil, activities: acts.sorted {
+                if $0.type == .cumulative && $1.type != .cumulative { return true }
+                if $0.type != .cumulative && $1.type == .cumulative { return false }
+                return $0.sortOrder < $1.sortOrder
+            }))
         }
         cachedGrouped = populated + empty
 
