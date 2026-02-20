@@ -32,12 +32,12 @@ struct ValueChartView: View {
 
     @State private var selectedRange: TimeRange = .month
 
+    /// Logs are expected to be pre-filtered for this activity by the caller
     private var filteredLogs: [ActivityLog] {
         let cutoff = Calendar.current.date(byAdding: .day, value: -selectedRange.days, to: Date()) ?? Date()
         return logs
             .filter {
-                $0.activity?.id == activity.id
-                && $0.status == .completed
+                $0.status == .completed
                 && $0.value != nil
                 && $0.date >= cutoff
             }

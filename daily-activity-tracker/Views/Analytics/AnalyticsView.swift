@@ -14,6 +14,7 @@ struct AnalyticsView: View {
     @State private var biggestWins: [(activity: Activity, delta: String)] = []
     @State private var deepDiveGroups: [(label: String, icon: String, activities: [Activity])] = []
     @State private var cachedPhotoActivities: [Activity] = []
+    @State private var cachedLogIndex: [UUID: [ActivityLog]] = [:]
     @State private var analyticsReady = false
 
     enum AnalyticsTab: String, CaseIterable {
@@ -49,11 +50,15 @@ struct AnalyticsView: View {
                 .padding(.horizontal)
                 .padding(.top, 8)
 
-                switch selectedTab {
-                case .activities:
+                // Keep activitiesContent alive across tab switches (preserves child @State)
+                ZStack {
                     activitiesContent
-                case .workouts:
-                    WorkoutAnalyticsView()
+                        .opacity(selectedTab == .activities ? 1 : 0)
+                        .allowsHitTesting(selectedTab == .activities)
+
+                    if selectedTab == .workouts {
+                        WorkoutAnalyticsView()
+                    }
                 }
             }
             .background(Color(.systemGroupedBackground))
@@ -175,7 +180,7 @@ struct AnalyticsView: View {
                                     allActivities: allActivities
                                 )
                             } label: {
-                                ValueChartView(activity: activity, logs: allLogs)
+                                ValueChartView(activity: activity, logs: cachedLogIndex[activity.id] ?? [])
                             }
                             .buttonStyle(.plain)
                         }
@@ -255,6 +260,7 @@ struct AnalyticsView: View {
 
         // Single log index — O(n) once
         let logIndex = engine.preIndexLogs(allLogs)
+        cachedLogIndex = logIndex
         let vacationSet = Set(vacationDays.map { $0.date.startOfDay })
 
         await Task.yield()

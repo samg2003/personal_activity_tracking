@@ -62,6 +62,9 @@ struct AddActivityView: View {
     @State private var showEditScopeDialog = false
     @State private var pendingSchedule: Schedule?
     
+    // Deferred rendering — lets the sheet animation finish before evaluating the heavy Form body
+    @State private var ready = false
+    
     // Edit Mode
     var activityToEdit: Activity?
     
@@ -160,6 +163,32 @@ struct AddActivityView: View {
 
     var body: some View {
         NavigationStack {
+            if ready {
+                formContent
+            } else {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color(.systemGroupedBackground))
+                    .navigationTitle(activityToEdit != nil ? "Edit Activity" : "New Activity")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Cancel") { dismiss() }
+                        }
+                    }
+            }
+        }
+        .task {
+            // Defer one run-loop tick so the sheet animation completes first
+            if !ready {
+                try? await Task.sleep(for: .milliseconds(50))
+                ready = true
+            }
+        }
+    }
+
+    /// The actual heavy form content — only rendered after sheet animation completes
+    private var formContent: some View {
             Form {
                 // Entity picker (Activity vs Reminder) — only for new items
                 if activityToEdit == nil {
@@ -283,7 +312,6 @@ struct AddActivityView: View {
             } message: {
                 Text("\"Future Only\" preserves past analytics with the old settings. \"All Changes\" updates everything retroactively.")
             }
-        }
     }
     
     // MARK: - Load Data
@@ -925,7 +953,12 @@ struct AddActivityView: View {
         }
 
         if let activity = activityToEdit {
-            if !activity.logs.isEmpty {
+            // Use a count query instead of faulting the entire .logs relationship
+            let activityID = activity.id
+            var descriptor = FetchDescriptor<ActivityLog>(predicate: #Predicate { $0.activity?.id == activityID })
+            descriptor.fetchLimit = 1
+            let hasLogs = (try? modelContext.fetchCount(descriptor)) ?? 0 > 0
+            if hasLogs {
                 pendingSchedule = schedule
                 showEditScopeDialog = true
                 return

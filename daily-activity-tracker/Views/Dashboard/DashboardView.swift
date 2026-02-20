@@ -40,6 +40,7 @@ struct DashboardView: View {
     // MARK: - Cached Derived Data (recomputed in recomputeDashboard)
 
     @State private var cachedTodayLogs: [ActivityLog] = []
+    @State private var cachedRecentLogs: [ActivityLog] = []
     @State private var cachedTodayActivities: [Activity] = []
     @State private var cachedAllDayActivities: [Activity] = []
     @State private var cachedPendingTimed: [Activity] = []
@@ -57,7 +58,7 @@ struct DashboardView: View {
         ActivityStatusService(
             date: today,
             todayLogs: cachedTodayLogs,
-            allLogs: allLogs,
+            allLogs: cachedRecentLogs,
             allActivities: allActivities,
             vacationDays: vacationDays,
             scheduleEngine: scheduleEngine
@@ -77,7 +78,7 @@ struct DashboardView: View {
 
     /// All container children applicable today: scheduled + carry-forward
     private func containerApplicableChildren(_ container: Activity) -> [Activity] {
-        scheduleEngine.applicableChildren(for: container, on: today, allActivities: allActivities, logs: allLogs)
+        scheduleEngine.applicableChildren(for: container, on: today, allActivities: allActivities, logs: cachedRecentLogs)
     }
 
     private var isSelectedDateVacation: Bool {
@@ -95,11 +96,17 @@ struct DashboardView: View {
         let tLogs = allLogs.filter { $0.date.isSameDay(as: date) }
         cachedTodayLogs = tLogs
 
+        // Step 1b: Pre-filter to recent 60-day window for carry-forward lookups
+        // carriedForwardSlots only looks back 60 days, no need to scan all 14k logs
+        let cutoff60 = Calendar.current.date(byAdding: .day, value: -61, to: date) ?? date
+        let recentLogs = allLogs.filter { $0.date >= cutoff60 }
+        cachedRecentLogs = recentLogs
+
         // Step 2: Build ActivityStatusService once for this computation
         let status = ActivityStatusService(
             date: date,
             todayLogs: tLogs,
-            allLogs: allLogs,
+            allLogs: recentLogs,
             allActivities: allActivities,
             vacationDays: vacationDays,
             scheduleEngine: scheduleEngine
@@ -107,7 +114,7 @@ struct DashboardView: View {
 
         // Step 3: Compute today's activities
         let tActivities = scheduleEngine.activitiesForToday(
-            from: allActivities, on: date, vacationDays: vacationDays, logs: allLogs
+            from: allActivities, on: date, vacationDays: vacationDays, logs: recentLogs
         )
         cachedTodayActivities = tActivities
 
@@ -127,7 +134,7 @@ struct DashboardView: View {
             // Completed check
             let isComplete: Bool
             if activity.type == .container {
-                let children = scheduleEngine.applicableChildren(for: activity, on: date, allActivities: allActivities, logs: allLogs)
+                let children = scheduleEngine.applicableChildren(for: activity, on: date, allActivities: allActivities, logs: recentLogs)
                 isComplete = children.contains { child in
                     if child.isMultiSession {
                         return child.timeSlots.contains(where: { status.isSessionCompleted(child, slot: $0) })
@@ -144,7 +151,7 @@ struct DashboardView: View {
             // Skipped check
             let isSkip: Bool
             if activity.type == .container {
-                let children = scheduleEngine.applicableChildren(for: activity, on: date, allActivities: allActivities, logs: allLogs)
+                let children = scheduleEngine.applicableChildren(for: activity, on: date, allActivities: allActivities, logs: recentLogs)
                 isSkip = children.contains { child in
                     if child.isMultiSession {
                         return child.timeSlots.contains(where: { status.isSessionSkipped(child, slot: $0) && !status.isSessionCompleted(child, slot: $0) })
@@ -183,12 +190,12 @@ struct DashboardView: View {
         var slotMap: [TimeSlot: [Activity]] = [:]
         for activity in pending {
             if activity.type == .container {
-                let children = scheduleEngine.applicableChildren(for: activity, on: date, allActivities: allActivities, logs: allLogs)
+                let children = scheduleEngine.applicableChildren(for: activity, on: date, allActivities: allActivities, logs: recentLogs)
                 for slot in [TimeSlot.allDay, .morning, .afternoon, .evening] {
                     let hasPendingChildInSlot = children.contains { child in
                         let inSlot: Bool
                         if child.isMultiSession {
-                            if let cfSlots = scheduleEngine.carriedForwardSlots(for: child, on: date, logs: allLogs) {
+                            if let cfSlots = scheduleEngine.carriedForwardSlots(for: child, on: date, logs: recentLogs) {
                                 inSlot = cfSlots.slots.contains(slot)
                             } else {
                                 inSlot = child.timeSlots.contains(slot)
@@ -208,7 +215,7 @@ struct DashboardView: View {
                 }
             } else if activity.isMultiSession {
                 let slotsToCheck: [TimeSlot]
-                if let cfSlots = scheduleEngine.carriedForwardSlots(for: activity, on: date, logs: allLogs) {
+                if let cfSlots = scheduleEngine.carriedForwardSlots(for: activity, on: date, logs: recentLogs) {
                     slotsToCheck = cfSlots.slots
                 } else {
                     slotsToCheck = activity.timeSlots
@@ -977,7 +984,7 @@ struct DashboardView: View {
     }
 
     private func carriedForwardOriginalDate(_ activity: Activity) -> Date? {
-        scheduleEngine.carriedForwardDate(for: activity, on: today, logs: allLogs)
+        scheduleEngine.carriedForwardDate(for: activity, on: today, logs: cachedRecentLogs)
     }
 
     /// Date to use when creating a log — original carry-forward date if applicable, otherwise today
@@ -995,7 +1002,7 @@ struct DashboardView: View {
     /// Find logs for an activity on its effective date (handles carry-forwarded items)
     private func effectiveLogs(for activity: Activity) -> [ActivityLog] {
         let logDate = effectiveLogDate(for: activity)
-        return allLogs.filter { $0.activity?.id == activity.id && $0.date.isSameDay(as: logDate) }
+        return cachedRecentLogs.filter { $0.activity?.id == activity.id && $0.date.isSameDay(as: logDate) }
     }
 
     // MARK: - Completion Logic (delegates to ActivityStatusService)

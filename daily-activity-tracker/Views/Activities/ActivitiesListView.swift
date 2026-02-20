@@ -39,52 +39,32 @@ struct ActivitiesListView: View {
     @FocusState private var inlineFocusedSection: UUID?
     @FocusState private var inlineFocusedContainer: UUID?
 
-    // Top-level activities only (not children of containers), excluding one-time tasks
-    private var topLevelActivities: [Activity] {
-        allActivities.filter {
+    // MARK: - Cached Derived Data (only recomputed when allActivities/categories/searchText change)
+    @State private var cachedGrouped: [(category: Category?, activities: [Activity])] = []
+    @State private var cachedOneTimeTasks: [Activity] = []
+    @State private var cachedCompletedOneTime: [Activity] = []
+    @State private var cachedPaused: [Activity] = []
+    @State private var cachedContainerActivities: [Activity] = []
+
+    private func recomputeCachedLists() {
+        let topLevel = allActivities.filter {
             $0.parent == nil && !$0.isStopped
             && $0.schedule.type != .sticky && $0.schedule.type != .adhoc
         }
-    }
 
-    // Active one-time tasks (sticky/adhoc not yet completed)
-    private var activeOneTimeTasks: [Activity] {
-        allActivities.filter {
-            $0.parent == nil && !$0.isStopped
-            && ($0.schedule.type == .sticky || $0.schedule.type == .adhoc)
+        let filtered: [Activity]
+        if searchText.isEmpty {
+            filtered = topLevel
+        } else {
+            filtered = topLevel.filter {
+                $0.name.localizedCaseInsensitiveContains(searchText)
+            }
         }
-    }
 
-    // Completed one-time tasks (sticky/adhoc that are stopped)
-    private var completedOneTimeTasks: [Activity] {
-        allActivities.filter {
-            $0.isStopped
-            && ($0.schedule.type == .sticky || $0.schedule.type == .adhoc)
-        }
-    }
-
-    // Paused recurring activities only (not one-time tasks)
-    private var pausedActivities: [Activity] {
-        allActivities.filter {
-            $0.isStopped
-            && $0.schedule.type != .sticky && $0.schedule.type != .adhoc
-        }
-    }
-
-    private var filteredActivities: [Activity] {
-        if searchText.isEmpty { return topLevelActivities }
-        return topLevelActivities.filter {
-            $0.name.localizedCaseInsensitiveContains(searchText)
-        }
-    }
-
-    // Group activities by category — show ALL categories (empty ones included for quick-add)
-    private var groupedByCategory: [(category: Category?, activities: [Activity])] {
-        let dict = Dictionary(grouping: filteredActivities) { $0.category?.id }
-        
+        // Group by category
+        let dict = Dictionary(grouping: filtered) { $0.category?.id }
         var populated: [(category: Category?, activities: [Activity])] = []
         var empty: [(category: Category?, activities: [Activity])] = []
-        
         for category in categories {
             let acts = dict[category.id] ?? []
             if acts.isEmpty {
@@ -93,13 +73,24 @@ struct ActivitiesListView: View {
                 populated.append((category: category, activities: acts.sorted { $0.sortOrder < $1.sortOrder }))
             }
         }
-        
-        // Uncategorized (only if has activities)
         if let acts = dict[nil], !acts.isEmpty {
             populated.append((category: nil, activities: acts.sorted { $0.sortOrder < $1.sortOrder }))
         }
-        
-        return populated + empty
+        cachedGrouped = populated + empty
+
+        cachedOneTimeTasks = allActivities.filter {
+            $0.parent == nil && !$0.isStopped
+            && ($0.schedule.type == .sticky || $0.schedule.type == .adhoc)
+        }
+        cachedCompletedOneTime = allActivities.filter {
+            $0.isStopped
+            && ($0.schedule.type == .sticky || $0.schedule.type == .adhoc)
+        }
+        cachedPaused = allActivities.filter {
+            $0.isStopped
+            && $0.schedule.type != .sticky && $0.schedule.type != .adhoc
+        }
+        cachedContainerActivities = allActivities.filter { $0.type == .container && !$0.isStopped }
     }
 
     var body: some View {
@@ -219,6 +210,18 @@ struct ActivitiesListView: View {
         } message: {
             Text("Apply this category to all selected activities.")
         }
+        .task {
+            recomputeCachedLists()
+        }
+        .onChange(of: allActivities.map(\.id)) { _, _ in
+            recomputeCachedLists()
+        }
+        .onChange(of: categories.map(\.id)) { _, _ in
+            recomputeCachedLists()
+        }
+        .onChange(of: searchText) { _, _ in
+            recomputeCachedLists()
+        }
     }
 
     // Simple standalone extraction — just detach from parent
@@ -232,7 +235,7 @@ struct ActivitiesListView: View {
 
     @ViewBuilder
     private var mainListContent: some View {
-        ForEach(groupedByCategory, id: \.category?.id) { group in
+        ForEach(cachedGrouped, id: \.category?.id) { group in
             Section {
                 ForEach(group.activities) { activity in
                     if activity.type == .container {
@@ -255,7 +258,7 @@ struct ActivitiesListView: View {
 
     @ViewBuilder
     private var oneTimeTasksSection: some View {
-        let tasks = activeOneTimeTasks.sorted(by: { $0.createdDate > $1.createdDate })
+        let tasks = cachedOneTimeTasks.sorted(by: { $0.createdDate > $1.createdDate })
         Section {
             DisclosureGroup(isExpanded: $remindersExpanded) {
                 ForEach(tasks) { activity in
@@ -279,6 +282,13 @@ struct ActivitiesListView: View {
                             }
                         }
                         Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.quaternary)
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        editingActivity = activity
                     }
                     .swipeActions(edge: .trailing) {
                         Button {
@@ -340,10 +350,10 @@ struct ActivitiesListView: View {
 
     @ViewBuilder
     private var completedOneTimeSection: some View {
-        if !completedOneTimeTasks.isEmpty {
+        if !cachedCompletedOneTime.isEmpty {
             Section {
                 DisclosureGroup(isExpanded: $completedOneTimeExpanded) {
-                    ForEach(completedOneTimeTasks.sorted(by: { ($0.stoppedAt ?? .distantPast) > ($1.stoppedAt ?? .distantPast) })) { activity in
+                    ForEach(cachedCompletedOneTime.sorted(by: { ($0.stoppedAt ?? .distantPast) > ($1.stoppedAt ?? .distantPast) })) { activity in
                         HStack(spacing: 10) {
                             Image(systemName: "checkmark.circle.fill")
                                 .font(.system(size: 14))
@@ -359,6 +369,10 @@ struct ActivitiesListView: View {
                                     .font(.caption2)
                                     .foregroundStyle(.tertiary)
                             }
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            editingActivity = activity
                         }
                         .swipeActions(edge: .trailing) {
                             Button(role: .destructive) {
@@ -380,7 +394,7 @@ struct ActivitiesListView: View {
                     HStack(spacing: 6) {
                         Image(systemName: "checkmark.circle")
                             .font(.caption)
-                        Text("Completed (\(completedOneTimeTasks.count))")
+                        Text("Completed (\(cachedCompletedOneTime.count))")
                             .font(.caption.weight(.medium))
                     }
                     .foregroundStyle(.secondary)
@@ -391,7 +405,7 @@ struct ActivitiesListView: View {
 
     @ViewBuilder
     private var emptyStateSection: some View {
-        if groupedByCategory.isEmpty && activeOneTimeTasks.isEmpty {
+        if cachedGrouped.isEmpty && cachedOneTimeTasks.isEmpty {
             Section {
                 inlineAddRow(category: nil)
             } header: {
@@ -403,17 +417,17 @@ struct ActivitiesListView: View {
 
     @ViewBuilder
     private var pausedSection: some View {
-        if !pausedActivities.isEmpty {
+        if !cachedPaused.isEmpty {
             Section {
                 DisclosureGroup {
-                    ForEach(pausedActivities) { activity in
+                    ForEach(cachedPaused) { activity in
                         pausedActivityRow(activity)
                     }
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "pause.circle")
                             .font(.caption)
-                        Text("Paused (\(pausedActivities.count))")
+                        Text("Paused (\(cachedPaused.count))")
                             .font(.caption.weight(.medium))
                     }
                     .foregroundStyle(.secondary)
@@ -454,6 +468,12 @@ struct ActivitiesListView: View {
             .buttonStyle(.plain)
         }
         .contextMenu {
+            Button {
+                editingActivity = activity
+            } label: {
+                Label("Edit", systemImage: "pencil")
+            }
+
             Button {
                 resumeActivity(activity)
             } label: {
@@ -656,7 +676,7 @@ struct ActivitiesListView: View {
             }
 
             // Move to a different container
-            let otherContainers = allActivities.filter { $0.type == .container && !$0.isStopped && $0.id != child.parent?.id }
+            let otherContainers = cachedContainerActivities.filter { $0.id != child.parent?.id }
             if !otherContainers.isEmpty {
                 Menu {
                     ForEach(otherContainers) { container in
@@ -730,6 +750,7 @@ struct ActivitiesListView: View {
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.quaternary)
             }
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .draggable(ActivityTransfer(activityId: activity.id))
@@ -748,7 +769,7 @@ struct ActivitiesListView: View {
             }
 
             // Move to Container submenu
-            let containers = allActivities.filter { $0.type == .container && !$0.isStopped && $0.id != activity.id }
+            let containers = cachedContainerActivities.filter { $0.id != activity.id }
             if !containers.isEmpty {
                 Menu {
                     ForEach(containers) { container in
@@ -1018,7 +1039,7 @@ struct ActivitiesListView: View {
                 Text(cat.name.uppercased())
                     .font(.system(size: 12, weight: .bold, design: .rounded))
 
-                let count = (groupedByCategory.first { $0.category?.id == cat.id }?.activities.count) ?? 0
+                let count = (cachedGrouped.first { $0.category?.id == cat.id }?.activities.count) ?? 0
                 if count > 0 {
                     Text("\(count)")
                         .font(.system(size: 10, weight: .bold, design: .rounded))
@@ -1075,7 +1096,7 @@ struct ActivitiesListView: View {
     private var deleteAlertMessage: some View {
         if let target = deleteTarget {
             if hasExistingData(target) {
-                Text("\"\(target.name)\" has \(target.logs.count) log entries. You can archive it (preserves data, hides from dashboard) or delete everything permanently.")
+                Text("\"\(target.name)\" has \(logCount(for: target)) log entries. You can archive it (preserves data, hides from dashboard) or delete everything permanently.")
             } else {
                 Text("Delete \"\(target.name)\"? This cannot be undone.")
             }
@@ -1084,8 +1105,19 @@ struct ActivitiesListView: View {
         }
     }
 
+    /// Lightweight log count via SQL COUNT — never faults the .logs relationship
+    private func logCount(for activity: Activity) -> Int {
+        let id = activity.id
+        let desc = FetchDescriptor<ActivityLog>(predicate: #Predicate { $0.activity?.id == id })
+        return (try? modelContext.fetchCount(desc)) ?? 0
+    }
+
     private func hasExistingData(_ activity: Activity) -> Bool {
-        !activity.logs.isEmpty || activity.children.contains(where: { !$0.logs.isEmpty })
+        if logCount(for: activity) > 0 { return true }
+        for child in activity.children {
+            if logCount(for: child) > 0 { return true }
+        }
+        return false
     }
 
     private func pauseActivity(_ activity: Activity) {
@@ -1192,13 +1224,14 @@ struct ActivitiesListView: View {
 
     private func moveActivities(in category: Category?, from source: IndexSet, to destination: Int) {
         // Get the sorted activities for this category group
+        let allFiltered = cachedGrouped.flatMap(\.activities)
         let activities: [Activity]
         if let cat = category {
-            activities = filteredActivities
+            activities = allFiltered
                 .filter { $0.category?.id == cat.id }
                 .sorted { $0.sortOrder < $1.sortOrder }
         } else {
-            activities = filteredActivities
+            activities = allFiltered
                 .filter { $0.category == nil }
                 .sorted { $0.sortOrder < $1.sortOrder }
         }
